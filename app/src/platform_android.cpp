@@ -4,6 +4,7 @@
 #include "app_state.hpp"
 
 #include <airlink.h>
+#include <android/log.h>
 #include <jni.h>
 
 #include <mutex>
@@ -24,6 +25,8 @@ std::vector<std::string> sharedEarly;  // shared before the handler was set
 // to the VM later, see only the system's classes through FindClass.
 jclass serviceClass = nullptr;
 jmethodID onPrompt = nullptr;
+jclass listenerClass = nullptr;  // AirLinkNotificationListener
+jmethodID listenerGranted = nullptr, listenerOpenSettings = nullptr, listenerAct = nullptr;
 
 std::string fromJava(JNIEnv* env, jstring s) {
     if (!s) return {};
@@ -129,6 +132,36 @@ void nodeStarted(void* node) {
     airlink_set_prompt_listener(static_cast<AirlinkNode*>(node), promptHeard, nullptr);
 }
 
+void log(const std::string& line) { __android_log_print(ANDROID_LOG_DEBUG, "AirLink", "%s", line.c_str()); }
+
+bool canShareNotifications() { return true; }
+
+bool notificationAccessGranted() {
+    JNIEnv* e = env();
+    if (!e || !listenerClass) return false;
+    bool granted = e->CallStaticBooleanMethod(listenerClass, listenerGranted);
+    if (e->ExceptionCheck()) e->ExceptionClear(), granted = false;
+    return granted;
+}
+
+void openNotificationAccessSettings() {
+    JNIEnv* e = env();
+    if (!e || !listenerClass) return;
+    e->CallStaticVoidMethod(listenerClass, listenerOpenSettings);
+    if (e->ExceptionCheck()) e->ExceptionClear();
+}
+
+void notificationAction(const std::string& kind, const std::string& key, const std::string& text) {
+    JNIEnv* e = env();
+    if (!e || !listenerClass) return;
+    jstring k = e->NewStringUTF(kind.c_str()), id = e->NewStringUTF(key.c_str()), t = e->NewStringUTF(text.c_str());
+    e->CallStaticVoidMethod(listenerClass, listenerAct, k, id, t);
+    if (e->ExceptionCheck()) e->ExceptionClear();
+    e->DeleteLocalRef(k), e->DeleteLocalRef(id), e->DeleteLocalRef(t);
+}
+
+void showDesktopNotification(const std::string&, const std::string&) {}  // a phone shows its own
+
 void filesReceived(const std::vector<std::string>& paths) {
     JNIEnv* e = env();
     jobject a;
@@ -169,6 +202,14 @@ extern "C" JNIEXPORT void JNICALL Java_dev_airlink_airlink_MainActivity_nativeIn
         e->DeleteLocalRef(local);
         onPrompt = e->GetStaticMethodID(serviceClass, "onPrompt", "(Ljava/lang/String;)V");
     }
+    if (!listenerClass) {
+        jclass local = e->FindClass("dev/airlink/airlink/AirLinkNotificationListener");
+        listenerClass = static_cast<jclass>(e->NewGlobalRef(local));
+        e->DeleteLocalRef(local);
+        listenerGranted = e->GetStaticMethodID(listenerClass, "accessGranted", "()Z");
+        listenerOpenSettings = e->GetStaticMethodID(listenerClass, "openAccessSettings", "()V");
+        listenerAct = e->GetStaticMethodID(listenerClass, "act", "(Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;)V");
+    }
 }
 
 namespace {
@@ -197,6 +238,11 @@ extern "C" JNIEXPORT void JNICALL Java_dev_airlink_airlink_MainActivity_nativeSh
         handler = shareHandler;
     }
     handler(std::move(list));
+}
+
+extern "C" JNIEXPORT void JNICALL Java_dev_airlink_airlink_AirLinkNotificationListener_nativeBroadcast(JNIEnv* e, jclass, jstring kind,
+                                                                                                    jstring body) {
+    airlink::App::get().broadcast(fromJava(e, kind), fromJava(e, body));
 }
 
 extern "C" JNIEXPORT void JNICALL Java_dev_airlink_airlink_MainActivity_nativeRespond(JNIEnv*, jclass, jlong requestId, jboolean accept) {

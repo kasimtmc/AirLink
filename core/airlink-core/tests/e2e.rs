@@ -279,3 +279,34 @@ async fn requests_work_over_a_reused_connection_in_both_directions() {
         .unwrap();
     assert!(tmp.path().join("b/downloads/f.txt").exists());
 }
+
+#[tokio::test]
+async fn app_messages_reach_paired_devices_only() {
+    let tmp = tempfile::tempdir().unwrap();
+    let a = node(&tmp.path().join("a"), "Alpha", true).await;
+    let b = node(&tmp.path().join("b"), "Beta", true).await;
+    let c = node(&tmp.path().join("c"), "Gamma", true).await;
+    assert!(pair(&a, &b, true).await);
+
+    let mut b_events = b.subscribe();
+    let body =
+        serde_json::json!({"app": "WhatsApp", "title": "Ayşe", "text": "Akşam görüşelim mi?"});
+    a.send_app_message(&b.info().id, "notification.posted", body.clone())
+        .await
+        .unwrap();
+    let (kind, got, from) = next_matching(&mut b_events, |e| match e {
+        Event::AppMessage { kind, body, peer } => Some((kind, body, peer.id)),
+        _ => None,
+    })
+    .await;
+    assert_eq!(kind, "notification.posted");
+    assert_eq!(got, body);
+    assert_eq!(from, a.info().id);
+
+    // Not to unpaired devices, from either side.
+    let err = a
+        .send_app_message(&c.info().id, "x", serde_json::json!({}))
+        .await
+        .unwrap_err();
+    assert!(format!("{err:#}").contains("not paired"));
+}

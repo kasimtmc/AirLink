@@ -38,6 +38,24 @@ void setShareHandler(std::function<void(std::vector<std::string>)> handler);
 // The core started: Android hooks its background notifications to it. `node` is an AirlinkNode*.
 void nodeStarted(void* node);
 
+// ---- Phone notifications on the computer --------------------------------------------------
+
+// Whether this device can share its notifications (Android), and whether the user allowed it
+// (Settings > Notification access).
+bool canShareNotifications();
+bool notificationAccessGranted();
+void openNotificationAccessSettings();
+
+// What a paired computer asked of one of this phone's notifications: kind "notification.dismiss"
+// or "notification.reply" (with `text`).
+void notificationAction(const std::string& kind, const std::string& key, const std::string& text);
+
+// Shows a notification of this computer's desktop (a phone's notification mirrored here).
+void showDesktopNotification(const std::string& title, const std::string& body);
+
+// A line in the platform's log (Android's logcat, stderr on the desktop).
+void log(const std::string& line);
+
 // Files that arrived (Android makes them visible to the gallery and file apps).
 void filesReceived(const std::vector<std::string>& paths);
 

@@ -64,7 +64,8 @@ set_target_properties(airlink_core PROPERTIES
 add_dependencies(airlink_core airlink_core_cargo)
 find_package(Threads REQUIRED)
 if(WIN32)
-    set(AIRLINK_RUST_SYSLIBS ws2_32 userenv bcrypt ntdll iphlpapi)
+    set(AIRLINK_RUST_SYSLIBS ws2_32 userenv bcrypt ntdll advapi32 kernel32 dbghelp iphlpapi
+        ole32 uuid shell32)  # the last three: the file dialog, the Send To shortcut
 elseif(ANDROID)
     set(AIRLINK_RUST_SYSLIBS dl m log)
 else()
@@ -90,4 +91,9 @@ target_link_libraries(${AIRLINK_TARGET} PRIVATE kompoz::app airlink_core)
 kompozable(${AIRLINK_TARGET})
 if(NOT ANDROID)
     kompoz_copy_assets(${AIRLINK_TARGET})
+endif()
+if(MINGW)
+    # One .exe that needs only Windows' own DLLs (no libstdc++/libgcc/winpthread next to it),
+    # and no console window behind the app.
+    target_link_options(${AIRLINK_TARGET} PRIVATE -static -mwindows)
 endif()

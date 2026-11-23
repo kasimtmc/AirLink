@@ -75,6 +75,23 @@ cmake -S app -B app/build -G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo && cmake --
 ./app/build/airlink
 ```
 
+Windows (Linux'tan MinGW-w64 ile çapraz derleme; tek `.exe`, yalnızca Windows'un kendi DLL'leri):
+
+```bash
+rustup target add x86_64-pc-windows-gnu
+cmake -S app -B app/build-windows -G Ninja -DCMAKE_TOOLCHAIN_FILE=../kompoz/cmake/mingw-w64-x86_64.cmake -DCMAKE_BUILD_TYPE=Release
+cmake --build app/build-windows
+```
+
+`airlink.exe` `fonts/` ve `licenses/` klasörleriyle birlikte dağıtılır. İlk açılışta Explorer'a "AirLink ile gönder"
+(sağ tık) ve "Gönder" menüsüne kısayol ekler (yalnızca bu kullanıcı için); `airlink.exe --unregister` kaldırır.
+
+Linux sağ tık menüsü (Dolphin, GNOME Files) ve uygulama menüsü girdisi:
+
+```bash
+app/packaging/linux/install.sh
+```
+
 Android (NDK 29.0.14206865, SDK CMake 4.1.2, `cargo-ndk`, Rust hedefi `aarch64-linux-android`):
 
 ```bash

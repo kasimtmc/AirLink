@@ -11,7 +11,7 @@
  *      Node events (see airlink_core::Event):
  *        peer_discovered, peer_lost, pairing_request, pairing_completed, request_cancelled,
  *        file_offer, transfer_pending, transfer_progress, transfer_completed,
- *        transfer_failed, clipboard_received
+ *        transfer_failed, clipboard_received, app_message
  *      request_answered {"request_id","accepted"}: airlink_respond took an answer
  *      Operation results:
  *        {"event":"op_result","op":N,"ok":true,"value":...}
@@ -81,6 +81,11 @@ uint64_t airlink_send_files(AirlinkNode* node, const char* peer_id, const char* 
 
 /* Result: op_result. */
 uint64_t airlink_send_clipboard(AirlinkNode* node, const char* peer_id, const char* text);
+
+/* An app message to a paired device (see docs/protocol.md, app_message): `kind` names it
+ * ("notification.posted"...), body_json is any JSON value. Result: op_result. The other side gets
+ * an app_message event {"peer", "kind", "body"}. */
+uint64_t airlink_send_message(AirlinkNode* node, const char* peer_id, const char* kind, const char* body_json);
 
 void airlink_free_string(char* s);
 

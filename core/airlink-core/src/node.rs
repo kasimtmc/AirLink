@@ -31,6 +31,8 @@ pub const DEFAULT_PORT: u16 = 47820;
 
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
 const HELLO_TIMEOUT: Duration = Duration::from_secs(10);
+/// For a reply that needs no user: clipboard, app messages.
+const REQUEST_TIMEOUT: Duration = Duration::from_secs(4);
 /// How long a user has to answer a pairing / file prompt.
 const PROMPT_TIMEOUT: Duration = Duration::from_secs(120);
 /// How long the remote side waits for that answer (prompt + slack).
@@ -158,6 +160,12 @@ pub enum Event {
     ClipboardReceived {
         peer: DeviceInfo,
         text: String,
+    },
+    /// From a paired device's app (see [`Message::AppMessage`]).
+    AppMessage {
+        peer: DeviceInfo,
+        kind: String,
+        body: serde_json::Value,
     },
 }
 
@@ -406,17 +414,30 @@ impl Node {
         if text.len() > MAX_CLIPBOARD_LEN {
             bail!("clipboard text too large");
         }
-        let (conn, _) = self.inner.connection_to(peer_id).await?;
-        let (mut send, mut recv) = conn.open_bi().await?;
-        write_msg(
-            &mut send,
-            &Message::Clipboard {
-                text: text.to_owned(),
-            },
-        )
-        .await?;
-        send.finish()?;
-        match check(timeout(HELLO_TIMEOUT, read_msg(&mut recv)).await??)? {
+        let msg = Message::Clipboard {
+            text: text.to_owned(),
+        };
+        match self.inner.request(peer_id, &msg).await? {
+            Message::Ack => Ok(()),
+            m => bail!("unexpected reply: {m:?}"),
+        }
+    }
+
+    /// Sends an app message to a paired device; resolves once it was received.
+    pub async fn send_app_message(
+        &self,
+        peer_id: &str,
+        kind: &str,
+        body: serde_json::Value,
+    ) -> Result<()> {
+        if kind.is_empty() || body.to_string().len() > crate::protocol::MAX_APP_MESSAGE_LEN {
+            bail!("app message is empty or too large");
+        }
+        let msg = Message::AppMessage {
+            kind: kind.to_owned(),
+            body,
+        };
+        match self.inner.request(peer_id, &msg).await? {
             Message::Ack => Ok(()),
             m => bail!("unexpected reply: {m:?}"),
         }
@@ -653,6 +674,14 @@ async fn handle_stream(
                 });
                 write_msg(&mut send, &Message::Ack).await?;
             }
+        }
+        Message::AppMessage { kind, body } => {
+            inner.emit(Event::AppMessage {
+                peer: peer.clone(),
+                kind,
+                body,
+            });
+            write_msg(&mut send, &Message::Ack).await?;
         }
         _ => write_msg(&mut send, &Message::error("unsupported")).await?,
     }
@@ -964,6 +993,42 @@ impl Inner {
     }
 
     /// Returns a live, authenticated connection to a trusted peer.
+    /// One message and its reply over a new stream to a paired device. A cached connection can be
+    /// dead without our knowing yet (the peer crashed, slept or lost Wi-Fi: QUIC only notices at
+    /// its idle timeout): if the exchange fails over one, it is dropped and tried once more over a
+    /// fresh connection.
+    async fn request(self: &Arc<Self>, peer_id: &str, msg: &Message) -> Result<Message> {
+        let cached = self
+            .connections
+            .lock()
+            .unwrap()
+            .get(peer_id)
+            .is_some_and(|(c, _)| c.close_reason().is_none());
+        match self.request_once(peer_id, msg).await {
+            Err(e) if cached && !format!("{e:#}").starts_with("peer error") => {
+                debug!("request over cached connection failed ({e:#}); retrying over a new one");
+                if let Some((c, _)) = self.connections.lock().unwrap().remove(peer_id) {
+                    c.close(0u32.into(), b"stale");
+                }
+                self.request_once(peer_id, msg).await
+            }
+            other => other,
+        }
+    }
+
+    async fn request_once(self: &Arc<Self>, peer_id: &str, msg: &Message) -> Result<Message> {
+        let (conn, _) = self.connection_to(peer_id).await?;
+        let (mut send, mut recv) = conn.open_bi().await?;
+        write_msg(&mut send, msg).await?;
+        send.finish()?;
+        // A live peer answers at once; waiting the whole idle timeout would hold up the retry.
+        check(
+            timeout(REQUEST_TIMEOUT, read_msg(&mut recv))
+                .await
+                .map_err(|_| anyhow!("no answer"))??,
+        )
+    }
+
     async fn connection_to(self: &Arc<Self>, peer_id: &str) -> Result<(Connection, DeviceInfo)> {
         if !self.trust.lock().unwrap().is_trusted(peer_id) {
             bail!("device {peer_id} is not paired");

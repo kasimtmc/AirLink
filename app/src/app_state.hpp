@@ -73,6 +73,18 @@ struct Transfer {
     bool operator==(const Transfer&) const = default;
 };
 
+// A notification of a paired phone, mirrored on this computer.
+struct PhoneNotification {
+    std::string peerId;
+    std::string key;  // the phone's own key for it
+    std::string app;
+    std::string title;
+    std::string text;
+    int64_t time = 0;  // ms since the epoch
+    bool canReply = false;
+    bool operator==(const PhoneNotification&) const = default;
+};
+
 class App {
 public:
     // The one app state of the process.
@@ -94,6 +106,11 @@ public:
     std::optional<OutgoingPairing> outgoing() const;
     // Files handed to the app from outside, waiting for the user to pick a device (empty: none).
     std::vector<std::string> share() const;
+    // Phones' notifications, newest first.
+    std::vector<PhoneNotification> phoneNotifications() const;
+    // This phone: may it share its notifications, and is it allowed to.
+    bool canShareNotifications() const;
+    bool notificationAccess() const;
     std::string peerName(const std::string& id) const;
 
     // Messages for a snackbar, and clipboard texts from other devices, since the last call.
@@ -114,6 +131,12 @@ public:
     void clearFinishedTransfers() const;
     void shareTo(const std::string& peerId) const;
     void cancelShare() const;
+    // A phone's notification: dismiss it there, or answer it (messaging apps).
+    void dismissPhoneNotification(const PhoneNotification& n) const;
+    void replyPhoneNotification(const PhoneNotification& n, const std::string& text) const;
+    void openNotificationAccessSettings() const;
+    // To every reachable paired device (this phone's notifications, as they come and go).
+    void broadcast(const std::string& kind, const std::string& bodyJson) const;
 
     bool operator==(const App& other) const { return impl_ == other.impl_; }
 

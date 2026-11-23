@@ -101,7 +101,25 @@ Bluetooth "Numeric Comparison" yönteminin aynısıdır.
 | 1 | A → B | `clipboard { text }` (en fazla 1 MiB) |
 | 2 | B → A | `ack` |
 
-## 9. Gelecek sürümler (ayrılmış)
+## 9. Uygulama mesajları
+
+Dosya ve pano dışındaki özellikler (bildirimler, SMS, aramalar…) çekirdeğin bilmediği uygulama mesajlarıyla taşınır:
+
+| Adım | Yön | Mesaj |
+|---|---|---|
+| 1 | A → B | `app_message { kind, body }`: `kind` mesajın adı, `body` herhangi bir JSON değeri (en fazla 1 MiB) |
+| 2 | B → A | `ack` |
+
+Yalnızca eşleşmiş cihazlar arasında gider. Tanımlı türler:
+
+| `kind` | Yön | `body` |
+|---|---|---|
+| `notification.posted` | telefon → PC | `{ key, app, package, title, text, time, can_reply }` |
+| `notification.removed` | telefon → PC | `{ key }` |
+| `notification.dismiss` | PC → telefon | `{ key }` |
+| `notification.reply` | PC → telefon | `{ key, text }` |
+
+## 10. Gelecek sürümler (ayrılmış)
 
 Şu mesaj aileleri sonraki fazlarda eklenecek:
 

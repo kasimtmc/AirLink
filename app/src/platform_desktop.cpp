@@ -10,8 +10,20 @@
 #include <string>
 #include <thread>
 
+#if defined(_WIN32)
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+#include <objbase.h>
+#include <shlobj.h>
+#include <shobjidl.h>
+#endif
+
 #if defined(__linux__)
+#include <spawn.h>
 #include <sys/socket.h>
+#include <sys/wait.h>
 #include <sys/stat.h>
 #include <sys/un.h>
 #include <unistd.h>
@@ -68,12 +80,58 @@ void pickFiles(std::function<void(std::vector<std::string>)> done) {
     std::thread([done = std::move(done)] { done(runPicker()); }).detach();
 }
 
-#else
+#elif defined(_WIN32)
+
+namespace {
+
+std::string toUtf8(const wchar_t* w) {
+    int n = WideCharToMultiByte(CP_UTF8, 0, w, -1, nullptr, 0, nullptr, nullptr);
+    if (n <= 1) return {};
+    std::string s(size_t(n - 1), '\0');
+    WideCharToMultiByte(CP_UTF8, 0, w, -1, s.data(), n, nullptr, nullptr);
+    return s;
+}
+
+}  // namespace
 
 void pickFiles(std::function<void(std::vector<std::string>)> done) {
-    // TODO(windows): IFileOpenDialog. Until then files are sent by drag and drop.
-    done({});
+    // The system's file dialog, on a thread of its own (COM's single-threaded apartment).
+    std::thread([done = std::move(done)] {
+        std::vector<std::string> paths;
+        if (SUCCEEDED(CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE))) {
+            IFileOpenDialog* dialog = nullptr;
+            if (SUCCEEDED(CoCreateInstance(CLSID_FileOpenDialog, nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&dialog)))) {
+                DWORD options = 0;
+                dialog->GetOptions(&options);
+                dialog->SetOptions(options | FOS_ALLOWMULTISELECT | FOS_FORCEFILESYSTEM);
+                dialog->SetTitle(L"AirLink: dosya gönder");
+                IShellItemArray* items = nullptr;
+                if (SUCCEEDED(dialog->Show(nullptr)) && SUCCEEDED(dialog->GetResults(&items))) {
+                    DWORD count = 0;
+                    items->GetCount(&count);
+                    for (DWORD i = 0; i < count; ++i) {
+                        IShellItem* item = nullptr;
+                        if (FAILED(items->GetItemAt(i, &item))) continue;
+                        PWSTR path = nullptr;
+                        if (SUCCEEDED(item->GetDisplayName(SIGDN_FILESYSPATH, &path))) {
+                            paths.push_back(toUtf8(path));
+                            CoTaskMemFree(path);
+                        }
+                        item->Release();
+                    }
+                    items->Release();
+                }
+                dialog->Release();
+            }
+            CoUninitialize();
+        }
+        done(std::move(paths));
+    }).detach();
 }
+
+#else
+
+void pickFiles(std::function<void(std::vector<std::string>)> done) { done({}); }
 
 #endif
 
@@ -100,14 +158,29 @@ void deliverShared(std::vector<std::string> paths) {
 }
 
 std::vector<std::string> filesFromArgs(int argc, char** argv) {
+    std::vector<std::string> args;
+#if defined(_WIN32)
+    // argv is in the ANSI code page: names outside it (Turkish ones, say) would be lost.
+    (void)argc, (void)argv;
+    int n = 0;
+    if (LPWSTR* wide = CommandLineToArgvW(GetCommandLineW(), &n)) {
+        for (int i = 1; i < n; ++i) args.push_back(toUtf8(wide[i]));
+        LocalFree(wide);
+    }
+#else
+    for (int i = 1; i < argc; ++i) args.push_back(argv[i]);
+#endif
     std::vector<std::string> files;
-    for (int i = 1; i < argc; ++i) {
-        std::string arg = argv[i];
+    for (std::string arg : args) {
         if (arg == "--send") continue;
         if (arg.starts_with("file://")) arg = arg.substr(7);  // (%U from some file managers)
+        if (arg.starts_with("--")) continue;
         std::error_code ec;
-        auto absolute = std::filesystem::absolute(arg, ec);
-        if (!ec && std::filesystem::exists(absolute, ec)) files.push_back(absolute.string());
+        auto absolute = std::filesystem::absolute(std::filesystem::path(std::u8string(arg.begin(), arg.end())), ec);
+        if (!ec && std::filesystem::exists(absolute, ec)) {
+            std::u8string utf8 = absolute.u8string();
+            files.emplace_back(utf8.begin(), utf8.end());
+        }
     }
     return files;
 }
@@ -199,12 +272,145 @@ void handleLaunch(int argc, char** argv) {
     deliverShared(std::move(files));
 }
 
-#else
+#elif defined(_WIN32)
+
+namespace {
+
+std::wstring userName() {
+    wchar_t name[256];
+    DWORD size = 256;
+    return GetUserNameW(name, &size) ? std::wstring(name) : L"user";
+}
+
+std::wstring pipeName() { return L"\\\\.\\pipe\\airlink-" + userName(); }
+
+// Hands `files` (one per line) to a running instance. False if none listens.
+bool forward(const std::vector<std::string>& files) {
+    std::wstring name = pipeName();
+    HANDLE pipe = INVALID_HANDLE_VALUE;
+    for (int tries = 0; tries < 20; ++tries) {
+        pipe = CreateFileW(name.c_str(), GENERIC_WRITE, 0, nullptr, OPEN_EXISTING, 0, nullptr);
+        if (pipe != INVALID_HANDLE_VALUE) break;
+        if (GetLastError() != ERROR_PIPE_BUSY) return false;
+        WaitNamedPipeW(name.c_str(), 200);
+    }
+    if (pipe == INVALID_HANDLE_VALUE) return false;
+    std::string message;
+    for (const auto& f : files) message += f + "\n";
+    DWORD written = 0;
+    WriteFile(pipe, message.data(), DWORD(message.size()), &written, nullptr);
+    CloseHandle(pipe);
+    return true;
+}
+
+void serve() {
+    std::thread([] {
+        std::wstring name = pipeName();
+        bool first = true;
+        while (true) {
+            // Inbound only; the default security lets only this user (and admins) write to it.
+            HANDLE pipe = CreateNamedPipeW(name.c_str(), PIPE_ACCESS_INBOUND | (first ? FILE_FLAG_FIRST_PIPE_INSTANCE : 0),
+                                           PIPE_TYPE_BYTE | PIPE_WAIT | PIPE_REJECT_REMOTE_CLIENTS, PIPE_UNLIMITED_INSTANCES, 0,
+                                           64 * 1024, 0, nullptr);
+            if (pipe == INVALID_HANDLE_VALUE) return;
+            first = false;
+            if (ConnectNamedPipe(pipe, nullptr) || GetLastError() == ERROR_PIPE_CONNECTED) {
+                std::string data;
+                char buf[4096];
+                DWORD n = 0;
+                while (ReadFile(pipe, buf, sizeof buf, &n, nullptr) && n > 0) data.append(buf, n);
+                std::vector<std::string> files;
+                size_t start = 0;
+                for (size_t end; (end = data.find('\n', start)) != std::string::npos; start = end + 1)
+                    if (end > start) files.push_back(data.substr(start, end - start));
+                deliverShared(std::move(files));
+            }
+            DisconnectNamedPipe(pipe);
+            CloseHandle(pipe);
+        }
+    }).detach();
+}
+
+// ---- Explorer: "AirLink ile gönder" on files and folders, and AirLink in "Send to" ----------
+
+void setRegistryString(HKEY root, const std::wstring& key, const wchar_t* name, const std::wstring& value) {
+    HKEY h;
+    if (RegCreateKeyExW(root, key.c_str(), 0, nullptr, 0, KEY_SET_VALUE, nullptr, &h, nullptr) != ERROR_SUCCESS) return;
+    RegSetValueExW(h, name, 0, REG_SZ, reinterpret_cast<const BYTE*>(value.c_str()), DWORD((value.size() + 1) * sizeof(wchar_t)));
+    RegCloseKey(h);
+}
+
+std::wstring sendToShortcut() {
+    PWSTR folder = nullptr;
+    std::wstring path;
+    if (SUCCEEDED(SHGetKnownFolderPath(FOLDERID_SendTo, 0, nullptr, &folder))) path = std::wstring(folder) + L"\\AirLink.lnk";
+    CoTaskMemFree(folder);
+    return path;
+}
+
+// Per user (HKCU, the user's own Send To folder): no administrator needed. Kept up to date with
+// where this .exe is, every start.
+void registerShell() {
+    wchar_t exe[MAX_PATH];
+    if (!GetModuleFileNameW(nullptr, exe, MAX_PATH)) return;
+    std::wstring command = L"\"" + std::wstring(exe) + L"\" --send \"%1\"";
+    for (const wchar_t* type : {L"*", L"Directory"}) {
+        std::wstring key = std::wstring(L"Software\\Classes\\") + type + L"\\shell\\AirLink";
+        setRegistryString(HKEY_CURRENT_USER, key, nullptr, L"AirLink ile gönder");
+        setRegistryString(HKEY_CURRENT_USER, key, L"Icon", std::wstring(exe) + L",0");
+        setRegistryString(HKEY_CURRENT_USER, key + L"\\command", nullptr, command);
+    }
+    // Send To gives all the selected files to one launch.
+    std::wstring link = sendToShortcut();
+    if (link.empty() || FAILED(CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED))) return;
+    IShellLinkW* shell = nullptr;
+    if (SUCCEEDED(CoCreateInstance(CLSID_ShellLink, nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&shell)))) {
+        shell->SetPath(exe);
+        shell->SetArguments(L"--send");
+        shell->SetDescription(L"AirLink ile gönder");
+        IPersistFile* file = nullptr;
+        if (SUCCEEDED(shell->QueryInterface(IID_PPV_ARGS(&file)))) {
+            file->Save(link.c_str(), TRUE);
+            file->Release();
+        }
+        shell->Release();
+    }
+    CoUninitialize();
+}
+
+void unregisterShell() {
+    for (const wchar_t* type : {L"*", L"Directory"})
+        RegDeleteTreeW(HKEY_CURRENT_USER, (std::wstring(L"Software\\Classes\\") + type + L"\\shell\\AirLink").c_str());
+    if (std::wstring link = sendToShortcut(); !link.empty()) DeleteFileW(link.c_str());
+}
+
+}  // namespace
 
 void handleLaunch(int argc, char** argv) {
-    // TODO(windows): a named pipe for one instance, as Linux's socket.
-    deliverShared(filesFromArgs(argc, argv));
+    for (int i = 1; i < argc; ++i)
+        if (std::string(argv[i]) == "--unregister") {
+            unregisterShell();
+            std::exit(0);
+        }
+    std::vector<std::string> files = filesFromArgs(argc, argv);
+    if (std::getenv("KOMPOZ_HEADLESS")) return deliverShared(std::move(files));
+    // One instance. Explorer starts one process per selected file at once: the first takes the
+    // mutex and serves; the others wait for its pipe and hand it their file.
+    CreateMutexW(nullptr, TRUE, (L"Local\\AirLink-" + userName()).c_str());
+    bool another = GetLastError() == ERROR_ALREADY_EXISTS;
+    for (int tries = 0; another && tries < 30; ++tries) {
+        if (forward(files)) std::exit(0);
+        Sleep(100);
+    }
+    if (another) std::exit(0);  // it never answered; don't run the same identity twice
+    serve();
+    registerShell();
+    deliverShared(std::move(files));
 }
+
+#else
+
+void handleLaunch(int argc, char** argv) { deliverShared(filesFromArgs(argc, argv)); }
 
 #endif
 
@@ -219,6 +425,31 @@ void setShareHandler(std::function<void(std::vector<std::string>)> handler) {
 }
 
 void nodeStarted(void*) {}
+
+void log(const std::string& line) { std::fprintf(stderr, "airlink: %s\n", line.c_str()); }
+
+// ---- Phone notifications: the computer only shows them ---------------------------------------
+
+bool canShareNotifications() { return false; }
+bool notificationAccessGranted() { return false; }
+void openNotificationAccessSettings() {}
+void notificationAction(const std::string&, const std::string&, const std::string&) {}
+
+void showDesktopNotification(const std::string& title, const std::string& body) {
+#if defined(__linux__)
+    // The desktop's own notifications (freedesktop.org), through notify-send: no shell, so the
+    // phone's text is passed as it is.
+    std::string t = title, b = body;
+    std::thread([t, b] {
+        pid_t pid = 0;
+        const char* args[] = {"notify-send", "--app-name=AirLink", "--icon=airlink", t.c_str(), b.c_str(), nullptr};
+        if (posix_spawnp(&pid, "notify-send", nullptr, nullptr, const_cast<char* const*>(args), environ) == 0)
+            waitpid(pid, nullptr, 0);
+    }).detach();
+#else
+    (void)title, (void)body;  // TODO(windows): a toast
+#endif
+}
 
 void stageUris(const std::vector<std::string>&, std::function<void(std::vector<std::string>)> done) {
     done({});  // desktop drops come as paths

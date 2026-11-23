@@ -453,6 +453,38 @@ pub unsafe extern "C" fn airlink_send_clipboard(
 }
 
 /// # Safety
+/// `node` as for `node_ref`; strings valid C strings (`body_json`: a JSON value).
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn airlink_send_message(
+    node: *mut AirlinkNode,
+    peer_id: *const c_char,
+    kind: *const c_char,
+    body_json: *const c_char,
+) -> u64 {
+    let (Some(n), Some(id), Some(kind), Some(body)) = (
+        unsafe { node_ref(node) },
+        unsafe { read_str(peer_id) },
+        unsafe { read_str(kind) },
+        unsafe { read_str(body_json) },
+    ) else {
+        return 0;
+    };
+    guard(0, || {
+        let op = n.shared.id();
+        let (node, shared) = (n.node.clone(), n.shared.clone());
+        n.rt.spawn(async move {
+            let res = async {
+                let body: Value = serde_json::from_str(&body)?;
+                node.send_app_message(&id, &kind, body).await
+            }
+            .await;
+            shared.op_result(op, res);
+        });
+        op
+    })
+}
+
+/// # Safety
 /// `s` is NULL or a string returned by this library, not yet freed.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn airlink_free_string(s: *mut c_char) {

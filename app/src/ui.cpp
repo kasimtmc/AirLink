@@ -2,6 +2,8 @@
 
 #include <kompoz/kompoz.hpp>
 
+#include <ctime>
+
 #include "app_icons.hpp"
 #include "app_state.hpp"
 #include "platform.hpp"
@@ -40,6 +42,20 @@ static std::vector<std::string> droppedUris(const DragAndDropEvent& e) {
 static std::string fileName(const std::string& path) {
     size_t slash = path.find_last_of("/\\");
     return slash == std::string::npos ? path : path.substr(slash + 1);
+}
+
+// "14:05" for a time in ms since the epoch, in the local time zone.
+static std::string clockTime(int64_t ms) {
+    std::time_t t = std::time_t(ms / 1000);
+    std::tm local{};
+#if defined(_WIN32)
+    localtime_s(&local, &t);
+#else
+    localtime_r(&t, &local);
+#endif
+    char buf[8];
+    std::strftime(buf, sizeof buf, "%H:%M", &local);
+    return buf;
 }
 
 static std::string spacedCode(const std::string& code) {
@@ -152,7 +168,12 @@ fun DeviceList(app: App, clipboard: ClipboardManager) {
     val transfers = app.transfers()
     val paired = app.pairedPeers()
     val nearby = app.nearbyPeers()
+    // (Lists for items() are read here, not inside LazyColumn's block: the items are composed
+    // after that block returns.)
+    val notifications = app.phoneNotifications()
     var forgetting by remember { mutableStateOf("") }
+    var replyTo by remember { mutableStateOf(PhoneNotification()) }
+    var replyText by remember { mutableStateOf("") }
 
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
@@ -160,6 +181,19 @@ fun DeviceList(app: App, clipboard: ClipboardManager) {
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         item { ThisDeviceCard(app.me()) }
+
+        if (app.canShareNotifications()) {
+            item { NotificationAccessCard(app) }
+        }
+
+        if (notifications.isNotEmpty()) {
+            item { SectionTitle("Telefon bildirimleri") }
+            items(notifications) { n ->
+                PhoneNotificationCard(n, app.peerName(n.peerId),
+                    onDismiss = { app.dismissPhoneNotification(n) },
+                    onReply = { replyTo = n })
+            }
+        }
 
         if (transfers.isNotEmpty()) {
             item { SectionTitle("Aktarımlar") }
@@ -189,6 +223,23 @@ fun DeviceList(app: App, clipboard: ClipboardManager) {
         }
     }
 
+    if (replyTo.key.isNotEmpty()) {
+        AlertDialog(
+            onDismissRequest = { replyTo = PhoneNotification(); replyText = "" },
+            title = { Text("${replyTo.title} yanıtla") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(replyTo.text, style = MaterialTheme.typography.bodySmall, maxLines = 3, overflow = TextOverflow.Ellipsis)
+                    OutlinedTextField(value = replyText, onValueChange = { replyText = it }, modifier = Modifier.fillMaxWidth(), label = "Yanıt")
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { app.replyPhoneNotification(replyTo, replyText); replyTo = PhoneNotification(); replyText = "" }) { Text("Gönder") }
+            },
+            dismissButton = { TextButton(onClick = { replyTo = PhoneNotification(); replyText = "" }) { Text("Vazgeç") } },
+        )
+    }
+
     if (forgetting.isNotEmpty()) {
         AlertDialog(
             onDismissRequest = { forgetting = "" },
@@ -214,6 +265,39 @@ fun ThisDeviceCard(me: DeviceInfo) {
                 Text("Bu cihaz · ${shortId(me.id)} · port ${me.port}", color = cs.onPrimaryContainer)
                 Text("Gelen dosyalar: ${me.downloadDir}", style = MaterialTheme.typography.bodySmall,
                      color = cs.onPrimaryContainer, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            }
+        }
+    }
+}
+
+@Kompozable
+fun NotificationAccessCard(app: App) {
+    OutlinedCard(modifier = Modifier.fillMaxWidth()) {
+        Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text("Bildirimleri bilgisayarda göster", style = MaterialTheme.typography.titleMedium)
+            if (app.notificationAccess()) {
+                Text("Bu telefonun bildirimleri eşleşmiş bilgisayarlara gidiyor; oradan kapatılabilir ya da yanıtlanabilir.",
+                     color = MaterialTheme.colorScheme.onSurfaceVariant)
+            } else {
+                Text("Bilgisayarlarınız bu telefonun bildirimlerini görsün ve mesajları oradan yanıtlayın. Ayarlar'da AirLink'e bildirim erişimi verin.",
+                     color = MaterialTheme.colorScheme.onSurfaceVariant)
+                FilledTonalButton(onClick = { app.openNotificationAccessSettings() }) { Text("İzin ver") }
+            }
+        }
+    }
+}
+
+@Kompozable
+fun PhoneNotificationCard(n: PhoneNotification, peerName: String, onDismiss: () -> Unit, onReply: () -> Unit) {
+    val cs = MaterialTheme.colorScheme
+    Card(modifier = Modifier.fillMaxWidth()) {
+        Column(modifier = Modifier.fillMaxWidth().padding(16.dp, 12.dp)) {
+            Text("${n.app} · $peerName · ${clockTime(n.time)}", style = MaterialTheme.typography.labelMedium, color = cs.primary)
+            if (n.title.isNotEmpty()) Text(n.title, style = MaterialTheme.typography.titleSmall)
+            if (n.text.isNotEmpty()) Text(n.text, style = MaterialTheme.typography.bodyMedium, color = cs.onSurfaceVariant, maxLines = 4, overflow = TextOverflow.Ellipsis)
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                if (n.canReply) TextButton(onClick = onReply) { Text("Yanıtla") }
+                TextButton(onClick = onDismiss) { Text("Kapat") }
             }
         }
     }

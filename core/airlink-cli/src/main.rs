@@ -68,6 +68,12 @@ enum Cmd {
     },
     /// Send text to a paired device's clipboard (reads stdin if TEXT is omitted).
     Clip { peer: String, text: Option<String> },
+    /// Send an app message (JSON body) to a paired device, e.g. for testing features.
+    Msg {
+        peer: String,
+        kind: String,
+        body: String,
+    },
     /// List paired devices.
     Peers,
     /// Remove a paired device.
@@ -211,6 +217,13 @@ async fn one_shot(node: &Node, cmd: Cmd) -> Result<()> {
             };
             node.send_clipboard(&id, &text).await?;
             println!("✓ Clipboard sent");
+        }
+        Cmd::Msg { peer, kind, body } => {
+            let id = resolve_trusted(node, &peer).await?;
+            let body: serde_json::Value =
+                serde_json::from_str(&body).context("body must be JSON")?;
+            node.send_app_message(&id, &kind, body).await?;
+            println!("✓ Sent {kind}");
         }
         Cmd::Peers => {
             let peers = node.trusted_peers();
@@ -412,6 +425,9 @@ async fn run(cfg: NodeConfig, clipboard_sync: bool, json: bool) -> Result<()> {
                         }
                     }
                     Event::TransferFailed { error, .. } if !json => println!("\n✗ Transfer failed: {error}"),
+                    Event::AppMessage { peer, kind, body } if !json => {
+                        println!("✉ {} from {}: {}", kind, peer.name, body);
+                    }
                     Event::ClipboardReceived { peer, text } => {
                         #[cfg(feature = "clipboard")]
                         if let Some(c) = &clip {

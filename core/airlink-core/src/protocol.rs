@@ -6,6 +6,8 @@ use serde::{Deserialize, Serialize};
 pub const PROTOCOL_VERSION: u32 = 1;
 pub const MAX_HEADER_LEN: usize = 8 * 1024 * 1024;
 pub const MAX_CLIPBOARD_LEN: usize = 1024 * 1024;
+/// An app message's body, as JSON text.
+pub const MAX_APP_MESSAGE_LEN: usize = 1024 * 1024;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct DeviceInfo {
@@ -61,6 +63,14 @@ pub enum Message {
 
     Clipboard {
         text: String,
+    },
+
+    /// A message between the two devices' apps, opaque to the core: `kind` names it
+    /// ("notification.posted", "sms.send"…), `body` is its JSON. Features beyond files and the
+    /// clipboard ride on it.
+    AppMessage {
+        kind: String,
+        body: serde_json::Value,
     },
 
     Ack,

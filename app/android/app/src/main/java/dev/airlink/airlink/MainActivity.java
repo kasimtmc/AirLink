@@ -28,7 +28,8 @@ import dev.kompoz.KompozActivity;
 public class MainActivity extends KompozActivity {
     private static final int PICK_FILES = 7001;
 
-    static volatile boolean visible;  // on screen: requests show as the app's dialogs, not notifications
+    static volatile boolean visible;
+    static volatile boolean nativeReady;  // libmain.so is loaded and told where things are  // on screen: requests show as the app's dialogs, not notifications
     private static MainActivity current;
 
     static MainActivity current() {
@@ -42,6 +43,7 @@ public class MainActivity extends KompozActivity {
         current = this;
         cleanStaged(System.nanoTime());
         nativeInit(this, getFilesDir().getAbsolutePath(), downloadDir(), deviceName());
+        nativeReady = true;
         AirLinkService.start(this);
         if (Build.VERSION.SDK_INT >= 33 && checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED)
             requestPermissions(new String[]{Manifest.permission.POST_NOTIFICATIONS}, 1);

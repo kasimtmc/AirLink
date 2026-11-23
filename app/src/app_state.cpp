@@ -32,7 +32,7 @@ std::string cleanError(std::string e) {
     return e;
 }
 
-enum class OpKind { StartPairing, ConfirmPairing, SendFiles, SendClipboard };
+enum class OpKind { StartPairing, ConfirmPairing, SendFiles, SendClipboard, SendReply, Broadcast };
 
 }  // namespace
 
@@ -48,6 +48,8 @@ struct App::Impl {
     MutableState<std::vector<Prompt>> prompts = mutableStateOf(std::vector<Prompt>{});
     MutableState<std::optional<OutgoingPairing>> outgoing = mutableStateOf(std::optional<OutgoingPairing>{});
     MutableState<std::vector<std::string>> share = mutableStateOf(std::vector<std::string>{});
+    MutableState<std::vector<PhoneNotification>> phoneNotifications = mutableStateOf(std::vector<PhoneNotification>{});
+    MutableState<bool> notificationAccess = mutableStateOf(false);
 
     std::vector<std::string> notices;
     std::vector<std::string> incomingClipboard;
@@ -180,6 +182,8 @@ struct App::Impl {
                 t.waiting = false;
                 t.error = cleanError(e["error"].str());
             });
+        } else if (kind == "app_message") {
+            handleAppMessage(e["peer"], e["kind"].str(), e["body"]);
         } else if (kind == "clipboard_received") {
             incomingClipboard.push_back(e["text"].str());
             notices.push_back(e["peer"]["name"].str() + " panosunu paylaştı");
@@ -209,7 +213,43 @@ struct App::Impl {
                 case OpKind::SendClipboard:
                     notices.push_back(ok ? "Pano gönderildi" : "Pano gönderilemedi: " + err);
                     break;
+                case OpKind::Broadcast:
+                    if (!ok) platform::log("broadcast failed: " + err);
+                    break;
+                case OpKind::SendReply:
+                    notices.push_back(ok ? "Yanıt gönderildi" : "Yanıt gönderilemedi: " + err);
+                    break;
             }
+        }
+    }
+
+    void handleAppMessage(const json::Value& peer, const std::string& kind, const json::Value& body) {
+        std::string peerId = peer["id"].str();
+        if (kind == "notification.posted") {
+            PhoneNotification n{.peerId = peerId,
+                                .key = body["key"].str(),
+                                .app = body["app"].str(),
+                                .title = body["title"].str(),
+                                .text = body["text"].str(),
+                                .time = body["time"].i64(),
+                                .canReply = body["can_reply"].boolean()};
+            bool fresh = true;
+            phoneNotifications.update([&](std::vector<PhoneNotification>& list) {
+                auto same = [&](const PhoneNotification& o) { return o.peerId == n.peerId && o.key == n.key; };
+                fresh = std::none_of(list.begin(), list.end(), same);
+                std::erase_if(list, same);
+                list.insert(list.begin(), n);
+                if (list.size() > 100) list.resize(100);
+            });
+            // An update of one already shown (a progress bar, a typing message) doesn't pop up again.
+            if (fresh) platform::showDesktopNotification(n.app.empty() ? n.title : n.app + ": " + n.title, n.text);
+        } else if (kind == "notification.removed") {
+            std::string key = body["key"].str();
+            phoneNotifications.update([&](std::vector<PhoneNotification>& list) {
+                std::erase_if(list, [&](const PhoneNotification& o) { return o.peerId == peerId && o.key == key; });
+            });
+        } else if (kind == "notification.dismiss" || kind == "notification.reply") {
+            platform::notificationAction(kind, body["key"].str(), body["text"].str());
         }
     }
 
@@ -253,8 +293,12 @@ void App::pump() const {
     for (auto& [peer, paths] : picked)
         if (!paths.empty()) sendFiles(peer, paths);
 
-    // Reachability changes without an event (a paired device's connection drops): refresh now and then.
-    if (++s.ticks % 40 == 0) s.refreshPeers();
+    // Reachability changes without an event (a paired device's connection drops), and the user may
+    // have granted notification access in Settings meanwhile: look now and then.
+    if (++s.ticks % 40 == 0) {
+        s.refreshPeers();
+        s.notificationAccess.set(platform::notificationAccessGranted());
+    }
 }
 
 bool App::ready() const { return impl_->ready.get(); }
@@ -286,6 +330,36 @@ std::optional<Prompt> App::prompt() const {
 
 std::optional<OutgoingPairing> App::outgoing() const { return impl_->outgoing.get(); }
 std::vector<std::string> App::share() const { return impl_->share.get(); }
+std::vector<PhoneNotification> App::phoneNotifications() const { return impl_->phoneNotifications.get(); }
+bool App::canShareNotifications() const { return platform::canShareNotifications(); }
+bool App::notificationAccess() const { return impl_->notificationAccess.get(); }
+
+void App::dismissPhoneNotification(const PhoneNotification& n) const {
+    std::string body = "{\"key\":" + json::quote(n.key) + "}";
+    airlink_send_message(impl_->node, n.peerId.c_str(), "notification.dismiss", body.c_str());
+    impl_->phoneNotifications.update([&](std::vector<PhoneNotification>& list) {
+        std::erase_if(list, [&](const PhoneNotification& o) { return o.peerId == n.peerId && o.key == n.key; });
+    });
+}
+
+void App::replyPhoneNotification(const PhoneNotification& n, const std::string& text) const {
+    if (text.empty()) return;
+    std::string body = "{\"key\":" + json::quote(n.key) + ",\"text\":" + json::quote(text) + "}";
+    impl_->track(airlink_send_message(impl_->node, n.peerId.c_str(), "notification.reply", body.c_str()), OpKind::SendReply);
+}
+
+void App::openNotificationAccessSettings() const { platform::openNotificationAccessSettings(); }
+
+void App::broadcast(const std::string& kind, const std::string& bodyJson) const {
+    if (!impl_->node) return;
+    int sent = 0;
+    for (const Peer& p : impl_->peers.peek())
+        if (p.paired && p.online) {
+            impl_->track(airlink_send_message(impl_->node, p.id.c_str(), kind.c_str(), bodyJson.c_str()), OpKind::Broadcast);
+            ++sent;
+        }
+    platform::log("broadcast " + kind + " to " + std::to_string(sent) + " of " + std::to_string(impl_->peers.peek().size()) + " devices");
+}
 
 void App::shareTo(const std::string& peerId) const {
     auto paths = impl_->share.peek();
