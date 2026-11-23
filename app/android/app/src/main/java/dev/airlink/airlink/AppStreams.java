@@ -29,7 +29,7 @@ import java.util.concurrent.Executors;
  * Advanced mode on the phone: this phone's apps, each opened on a display of its own for a paired
  * computer. The privileged work is the helper's (dev.airlink.airlink.helper, started as the shell
  * over the phone's own wireless debugging); this relays between it and the computer:
- *   apps.list -> apps.list_result {apps: [{label, component, icon (PNG, base64)}], first, done}, in parts
+ *   apps.list -> apps.list_result {list, part, parts, apps: [{label, component, icon (PNG, base64)}]}, in parts
  *     (app messages are at most 1 MiB, and with icons a phone's apps are more)
  *   apps.open {session, component, width, height, dpi} / apps.close {session} /
  *   apps.input {session, cmd: touch|scroll|key|text, ...}  -> the helper
@@ -42,7 +42,6 @@ final class AppStreams {
     private static Socket helper;
     private static OutputStream helperOut;
     private static boolean starting;
-    private static int logged;
     private static int port;
     private static String token;
 
@@ -62,9 +61,17 @@ final class AppStreams {
                     case "apps.close":
                         toHelper(req.put("cmd", "close"));
                         break;
-                    case "apps.input":
-                        toHelper(req);
+                    case "apps.input": {
+                        JSONObject input = req;
+                        if ("text".equals(req.optString("cmd")) && !typeable(req.optString("text"))) {
+                            // Letters the key map lacks (ç, ğ, ş, emoji...): through the clipboard, then a paste.
+                            paste(c, req.optString("text"));
+                            input = new JSONObject().put("cmd", "key").put("session", req.optInt("session"))
+                                    .put("code", android.view.KeyEvent.KEYCODE_PASTE);
+                        }
+                        toHelper(input);
                         break;
+                    }
                     default:
                         break;
                 }
@@ -72,6 +79,27 @@ final class AppStreams {
                 android.util.Log.w("AirLink", "apps request " + kind + " failed", e);
             }
         });
+    }
+
+    // Whether the helper can type it as keys.
+    private static boolean typeable(String text) {
+        if (text.isEmpty()) return true;
+        android.view.KeyCharacterMap map = android.view.KeyCharacterMap.load(android.view.KeyCharacterMap.VIRTUAL_KEYBOARD);
+        return map.getEvents(text.toCharArray()) != null;
+    }
+
+    // Puts text on the phone's clipboard (an app may write it from the background, not read it).
+    private static void paste(Context c, String text) throws Exception {
+        java.util.concurrent.CountDownLatch done = new java.util.concurrent.CountDownLatch(1);
+        new android.os.Handler(android.os.Looper.getMainLooper()).post(() -> {
+            try {
+                android.content.ClipboardManager cm = c.getSystemService(android.content.ClipboardManager.class);
+                cm.setPrimaryClip(android.content.ClipData.newPlainText("AirLink", text));
+            } finally {
+                done.countDown();
+            }
+        });
+        done.await(2, java.util.concurrent.TimeUnit.SECONDS);
     }
 
     // ---- The phone's apps ---------------------------------------------------------------------
@@ -92,24 +120,27 @@ final class AppStreams {
         return apps;
     }
 
-    // In parts of ~400 KB.
+    // In parts of ~400 KB, numbered: they may arrive in any order (each is a stream of its own).
     private static void sendList(String peerId, JSONArray apps) throws Exception {
+        java.util.List<JSONArray> parts = new java.util.ArrayList<>();
         JSONArray part = new JSONArray();
         int size = 0;
-        boolean first = true;
         for (int i = 0; i < apps.length(); i++) {
             JSONObject a = apps.getJSONObject(i);
             int n = a.toString().length();
             if (part.length() > 0 && size + n > 400 * 1024) {
-                SmsBridge.send(peerId, "apps.list_result", new JSONObject().put("apps", part).put("first", first).put("done", false));
-                first = false;
+                parts.add(part);
                 part = new JSONArray();
                 size = 0;
             }
             part.put(a);
             size += n;
         }
-        SmsBridge.send(peerId, "apps.list_result", new JSONObject().put("apps", part).put("first", first).put("done", true));
+        parts.add(part);
+        String list = Long.toHexString(System.nanoTime());  // which listing the parts belong to
+        for (int i = 0; i < parts.size(); i++)
+            SmsBridge.send(peerId, "apps.list_result", new JSONObject().put("list", list).put("part", i)
+                    .put("parts", parts.size()).put("apps", parts.get(i)));
     }
 
     private static String icon(Drawable d) {
@@ -157,7 +188,7 @@ final class AppStreams {
 
     /** From native code: the shell command that starts the helper ran (or not). */
     static void helperStarted(boolean ok, String message) {
-        android.util.Log.i("AirLink", "helper started: " + ok + " " + message);
+        if (!ok) android.util.Log.w("AirLink", "helper not started: " + message);
         worker.execute(() -> {
             if (!ok) {
                 starting = false;
@@ -207,9 +238,6 @@ final class AppStreams {
                 byte[] payload = new byte[length - 5];
                 in.readFully(payload);
                 String peer = sessionPeer.get(session);
-                if (type == 1 || logged++ < 3)
-                    android.util.Log.i("AirLink", "helper " + (type == 1 ? new String(payload, StandardCharsets.UTF_8) : "frame " + length)
-                            + " session " + session + " -> " + (peer == null ? "no peer" : peer.substring(0, 8)) + " native " + MainActivity.nativeReady);
                 if (type == 2 && peer != null) {
                     if (MainActivity.nativeReady) nativeSendFrame(peer, "app:" + session, payload);
                 } else if (type == 1 && peer != null) {

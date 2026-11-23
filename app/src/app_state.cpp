@@ -90,6 +90,12 @@ struct App::Impl {
     MutableState<std::string> advancedStatus = mutableStateOf(std::string());
     MutableState<std::vector<PhoneApp>> phoneApps = mutableStateOf(std::vector<PhoneApp>{});
     MutableState<bool> phoneAppsLoading = mutableStateOf(false);
+    struct Wheel {
+        double x = 0, y = 0, h = 0, v = 0;
+    };
+    std::map<int, Wheel> wheels;  // per app session: the turns not sent yet
+    std::string appsListing;                          // the listing whose parts are arriving
+    std::map<int, std::vector<PhoneApp>> appsParts;   // its parts so far
     MutableState<std::vector<AppWindow>> appWindows = mutableStateOf(std::vector<AppWindow>{});
     MutableState<int> activeWindow = mutableStateOf(0);
     int nextSession = 1;
@@ -377,13 +383,25 @@ struct App::Impl {
             if (open && (open->threadId == body["thread_id"].i64() || open->address == body["address"].str())) smsRefreshAt = ticks + 4;
             else if (!smsThreads.peek().empty()) smsRefreshAt = ticks + 4;
         } else if (kind == "apps.list_result") {
-            // In parts: the first replaces the list, the last ends the loading.
-            std::vector<PhoneApp> list = body["first"].boolean() ? std::vector<PhoneApp>{} : phoneApps.peek();
+            // In numbered parts, in any order: the list is shown when all of a listing's are here.
+            std::string list = body["list"].str();
+            if (list != appsListing) {
+                appsListing = list;
+                appsParts.clear();
+            }
+            int parts = int(body["parts"].i64()), part = int(body["part"].i64());
+            std::vector<PhoneApp> got;
             for (const auto& a : body["apps"].array())
-                list.push_back(PhoneApp{.label = a["label"].str(), .component = a["component"].str(),
-                                        .icon = kompoz::decodeToImageBitmap(base64(a["icon"].str()))});
-            phoneApps.set(std::move(list));
-            if (body["done"].boolean()) phoneAppsLoading.set(false);
+                got.push_back(PhoneApp{.label = a["label"].str(), .component = a["component"].str(),
+                                       .icon = kompoz::decodeToImageBitmap(base64(a["icon"].str()))});
+            appsParts[part] = std::move(got);
+            if (int(appsParts.size()) == parts) {
+                std::vector<PhoneApp> all;
+                for (auto& [i, p] : appsParts) all.insert(all.end(), p.begin(), p.end());
+                phoneApps.set(std::move(all));
+                phoneAppsLoading.set(false);
+                appsParts.clear();
+            }
         } else if (kind == "apps.event") {
             int session = int(body["session"].i64());
             std::string ev = body["event"].str();
@@ -538,6 +556,14 @@ void App::pump() const {
         s.callAccess.set(platform::callAccessGranted());
         s.screenControl.set(platform::screenControlEnabled());
     }
+    // The wheel turns since the last pump, one message per window.
+    for (auto& [session, w] : s.wheels) {
+        char buf[160];
+        std::snprintf(buf, sizeof buf, "{\"session\":%d,\"cmd\":\"scroll\",\"x\":%.4f,\"y\":%.4f,\"v\":%.2f,\"h\":%.2f}", session,
+                      w.x, w.y, w.v, w.h);
+        s.phoneAsk("apps.input", buf);
+    }
+    s.wheels.clear();
     // Open phone apps' newest frames.
     if (!s.appWindows.peek().empty()) {
         std::string phone = s.smsPhone();
@@ -760,6 +786,14 @@ void App::showAppWindow(int session) const {
 void App::minimizeAppWindow(int session) const {
     impl_->updateWindow(session, [](AppWindow& w) { w.minimized = true; });
     if (impl_->activeWindow.peek() == session) impl_->activeWindow.set(0);
+}
+
+void App::appWheel(int session, double x, double y, double h, double v) const {
+    Impl::Wheel& w = impl_->wheels[session];
+    w.x = x;
+    w.y = y;
+    w.h += h;
+    w.v += v;
 }
 
 void App::appInput(int session, const std::string& bodyJson) const {

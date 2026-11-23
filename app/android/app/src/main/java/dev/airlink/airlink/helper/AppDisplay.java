@@ -36,7 +36,8 @@ final class AppDisplay {
         void frame(AppDisplay display, byte[] jpeg);
     }
 
-    final int width, height, dpi;
+    final int width, height, dpi;  // as created: portrait
+    private volatile int rotation;  // the display's (Surface.ROTATION_*): it turns with its app
     private final VirtualDisplay virtualDisplay;
     private final ImageReader reader;
     private final HandlerThread thread;
@@ -44,7 +45,6 @@ final class AppDisplay {
     private volatile int quality = 70;
     private volatile int maxFps = 30;
     private long lastFrame;
-    private int frames;
 
     AppDisplay(String name, int width, int height, int dpi, FrameSink sink) throws Exception {
         this.width = width;
@@ -68,6 +68,15 @@ final class AppDisplay {
         if (virtualDisplay == null) throw new IllegalStateException("createVirtualDisplay returned null");
     }
 
+    /** The display's size as its app sees it now: input coordinates are in it. */
+    int logicalWidth() {
+        return rotation % 2 == 0 ? width : height;
+    }
+
+    int logicalHeight() {
+        return rotation % 2 == 0 ? height : width;
+    }
+
     int id() {
         return virtualDisplay.getDisplay().getDisplayId();
     }
@@ -79,7 +88,6 @@ final class AppDisplay {
 
     private void onImage() {
         Image image = reader.acquireLatestImage();
-        if (frames++ < 3) Log.i("display " + width + "x" + height + ": image " + (image != null));
         if (image == null) return;
         try {
             long now = System.currentTimeMillis();
@@ -90,7 +98,17 @@ final class AppDisplay {
             int padded = plane.getRowStride() / plane.getPixelStride();
             Bitmap bmp = Bitmap.createBitmap(padded, height, Bitmap.Config.ARGB_8888);
             bmp.copyPixelsFromBuffer(buf);
-            Bitmap cropped = padded == width ? bmp : Bitmap.createBitmap(bmp, 0, 0, width, height);
+            // ROTATES_WITH_CONTENT: an app that turns the display (landscape) is drawn turned into the
+            // portrait buffer; turned back here, the computer gets it upright.
+            rotation = virtualDisplay.getDisplay().getRotation();
+            Bitmap cropped;
+            if (rotation == 0) {
+                cropped = padded == width ? bmp : Bitmap.createBitmap(bmp, 0, 0, width, height);
+            } else {
+                android.graphics.Matrix m = new android.graphics.Matrix();
+                m.postRotate(-90f * rotation);
+                cropped = Bitmap.createBitmap(bmp, 0, 0, width, height, m, false);
+            }
             ByteArrayOutputStream out = new ByteArrayOutputStream(256 * 1024);
             cropped.compress(Bitmap.CompressFormat.JPEG, quality, out);
             if (cropped != bmp) cropped.recycle();

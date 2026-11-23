@@ -3,6 +3,7 @@
 #include <kompoz/kompoz.hpp>
 
 #include <algorithm>
+#include <cstring>
 #include <ctime>
 
 #include "app_icons.hpp"
@@ -135,7 +136,79 @@ static std::string appTouch(const std::string& action, Offset p, Size box, int i
     return buf;
 }
 
+// Whether an app's label has the search text in it, letters' case aside (Turkish İ/ı, Ş, Ç...).
+static std::string foldCase(const std::string& s) {
+    static const std::pair<const char*, const char*> pairs[] = {
+        {"İ", "i"}, {"I", "ı"}, {"Ş", "ş"}, {"Ç", "ç"}, {"Ğ", "ğ"}, {"Ö", "ö"}, {"Ü", "ü"}};
+    std::string out;
+    for (size_t i = 0; i < s.size();) {
+        bool done = false;
+        for (auto [from, to] : pairs) {
+            size_t n = std::strlen(from);
+            if (s.compare(i, n, from) == 0) {
+                out += to;
+                i += n;
+                done = true;
+                break;
+            }
+        }
+        if (done) continue;
+        char c = s[i++];
+        out += (c >= 'A' && c <= 'Z') ? char(c - 'A' + 'a') : c;
+    }
+    return out;
+}
+static bool matchesQuery(const std::string& label, const std::string& query) {
+    std::string l = foldCase(label), q = foldCase(query);
+    if (l.find(q) != std::string::npos) return true;
+    // "i" also finds "ı" and the other way round (people type either)
+    auto plain = [](std::string s) {
+        for (size_t p; (p = s.find("ı")) != std::string::npos;) s.replace(p, std::strlen("ı"), "i");
+        return s;
+    };
+    return plain(l).find(plain(q)) != std::string::npos;
+}
+
 static std::string textBody(const std::string& text) { return "{\"cmd\":\"text\",\"text\":" + json::quote(text) + "}"; }
+
+// A wheel turn over an app's display (notches; Kompoz: down and right positive, Android: up and left).
+static void appScroll(const App& app, int session, Offset p, Size box, int iw, int ih, Offset delta) {
+    double x = 0, y = 0;
+    toScreen(p, box, iw, ih, x, y);
+    app.appWheel(session, std::clamp(x, 0.0, 1.0), std::clamp(y, 0.0, 1.0), -double(delta.x), -double(delta.y));
+}
+
+// A key pressed over an app's window, as Android's KeyEvent code and meta state ("" when it has none).
+static std::string appKey(const KeyEvent& e) {
+    using K = Key;
+    int code = 0;
+    K k = e.key;
+    if (k >= K::A && k <= K::Z) code = 29 + (int(k) - int(K::A));             // KEYCODE_A..Z
+    else if (k >= K::Zero && k <= K::Nine) code = 7 + (int(k) - int(K::Zero));  // KEYCODE_0..9
+    else if (k >= K::F1 && k <= K::F12) code = 131 + (int(k) - int(K::F1));    // KEYCODE_F1..F12
+    else switch (k) {
+        case K::Enter: code = 66; break;
+        case K::Escape: code = 4; break;  // Back
+        case K::Tab: code = 61; break;
+        case K::Backspace: code = 67; break;
+        case K::Delete: code = 112; break;
+        case K::Space: code = 62; break;
+        case K::Left: code = 21; break;
+        case K::Right: code = 22; break;
+        case K::Up: code = 19; break;
+        case K::Down: code = 20; break;
+        case K::Home: code = 122; break;
+        case K::End: code = 123; break;
+        case K::PageUp: code = 92; break;
+        case K::PageDown: code = 93; break;
+        default: return {};
+    }
+    int meta = 0;
+    if (e.modifiers.shift) meta |= 0x1 | 0x40;      // META_SHIFT_ON | META_SHIFT_LEFT_ON
+    if (e.modifiers.ctrl) meta |= 0x1000 | 0x2000;  // META_CTRL_ON | META_CTRL_LEFT_ON
+    if (e.modifiers.alt) meta |= 0x2 | 0x10;        // META_ALT_ON | META_ALT_LEFT_ON
+    return "{\"cmd\":\"key\",\"code\":" + std::to_string(code) + ",\"meta\":" + std::to_string(meta) + "}";
+}
 
 static int64_t nowMs() { return int64_t(std::time(nullptr)) * 1000; }
 
@@ -626,7 +699,7 @@ fun AppsScreen(app: App) {
     } else {
         Column(modifier = Modifier.fillMaxSize()) {
             if (windows.isNotEmpty()) {
-                FlowRow(modifier = Modifier.fillMaxWidth().padding(12.dp, 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment) {
+                FlowRow(modifier = Modifier.fillMaxWidth().padding(12.dp, 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     for (w in windows) {
                         FilterChip(selected = w.session == active, onClick = { if (w.session == active) app.minimizeAppWindow(w.session) else app.showAppWindow(w.session) },
                                    label = { Text(if (w.minimized) "${w.label} (küçültüldü)" else w.label) })
@@ -645,19 +718,34 @@ fun AppsScreen(app: App) {
 
 @Kompozable
 fun AppGrid(app: App, apps: List<PhoneApp>) {
+    var query by remember { mutableStateOf("") }
     if (apps.isEmpty()) {
         Box(modifier = Modifier.fillMaxSize().padding(16.dp)) {
             Hint(if (app.phoneAppsLoading()) "Uygulamalar telefondan alınıyor…" else "Uygulama yok.", loading = app.phoneAppsLoading())
         }
     } else {
-        LazyVerticalGrid(GridCells.Adaptive(104.dp), modifier = Modifier.fillMaxSize(), contentPadding = PaddingValues(12.dp)) {
-            items(apps) { a ->
-                Column(modifier = Modifier.padding(4.dp).clickable(onClick = { app.openPhoneApp(a) }).padding(8.dp),
-                       horizontalAlignment = Alignment.CenterHorizontally) {
-                    if (!a.icon.empty()) Image(a.icon, contentDescription = null, modifier = Modifier.size(52.dp))
-                    Spacer(modifier = Modifier.height(6.dp))
-                    Text(a.label, style = MaterialTheme.typography.bodySmall, maxLines = 2, overflow = TextOverflow.Ellipsis,
-                         textAlign = TextAlign.Center)
+        val shown = if (query.isEmpty()) apps else apps.filter { matchesQuery(it.label, query) }
+        Column(modifier = Modifier.fillMaxSize()) {
+            Row(modifier = Modifier.fillMaxWidth().padding(16.dp, 12.dp), verticalAlignment = Alignment.CenterVertically) {
+                OutlinedTextField(value = query, onValueChange = { query = it }, singleLine = true, label = "Uygulama ara",
+                                  modifier = Modifier.weight(1f))
+                Spacer(modifier = Modifier.width(8.dp))
+                IconButton(onClick = { app.requestPhoneApps() }) { Icon(Icons.Default.Refresh, contentDescription = "Yenile") }
+            }
+            Text("${shown.size} uygulama", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                 modifier = Modifier.padding(20.dp, 0.dp))
+            LazyVerticalGrid(GridCells.Adaptive(96.dp), modifier = Modifier.fillMaxSize(), contentPadding = PaddingValues(12.dp),
+                             verticalArrangement = Arrangement.spacedBy(4.dp), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                items(shown) { a ->
+                    Column(modifier = Modifier.fillMaxWidth().height(112.dp).clip(RoundedCornerShape(16.dp))
+                                         .clickable(onClick = { app.openPhoneApp(a) }).padding(6.dp, 10.dp),
+                           horizontalAlignment = Alignment.CenterHorizontally) {
+                        if (a.icon.empty()) Box(modifier = Modifier.size(48.dp).background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(12.dp)))
+                        else Image(a.icon, contentDescription = null, modifier = Modifier.size(48.dp).clip(RoundedCornerShape(12.dp)))
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Text(a.label, style = MaterialTheme.typography.bodySmall, maxLines = 2, minLines = 2, overflow = TextOverflow.Ellipsis,
+                             textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth())
+                    }
                 }
             }
         }
@@ -669,6 +757,8 @@ fun AppWindowView(app: App, w: AppWindow) {
     var box by remember { mutableStateOf(Size(0f, 0f)) }
     var last by remember { mutableStateOf(Offset(0f, 0f)) }
     var typed by remember { mutableStateOf("") }
+    val focus = remember { FocusRequester() }
+    val clip = LocalClipboardManager.current
     val fw = if (w.frame.empty()) 720 else w.frame.width()
     val fh = if (w.frame.empty()) 1560 else w.frame.height()
     Column(modifier = Modifier.fillMaxSize()) {
@@ -689,15 +779,35 @@ fun AppWindowView(app: App, w: AppWindow) {
                 Image(w.frame, contentDescription = w.label, contentScale = ContentScale.Fit,
                       modifier = Modifier.fillMaxSize()
                           .onSizeChanged { box = it }
+                          .onPointerEvent(PointerEventType.Scroll) { e ->
+                              appScroll(app, w.session, e.changes.first().position, box, fw, fh, e.changes.first().scrollDelta)
+                              e.changes.first().consume()
+                          }
+                          // The keyboard goes to the app while its image has the focus (a click gives it).
+                          .onKeyEvent { e ->
+                              if (e.type != KeyEventType.KeyDown) false
+                              else if (e.isCtrlPressed && e.key == Key.V) {
+                                  val text = clip.getText()
+                                  if (text.isNotEmpty()) app.appInput(w.session, textBody(text))
+                                  true
+                              } else {
+                                  val body = appKey(e)
+                                  if (body.isNotEmpty()) app.appInput(w.session, body)
+                                  body.isNotEmpty()
+                              }
+                          }
+                          .focusRequester(focus)
+                          .focusable()
                           .pointerInput(Unit) {
                               detectTapGestures(onTap = { p ->
+                                  focus.requestFocus()
                                   app.appInput(w.session, appTouch("down", p, box, fw, fh))
                                   app.appInput(w.session, appTouch("up", p, box, fw, fh))
                               })
                           }
                           .pointerInput(Unit) {
                               detectDragGestures(
-                                  onDragStart = { p -> last = p; app.appInput(w.session, appTouch("down", p, box, fw, fh)) },
+                                  onDragStart = { p -> focus.requestFocus(); last = p; app.appInput(w.session, appTouch("down", p, box, fw, fh)) },
                                   onDrag = { change, amount -> last = last + amount; app.appInput(w.session, appTouch("move", last, box, fw, fh)) },
                                   onDragEnd = { app.appInput(w.session, appTouch("up", last, box, fw, fh)) },
                               )

@@ -285,6 +285,9 @@ public:
     void minimizeAppWindow(int session) const;
     // Input for an open app: {"cmd":"touch","action":"down","x":..,"y":..} and the like (helper/Server.java).
     void appInput(int session, const std::string& bodyJson) const;
+    // A wheel turn over an app's window (x, y: fractions; h, v: notches, Android's signs). Turns add
+    // up and go to the phone once per pump, not one message each.
+    void appWheel(int session, double x, double y, double h, double v) const;
     // This phone's frames (from any thread).
     void sendMedia(const std::string& peerId, const std::string& name, const std::vector<uint8_t>& frame) const;
     void stopMedia(const std::string& peerId, const std::string& name) const;

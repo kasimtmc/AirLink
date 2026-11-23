@@ -100,12 +100,12 @@ final class Server {
                     case "up" -> MotionEvent.ACTION_UP;
                     default -> MotionEvent.ACTION_MOVE;
                 };
-                Input.touch(d.id(), action, (float) c.optDouble("x") * d.width, (float) c.optDouble("y") * d.height);
+                Input.touch(d.id(), action, (float) c.optDouble("x") * d.logicalWidth(), (float) c.optDouble("y") * d.logicalHeight());
                 break;
             }
             case "scroll":
-                if (d != null) Input.scroll(d.id(), (float) c.optDouble("x") * d.width, (float) c.optDouble("y") * d.height,
-                        (float) c.optDouble("h"), (float) c.optDouble("v"));
+                if (d != null) Input.scroll(d.id(), (float) c.optDouble("x") * d.logicalWidth(), (float) c.optDouble("y") * d.logicalHeight(),
+                        (float) c.optDouble("h"), (float) c.optDouble("v"), d.logicalWidth(), d.logicalHeight());
                 break;
             case "key":
                 if (d != null) Input.key(d.id(), c.optInt("code", KeyEvent.KEYCODE_BACK), c.optInt("meta"));
