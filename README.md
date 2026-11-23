@@ -1,5 +1,7 @@
 # AirLink
 
+**English** · [Türkçe](README.tr.md)
+
 A seamless link between your Linux, Windows and Android devices, on your own network, with no account and no cloud:
 
 - **Files**: send files and folders between any paired devices. Use drag and drop, the share sheet on Android, or the right-click menu in Explorer, Dolphin or GNOME Files.
