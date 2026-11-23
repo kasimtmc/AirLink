@@ -1,103 +1,151 @@
 # AirLink
 
-Linux, Windows ve Android cihazlar arasında kesintisiz bağlantı sağlar:
+A seamless link between your Linux, Windows and Android devices, on your own network, with no account and no cloud:
 
-- dosya aktarımı
-- pano paylaşımı
-- telefon bildirimleri, SMS ve aramalar
-- cihazdan cihaza uzaktan kontrol
-- el hareketiyle aktarım
+- **Files**: send files and folders between any paired devices. Use drag and drop, the share sheet on Android, or the right-click menu in Explorer, Dolphin or GNOME Files.
+- **Clipboard**: send text to another device's clipboard.
+- **Notifications**: your phone's notifications appear on the computer, and you can reply to them from there.
+- **SMS**: read conversations on the computer, write new messages and pick recipients from your contacts.
+- **Calls**: incoming calls show on the computer. You can answer, hang up, hold and mute, switch between speaker, Bluetooth and earpiece, change the volume, and use the call log and dialer.
+- **Screen**: the phone's screen on the computer, with touch and swipe.
+- **Phone apps on the computer** (advanced mode): pick any app from the phone's app list and open it in its own window on the computer. You can use it with mouse and keyboard, minimize it and close it. It keeps running while the phone's own screen does something else.
 
-## Yol haritası
+Devices find each other with mDNS. You pair two devices once by comparing a 6-digit code shown on both screens. After that, all traffic goes over QUIC with mutual TLS.
 
-| Faz | İçerik | Durum |
+## Status
+
+| Phase | Scope | State |
 |---|---|---|
-| 1 | Keşif (mDNS), güvenli eşleştirme (SAS), şifreli QUIC bağlantısı, dosya aktarımı, pano | 🚧 Geliştiriliyor |
-| 2 | Bildirimler, SMS, arama kaydı, kişiler, gelen arama | ⏳ |
-| 3 | Android ekranını PC'den kontrol, PC'yi telefondan kontrol | ⏳ |
-| 4 | El hareketiyle aktarım, tek uygulama akışı, Bluetooth ile arama sesi | ⏳ |
+| 1 | Discovery, secure pairing, encrypted QUIC connection, file transfer, clipboard | ✅ |
+| 2 | Notifications, SMS, contacts, calls | ✅ |
+| 3 | Phone screen and phone apps on the computer | ✅ (Android → PC) |
+| 4 | Controlling the PC from the phone, gesture transfer, call audio over Bluetooth | ⏳ |
 
-## Yapı
+Linux and Android are tested on real devices. The Windows build cross-compiles and runs, but its networking still needs testing on a real Windows machine; under Wine, `quinn-udp` cannot open its socket.
+
+## Layout
 
 ```
-core/airlink-core   Rust çekirdek kütüphane (protokol, ağ, aktarım)
-core/airlink-capi   Çekirdeğin C arayüzü (include/airlink.h)
-core/airlink-cli    Geliştirme ve test için komut satırı aracı
-app/                Kompoz (C++20) arayüzü: Linux, Windows, Android tek kod
-app/android         Android Gradle projesi (KompozActivity üzerine MainActivity)
-docs/protocol.md    Protokol tanımı
+core/airlink-core   Rust core library: protocol, discovery, pairing, transfers, messages, media streams
+core/airlink-capi   C API over the core (include/airlink.h), used by the app
+core/airlink-adb    Android wireless-debugging client for advanced mode (pairing, shell)
+core/airlink-cli    Command-line tool for development and testing
+app/                The app: one C++20 code base for Linux, Windows and Android, with a Kompoz UI
+app/android         Android Gradle project, including the privileged helper for advanced mode
+app/packaging       Desktop integration (menu entry, file manager menus)
+docs/protocol.md    Wire protocol
 ```
 
-Arayüz [Kompoz](../kompoz) ile yazılıyor; KompozR tamamlandığında arayüz Rust'a taşınacak.
+The UI is built with [Kompoz](https://github.com/kasimtmc/kompoz), a Compose-style UI toolkit for C++. Once [KompozR](https://github.com/kasimtmc/KompozR), the Rust port, is ready, the UI will move to Rust.
 
-## Hızlı başlangıç (CLI)
+## Building
 
-Derleme:
+You need a Kompoz checkout next to AirLink at `../kompoz`. If it is somewhere else, pass `-DKOMPOZ_DIR=...`.
 
-```bash
-cargo build --release
-```
-
-**1. cihaz:** servisi başlatın. Pano eşitlemesi isteğe bağlıdır.
-
-```bash
-./target/release/airlink run --clipboard-sync
-```
-
-**2. cihaz:** ağdaki cihazları bulun ve eşleşin.
-
-```bash
-./target/release/airlink discover
-```
-
-```bash
-./target/release/airlink pair "Cihaz-Adı"
-```
-
-Eşleştirme sırasında iki ekranda da 6 haneli bir kod görünür. Kodlar aynıysa iki tarafta da `y` yazarak onaylayın.
-
-Eşleştikten sonra dosya ya da klasör gönderebilirsiniz:
-
-```bash
-./target/release/airlink send "Cihaz-Adı" dosya.pdf klasor/
-```
-
-Gelen dosyalar varsayılan olarak `~/Downloads/AirLink` klasörüne kaydedilir.
-
-## Uygulama (Kompoz)
-
-Kompoz deposunun AirLink'in yanında (`../kompoz`) olması gerekir; başka yerdeyse `-DKOMPOZ_DIR=...`.
-
-Masaüstü (Linux):
+### Linux
 
 ```bash
 cmake -S app -B app/build -G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo && cmake --build app/build
+```
+
+```bash
 ./app/build/airlink
 ```
 
-Windows (Linux'tan MinGW-w64 ile çapraz derleme; tek `.exe`, yalnızca Windows'un kendi DLL'leri):
-
-```bash
-rustup target add x86_64-pc-windows-gnu
-cmake -S app -B app/build-windows -G Ninja -DCMAKE_TOOLCHAIN_FILE=../kompoz/cmake/mingw-w64-x86_64.cmake -DCMAKE_BUILD_TYPE=Release
-cmake --build app/build-windows
-```
-
-`airlink.exe` `fonts/` ve `licenses/` klasörleriyle birlikte dağıtılır. İlk açılışta Explorer'a "AirLink ile gönder"
-(sağ tık) ve "Gönder" menüsüne kısayol ekler (yalnızca bu kullanıcı için); `airlink.exe --unregister` kaldırır.
-
-Linux sağ tık menüsü (Dolphin, GNOME Files) ve uygulama menüsü girdisi:
+To add an application menu entry, "Open with" for any file, and "AirLink ile gönder" (Send with AirLink) to the Dolphin and GNOME Files menus:
 
 ```bash
 app/packaging/linux/install.sh
 ```
 
-Android (NDK 29.0.14206865, SDK CMake 4.1.2, `cargo-ndk`, Rust hedefi `aarch64-linux-android`):
+Run `install.sh --uninstall` to remove them again.
+
+### Windows
+
+Cross-compiled from Linux with MinGW-w64. The result is a single `.exe` that depends only on Windows' own DLLs.
+
+```bash
+rustup target add x86_64-pc-windows-gnu
+```
+
+```bash
+cmake -S app -B app/build-windows -G Ninja -DCMAKE_TOOLCHAIN_FILE=../kompoz/cmake/mingw-w64-x86_64.cmake -DCMAKE_BUILD_TYPE=Release && cmake --build app/build-windows
+```
+
+Ship `airlink.exe` together with its `fonts/` and `licenses/` folders. On first start, it adds "AirLink ile gönder" (Send with AirLink) to Explorer's right-click menu and to the "Send to" menu, for the current user only. `airlink.exe --unregister` removes both.
+
+### Android
+
+Requirements:
+
+- NDK 29.0.14206865
+- SDK CMake 4.1.2
+- `cargo-ndk`
+- the Rust target `aarch64-linux-android`
 
 ```bash
 cd app/android && ./gradlew installDebug
 ```
 
-## Lisans
+Permissions are asked for on the phone, each from its own card in the app:
 
-Henüz belirlenmedi.
+- notification access
+- SMS and contacts
+- phone
+- accessibility, for touch on the shared screen
+
+#### Advanced mode
+
+Opening phone apps on the computer needs more than an app is allowed to do: creating trusted virtual displays and injecting input. AirLink gets these rights from the phone's own **wireless debugging**, the same way tools like scrcpy do, but without a computer or a cable:
+
+1. Enable *Developer options → Wireless debugging* on the phone.
+2. In AirLink, start advanced mode and choose *Pair device with pairing code*.
+3. Enter the code in AirLink's notification.
+
+AirLink then starts a small helper as the shell user. The helper opens each app on a display of its own, streams its frames and injects your input. Only AirLink can talk to the helper, which checks a token on a local socket. The helper stops when AirLink does.
+
+## Command-line tool
+
+Build it:
+
+```bash
+cargo build --release
+```
+
+Run a device. Clipboard sync is optional:
+
+```bash
+./target/release/airlink run --clipboard-sync
+```
+
+On another device, find devices on the network:
+
+```bash
+./target/release/airlink discover
+```
+
+Then pair with one of them:
+
+```bash
+./target/release/airlink pair "Device name"
+```
+
+Both devices show the same 6-digit code; confirm with `y` on each. After pairing you can send files and folders:
+
+```bash
+./target/release/airlink send "Device name" document.pdf folder/
+```
+
+Received files go to `~/Downloads/AirLink`. Run `airlink --help` for the other commands: `info`, `peers`, `clip`, `msg` and `forget`.
+
+## Tests
+
+```bash
+cargo test
+```
+
+The end-to-end tests run real nodes over loopback and cover pairing, transfers, reconnects, app messages and media streams.
+
+## License
+
+Not decided yet.
