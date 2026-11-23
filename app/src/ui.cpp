@@ -58,6 +58,33 @@ static std::string clockTime(int64_t ms) {
     return buf;
 }
 
+// The first letter of a name, for an avatar (a whole UTF-8 character).
+static std::string initial(const std::string& name) {
+    if (name.empty()) return "?";
+    size_t n = 1;
+    unsigned char c = static_cast<unsigned char>(name[0]);
+    if (c >= 0xF0) n = 4;
+    else if (c >= 0xE0) n = 3;
+    else if (c >= 0xC0) n = 2;
+    return name.substr(0, n);
+}
+
+// "14:05" today, "23.11" another day.
+static std::string shortDate(int64_t ms) {
+    std::time_t t = std::time_t(ms / 1000), now = std::time(nullptr);
+    std::tm a{}, b{};
+#if defined(_WIN32)
+    localtime_s(&a, &t);
+    localtime_s(&b, &now);
+#else
+    localtime_r(&t, &a);
+    localtime_r(&now, &b);
+#endif
+    char buf[16];
+    std::strftime(buf, sizeof buf, a.tm_yday == b.tm_yday && a.tm_year == b.tm_year ? "%H:%M" : "%d.%m", &a);
+    return buf;
+}
+
 static std::string spacedCode(const std::string& code) {
     return code.size() == 6 ? code.substr(0, 3) + " " + code.substr(3) : code;
 }
@@ -91,6 +118,7 @@ fun Home() {
     val snackbar = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
     val clipboard = clipboardManager()
+    var tab by remember { mutableStateOf(0) }
 
     // The core's events, applied on the UI thread.
     LaunchedEffect(Unit) {
@@ -115,13 +143,23 @@ fun Home() {
         },
         snackbarHost = { SnackbarHost(snackbar) },
     ) { padding ->
-        Box(modifier = Modifier.fillMaxSize().padding(padding)) {
-            if (app.ready()) {
-                DeviceList(app, clipboard)
-            } else if (app.startError().isNotEmpty()) {
-                Text("Başlatılamadı:\n${app.startError()}", modifier = Modifier.align(Alignment.Center).padding(24.dp))
-            } else {
-                CircularProgressIndicator(modifier = Modifier.align(Alignment.Center))
+        // A computer also shows a paired phone's SMS, on a tab of its own.
+        val tabs = isDesktop() && app.ready()
+        Column(modifier = Modifier.fillMaxSize().padding(padding)) {
+            if (tabs) {
+                PrimaryTabRow(selectedTabIndex = tab) {
+                    Tab(selected = tab == 0, onClick = { tab = 0 }, text = { Text("Cihazlar") })
+                    Tab(selected = tab == 1, onClick = { tab = 1 }, text = { Text("Mesajlar") })
+                }
+            }
+            Box(modifier = Modifier.fillMaxSize()) {
+                if (app.ready()) {
+                    if (tabs && tab == 1) MessagesScreen(app) else DeviceList(app, clipboard)
+                } else if (app.startError().isNotEmpty()) {
+                    Text("Başlatılamadı:\n${app.startError()}", modifier = Modifier.align(Alignment.Center).padding(24.dp))
+                } else {
+                    CircularProgressIndicator(modifier = Modifier.align(Alignment.Center))
+                }
             }
         }
     }
@@ -184,6 +222,9 @@ fun DeviceList(app: App, clipboard: ClipboardManager) {
 
         if (app.canShareNotifications()) {
             item { NotificationAccessCard(app) }
+        }
+        if (app.canShareSms()) {
+            item { SmsAccessCard(app) }
         }
 
         if (notifications.isNotEmpty()) {
@@ -283,6 +324,187 @@ fun NotificationAccessCard(app: App) {
                      color = MaterialTheme.colorScheme.onSurfaceVariant)
                 FilledTonalButton(onClick = { app.openNotificationAccessSettings() }) { Text("İzin ver") }
             }
+        }
+    }
+}
+
+@Kompozable
+fun SmsAccessCard(app: App) {
+    OutlinedCard(modifier = Modifier.fillMaxWidth()) {
+        Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text("SMS'leri bilgisayardan kullan", style = MaterialTheme.typography.titleMedium)
+            if (app.smsAccess()) {
+                Text("Eşleşmiş bilgisayarlar bu telefonun SMS'lerini görebilir ve gönderebilir.",
+                     color = MaterialTheme.colorScheme.onSurfaceVariant)
+            } else {
+                Text("Bilgisayarınızdan mesajlarınızı okuyun ve SMS gönderin. AirLink'e SMS (ve isimler için kişiler) izni verin.",
+                     color = MaterialTheme.colorScheme.onSurfaceVariant)
+                FilledTonalButton(onClick = { app.requestSmsAccess() }) { Text("İzin ver") }
+            }
+        }
+    }
+}
+
+// ---- Messages (a paired phone's SMS, on a computer) -----------------------------------------
+
+@Kompozable
+fun MessagesScreen(app: App) {
+    val phone = app.smsPhone()
+    val open = app.smsOpenThread()
+    LaunchedEffect(phone) {
+        if (phone.isNotEmpty()) app.requestSmsThreads()
+    }
+    if (phone.isEmpty()) {
+        Box(modifier = Modifier.fillMaxSize().padding(16.dp)) {
+            Hint("Mesajlar için eşleşmiş bir Android telefon çevrimiçi olmalı.", loading = false)
+        }
+    } else if (app.smsError().isNotEmpty()) {
+        Column(modifier = Modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text(app.smsError())
+            TextButton(onClick = { app.requestSmsThreads() }) { Text("Tekrar dene") }
+        }
+    } else if (open != null) {
+        Conversation(app, open!!)
+    } else {
+        ThreadList(app)
+    }
+}
+
+@Kompozable
+fun ThreadList(app: App) {
+    val threads = app.smsThreads()
+    var composing by remember { mutableStateOf(false) }
+    Box(modifier = Modifier.fillMaxSize()) {
+        LazyColumn(modifier = Modifier.fillMaxSize(), contentPadding = PaddingValues(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            if (threads.isEmpty()) {
+                item { Hint(if (app.smsLoading()) "Mesajlar telefondan alınıyor…" else "Mesaj yok.", loading = app.smsLoading()) }
+            }
+            items(threads) { t -> ThreadRow(t, onClick = { app.openSmsThread(t) }) }
+        }
+        FloatingActionButton(onClick = { composing = true }, modifier = Modifier.align(Alignment.BottomEnd).padding(16.dp)) {
+            Icon(Icons.Filled.Add, contentDescription = "Yeni mesaj")
+        }
+    }
+    if (composing) NewSmsDialog(app, onClose = { composing = false })
+}
+
+@Kompozable
+fun ThreadRow(t: SmsThread, onClick: () -> Unit) {
+    val cs = MaterialTheme.colorScheme
+    Card(onClick = onClick, modifier = Modifier.fillMaxWidth()) {
+        Row(modifier = Modifier.fillMaxWidth().padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
+            Box(modifier = Modifier.size(40.dp).background(cs.primaryContainer, CircleShape), contentAlignment = Alignment.Center) {
+                Text(initial(t.title()), color = cs.onPrimaryContainer, style = MaterialTheme.typography.titleMedium)
+            }
+            Spacer(modifier = Modifier.width(12.dp))
+            Column(modifier = Modifier.weight(1f)) {
+                Text(t.title(), style = MaterialTheme.typography.titleSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(t.snippet, style = MaterialTheme.typography.bodyMedium, color = cs.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            }
+            Spacer(modifier = Modifier.width(8.dp))
+            Column(horizontalAlignment = Alignment.End) {
+                Text(shortDate(t.date), style = MaterialTheme.typography.labelSmall, color = cs.onSurfaceVariant)
+                if (t.unread > 0) {
+                    Box(modifier = Modifier.padding(top = 4.dp).size(20.dp).background(cs.primary, CircleShape), contentAlignment = Alignment.Center) {
+                        Text("${t.unread}", color = cs.onPrimary, style = MaterialTheme.typography.labelSmall)
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Kompozable
+fun Conversation(app: App, thread: SmsThread) {
+    val messages = app.smsMessages()
+    val list = rememberLazyListState()
+    var text by remember { mutableStateOf("") }
+    LaunchedEffect(messages.size) {
+        if (messages.isNotEmpty()) list.scrollToItem(messages.size - 1)
+    }
+    Column(modifier = Modifier.fillMaxSize()) {
+        Row(modifier = Modifier.fillMaxWidth().padding(4.dp), verticalAlignment = Alignment.CenterVertically) {
+            IconButton(onClick = { app.closeSmsThread() }) { Icon(Icons.Filled.ArrowBack, contentDescription = "Geri") }
+            Column {
+                Text(thread.title(), style = MaterialTheme.typography.titleMedium)
+                if (thread.name.isNotEmpty()) Text(thread.address, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+        }
+        HorizontalDivider()
+        LazyColumn(modifier = Modifier.weight(1f).fillMaxWidth(), state = list, contentPadding = PaddingValues(12.dp),
+                   verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            items(messages) { m -> Bubble(m) }
+        }
+        Row(modifier = Modifier.fillMaxWidth().padding(8.dp), verticalAlignment = Alignment.CenterVertically) {
+            OutlinedTextField(value = text, onValueChange = { text = it }, modifier = Modifier.weight(1f), label = "Mesaj")
+            IconButton(onClick = { app.sendSms(thread.address, text); text = "" }, enabled = text.isNotBlank()) {
+                Icon(Icons.Filled.Send, contentDescription = "Gönder")
+            }
+        }
+    }
+}
+
+@Kompozable
+fun Bubble(m: SmsMessage) {
+    val cs = MaterialTheme.colorScheme
+    val color = if (m.outgoing) cs.primaryContainer else cs.surfaceContainerHigh
+    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = if (m.outgoing) Arrangement.End else Arrangement.Start) {
+        Column(modifier = Modifier.widthIn(0.dp, 360.dp).background(color, RoundedCornerShape(16.dp)).padding(12.dp, 8.dp)) {
+            Text(m.body, style = MaterialTheme.typography.bodyMedium)
+            Text(if (m.failed) "${clockTime(m.date)} · gönderilemedi" else if (m.id < 0) "gönderiliyor…" else clockTime(m.date),
+                 style = MaterialTheme.typography.labelSmall, color = if (m.failed) cs.error else cs.onSurfaceVariant)
+        }
+    }
+}
+
+@Kompozable
+fun NewSmsDialog(app: App, onClose: () -> Unit) {
+    var to by remember { mutableStateOf("") }        // what was typed: a name or a number
+    var chosen by remember { mutableStateOf("") }    // the contact picked, its name
+    var number by remember { mutableStateOf("") }    // the number it goes to
+    var body by remember { mutableStateOf("") }
+    // Search the phone's contacts as the user types (once typing pauses).
+    LaunchedEffect(to) {
+        delay(250)
+        if (chosen.isEmpty()) app.searchContacts(to)
+    }
+    val results = app.contactResults()
+    AlertDialog(
+        onDismissRequest = onClose,
+        title = { Text("Yeni mesaj") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedTextField(value = to, onValueChange = { to = it; chosen = ""; number = it }, singleLine = true,
+                                  label = "Kişi ya da numara", modifier = Modifier.fillMaxWidth())
+                if (chosen.isNotEmpty()) {
+                    Text("$chosen · $number", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary)
+                } else {
+                    for (c in results.take(5)) {
+                        ContactRow(c, onClick = { chosen = c.name; number = c.number; to = c.name })
+                    }
+                }
+                OutlinedTextField(value = body, onValueChange = { body = it }, label = "Mesaj", modifier = Modifier.fillMaxWidth())
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = { app.sendSms(number, body); app.searchContacts(""); app.requestSmsThreads(); onClose() },
+                       enabled = number.isNotBlank() && body.isNotBlank()) { Text("Gönder") }
+        },
+        dismissButton = { TextButton(onClick = { app.searchContacts(""); onClose() }) { Text("Vazgeç") } },
+    )
+}
+
+@Kompozable
+fun ContactRow(c: ContactMatch, onClick: () -> Unit) {
+    val cs = MaterialTheme.colorScheme
+    Row(modifier = Modifier.fillMaxWidth().clickable(onClick = onClick).padding(4.dp, 6.dp), verticalAlignment = Alignment.CenterVertically) {
+        Box(modifier = Modifier.size(32.dp).background(cs.secondaryContainer, CircleShape), contentAlignment = Alignment.Center) {
+            Text(initial(c.name), color = cs.onSecondaryContainer, style = MaterialTheme.typography.labelLarge)
+        }
+        Spacer(modifier = Modifier.width(12.dp))
+        Column(modifier = Modifier.weight(1f)) {
+            Text(c.name, style = MaterialTheme.typography.bodyMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(if (c.label.isEmpty()) c.number else "${c.label} · ${c.number}", style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant)
         }
     }
 }

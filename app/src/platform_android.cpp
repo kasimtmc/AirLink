@@ -27,6 +27,8 @@ jclass serviceClass = nullptr;
 jmethodID onPrompt = nullptr;
 jclass listenerClass = nullptr;  // AirLinkNotificationListener
 jmethodID listenerGranted = nullptr, listenerOpenSettings = nullptr, listenerAct = nullptr;
+jclass smsClass = nullptr, activityClass = nullptr;  // SmsBridge, MainActivity
+jmethodID smsHandle = nullptr, smsGranted = nullptr, smsRequestPermissions = nullptr;
 
 std::string fromJava(JNIEnv* env, jstring s) {
     if (!s) return {};
@@ -162,6 +164,32 @@ void notificationAction(const std::string& kind, const std::string& key, const s
 
 void showDesktopNotification(const std::string&, const std::string&) {}  // a phone shows its own
 
+bool canShareSms() { return true; }
+
+bool smsAccessGranted() {
+    JNIEnv* e = env();
+    if (!e || !activityClass) return false;
+    bool granted = e->CallStaticBooleanMethod(activityClass, smsGranted);
+    if (e->ExceptionCheck()) e->ExceptionClear(), granted = false;
+    return granted;
+}
+
+void requestSmsAccess() {
+    JNIEnv* e = env();
+    if (!e || !activityClass) return;
+    e->CallStaticVoidMethod(activityClass, smsRequestPermissions);
+    if (e->ExceptionCheck()) e->ExceptionClear();
+}
+
+void smsRequest(const std::string& peerId, const std::string& kind, const std::string& bodyJson) {
+    JNIEnv* e = env();
+    if (!e || !smsClass) return;
+    jstring p = e->NewStringUTF(peerId.c_str()), k = e->NewStringUTF(kind.c_str()), b = e->NewStringUTF(bodyJson.c_str());
+    e->CallStaticVoidMethod(smsClass, smsHandle, p, k, b);
+    if (e->ExceptionCheck()) e->ExceptionClear();
+    e->DeleteLocalRef(p), e->DeleteLocalRef(k), e->DeleteLocalRef(b);
+}
+
 void filesReceived(const std::vector<std::string>& paths) {
     JNIEnv* e = env();
     jobject a;
@@ -210,6 +238,17 @@ extern "C" JNIEXPORT void JNICALL Java_dev_airlink_airlink_MainActivity_nativeIn
         listenerOpenSettings = e->GetStaticMethodID(listenerClass, "openAccessSettings", "()V");
         listenerAct = e->GetStaticMethodID(listenerClass, "act", "(Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;)V");
     }
+    if (!smsClass) {
+        jclass local = e->FindClass("dev/airlink/airlink/SmsBridge");
+        smsClass = static_cast<jclass>(e->NewGlobalRef(local));
+        e->DeleteLocalRef(local);
+        smsHandle = e->GetStaticMethodID(smsClass, "handle", "(Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;)V");
+        local = e->FindClass("dev/airlink/airlink/MainActivity");
+        activityClass = static_cast<jclass>(e->NewGlobalRef(local));
+        e->DeleteLocalRef(local);
+        smsGranted = e->GetStaticMethodID(activityClass, "smsGranted", "()Z");
+        smsRequestPermissions = e->GetStaticMethodID(activityClass, "requestSmsPermissions", "()V");
+    }
 }
 
 namespace {
@@ -242,6 +281,14 @@ extern "C" JNIEXPORT void JNICALL Java_dev_airlink_airlink_MainActivity_nativeSh
 
 extern "C" JNIEXPORT void JNICALL Java_dev_airlink_airlink_AirLinkNotificationListener_nativeBroadcast(JNIEnv* e, jclass, jstring kind,
                                                                                                     jstring body) {
+    airlink::App::get().broadcast(fromJava(e, kind), fromJava(e, body));
+}
+
+extern "C" JNIEXPORT void JNICALL Java_dev_airlink_airlink_SmsBridge_nativeSendTo(JNIEnv* e, jclass, jstring peer, jstring kind, jstring body) {
+    airlink::App::get().sendTo(fromJava(e, peer), fromJava(e, kind), fromJava(e, body));
+}
+
+extern "C" JNIEXPORT void JNICALL Java_dev_airlink_airlink_SmsBridge_nativeBroadcast(JNIEnv* e, jclass, jstring kind, jstring body) {
     airlink::App::get().broadcast(fromJava(e, kind), fromJava(e, body));
 }
 

@@ -53,6 +53,14 @@ void notificationAction(const std::string& kind, const std::string& key, const s
 // Shows a notification of this computer's desktop (a phone's notification mirrored here).
 void showDesktopNotification(const std::string& title, const std::string& body);
 
+// ---- SMS (a phone's, used from a paired computer) ------------------------------------------
+
+bool canShareSms();
+bool smsAccessGranted();
+void requestSmsAccess();
+// A computer's "sms.*" request to this phone (body: JSON); answered with App::sendTo.
+void smsRequest(const std::string& peerId, const std::string& kind, const std::string& bodyJson);
+
 // A line in the platform's log (Android's logcat, stderr on the desktop).
 void log(const std::string& line);
 

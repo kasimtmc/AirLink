@@ -4,6 +4,7 @@
 // strings with escapes, numbers, booleans, null). Malformed input yields null values.
 
 #include <cstdint>
+#include <cstdio>
 #include <cstdlib>
 #include <string>
 #include <string_view>
@@ -35,6 +36,9 @@ public:
     int64_t i64(int64_t fallback = 0) const { return type_ == Type::Number ? integer_ : fallback; }
     uint64_t u64(uint64_t fallback = 0) const { return type_ == Type::Number ? uint64_t(integer_) : fallback; }
     double num(double fallback = 0) const { return type_ == Type::Number ? number_ : fallback; }
+
+    // Back to JSON text.
+    std::string dump() const;
 
     static Value parse(std::string_view text) {
         Parser p{text};
@@ -174,6 +178,33 @@ private:
     std::vector<Value> array_;
     std::vector<std::pair<std::string, Value>> object_;
 };
+
+std::string quote(std::string_view text);
+
+inline std::string Value::dump() const {
+    switch (type_) {
+        case Type::Null: return "null";
+        case Type::Bool: return bool_ ? "true" : "false";
+        case Type::Number: {
+            if (double(integer_) == number_) return std::to_string(integer_);
+            char buf[32];
+            std::snprintf(buf, sizeof buf, "%.17g", number_);
+            return buf;
+        }
+        case Type::String: return quote(string_);
+        case Type::Array: {
+            std::string out = "[";
+            for (size_t i = 0; i < array_.size(); ++i) out += (i ? "," : "") + array_[i].dump();
+            return out + "]";
+        }
+        case Type::Object: {
+            std::string out = "{";
+            for (size_t i = 0; i < object_.size(); ++i) out += (i ? "," : "") + quote(object_[i].first) + ":" + object_[i].second.dump();
+            return out + "}";
+        }
+    }
+    return "null";
+}
 
 // `text` as a JSON string literal, quotes included.
 inline std::string quote(std::string_view text) {

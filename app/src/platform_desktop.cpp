@@ -426,6 +426,11 @@ void setShareHandler(std::function<void(std::vector<std::string>)> handler) {
 
 void nodeStarted(void*) {}
 
+bool canShareSms() { return false; }
+bool smsAccessGranted() { return false; }
+void requestSmsAccess() {}
+void smsRequest(const std::string&, const std::string&, const std::string&) {}
+
 void log(const std::string& line) { std::fprintf(stderr, "airlink: %s\n", line.c_str()); }
 
 // ---- Phone notifications: the computer only shows them ---------------------------------------

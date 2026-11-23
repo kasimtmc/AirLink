@@ -118,6 +118,12 @@ Yalnızca eşleşmiş cihazlar arasında gider. Tanımlı türler:
 | `notification.removed` | telefon → PC | `{ key }` |
 | `notification.dismiss` | PC → telefon | `{ key }` |
 | `notification.reply` | PC → telefon | `{ key, text }` |
+| `sms.threads_request` | PC → telefon | `{}` → `sms.threads { threads: [{ thread_id, address, name, snippet, date, unread }] }` |
+| `sms.thread_request` | PC → telefon | `{ thread_id }` → `sms.messages { thread_id, messages: [{ id, body, date, outgoing, failed }] }` |
+| `sms.send` | PC → telefon | `{ address, text }` → `sms.sent { address, ok, error? }` |
+| `sms.received` | telefon → PC | `{ address, name, body, date, thread_id }` |
+| `sms.error` | telefon → PC | `{ error, request }` (`no_permission`: SMS izni verilmemiş) |
+| `contacts.search` | PC → telefon | `{ query }` → `contacts.results { query, contacts: [{ name, number, label }] }` |
 
 ## 10. Gelecek sürümler (ayrılmış)
 

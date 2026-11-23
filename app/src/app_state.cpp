@@ -3,6 +3,7 @@
 #include <airlink.h>
 
 #include <algorithm>
+#include <ctime>
 #include <cstdio>
 #include <cstdlib>
 #include <map>
@@ -32,7 +33,7 @@ std::string cleanError(std::string e) {
     return e;
 }
 
-enum class OpKind { StartPairing, ConfirmPairing, SendFiles, SendClipboard, SendReply, Broadcast };
+enum class OpKind { StartPairing, ConfirmPairing, SendFiles, SendClipboard, SendReply };
 
 }  // namespace
 
@@ -50,6 +51,15 @@ struct App::Impl {
     MutableState<std::vector<std::string>> share = mutableStateOf(std::vector<std::string>{});
     MutableState<std::vector<PhoneNotification>> phoneNotifications = mutableStateOf(std::vector<PhoneNotification>{});
     MutableState<bool> notificationAccess = mutableStateOf(false);
+    MutableState<std::vector<SmsThread>> smsThreads = mutableStateOf(std::vector<SmsThread>{});
+    MutableState<std::optional<SmsThread>> smsOpen = mutableStateOf(std::optional<SmsThread>{});
+    MutableState<std::vector<SmsMessage>> smsMessages = mutableStateOf(std::vector<SmsMessage>{});
+    MutableState<std::string> smsError = mutableStateOf(std::string());
+    MutableState<bool> smsLoading = mutableStateOf(false);
+    MutableState<bool> smsAccess = mutableStateOf(false);
+    MutableState<std::vector<ContactMatch>> contactResults = mutableStateOf(std::vector<ContactMatch>{});
+    std::string contactQuery;  // answers to older searches are dropped
+    int smsRefreshAt = -1;  // a tick to ask the open conversation again (a sent SMS is recorded late)
 
     std::vector<std::string> notices;
     std::vector<std::string> incomingClipboard;
@@ -60,6 +70,7 @@ struct App::Impl {
     std::mutex pickedMutex;
     std::vector<std::pair<std::string, std::vector<std::string>>> picked;
     std::vector<std::string> shared;  // from platform::setShareHandler, any thread
+    std::vector<std::string> onlinePaired;  // for sends from any thread (under pickedMutex)
 
     ~Impl() {
         if (node) airlink_stop(node);
@@ -106,6 +117,12 @@ struct App::Impl {
                                 .platform = p["platform"].str(),
                                 .paired = p["paired"].boolean(),
                                 .online = p["online"].boolean()});
+        {
+            std::lock_guard lock(pickedMutex);
+            onlinePaired.clear();
+            for (const Peer& p : list)
+                if (p.paired && p.online) onlinePaired.push_back(p.id);
+        }
         peers.set(std::move(list));
     }
 
@@ -213,9 +230,6 @@ struct App::Impl {
                 case OpKind::SendClipboard:
                     notices.push_back(ok ? "Pano gönderildi" : "Pano gönderilemedi: " + err);
                     break;
-                case OpKind::Broadcast:
-                    if (!ok) platform::log("broadcast failed: " + err);
-                    break;
                 case OpKind::SendReply:
                     notices.push_back(ok ? "Yanıt gönderildi" : "Yanıt gönderilemedi: " + err);
                     break;
@@ -250,7 +264,61 @@ struct App::Impl {
             });
         } else if (kind == "notification.dismiss" || kind == "notification.reply") {
             platform::notificationAction(kind, body["key"].str(), body["text"].str());
+        } else if (kind == "sms.threads_request" || kind == "sms.thread_request" || kind == "sms.send" || kind == "contacts.search") {
+            platform::smsRequest(peerId, kind, body.dump());  // this phone answers
+        } else if (kind == "sms.threads") {
+            std::vector<SmsThread> list;
+            for (const auto& t : body["threads"].array())
+                list.push_back(SmsThread{.threadId = t["thread_id"].i64(), .address = t["address"].str(), .name = t["name"].str(),
+                                         .snippet = t["snippet"].str(), .date = t["date"].i64(), .unread = int(t["unread"].i64())});
+            smsThreads.set(std::move(list));
+            smsLoading.set(false);
+            smsError.set({});
+        } else if (kind == "sms.messages") {
+            auto open = smsOpen.peek();
+            if (!open || open->threadId != body["thread_id"].i64()) return;
+            std::vector<SmsMessage> list;
+            for (const auto& m : body["messages"].array())
+                list.push_back(SmsMessage{.id = m["id"].i64(), .body = m["body"].str(), .date = m["date"].i64(),
+                                          .outgoing = m["outgoing"].boolean(), .failed = m["failed"].boolean()});
+            smsMessages.set(std::move(list));
+            smsLoading.set(false);
+        } else if (kind == "sms.sent") {
+            if (!body["ok"].boolean()) notices.push_back("SMS gönderilemedi: " + body["error"].str());
+            smsRefreshAt = ticks + 30;  // ~1.5 s: the phone records it in the conversation meanwhile
+        } else if (kind == "sms.received") {
+            auto open = smsOpen.peek();
+            if (open && (open->threadId == body["thread_id"].i64() || open->address == body["address"].str())) smsRefreshAt = ticks + 4;
+            else if (!smsThreads.peek().empty()) smsRefreshAt = ticks + 4;
+        } else if (kind == "contacts.results") {
+            if (body["query"].str() != contactQuery) return;
+            std::vector<ContactMatch> list;
+            for (const auto& c : body["contacts"].array())
+                list.push_back(ContactMatch{.name = c["name"].str(), .number = c["number"].str(), .label = c["label"].str()});
+            contactResults.set(std::move(list));
+        } else if (kind == "sms.error") {
+            smsLoading.set(false);
+            smsError.set(body["error"].str() == "no_permission" ? "Telefonda AirLink'e SMS izni verilmemiş. Telefondaki AirLink'ten izin verin."
+                                                               : body["error"].str());
         }
+    }
+
+    std::string smsPhone() const {
+        for (const Peer& p : peers.peek())
+            if (p.paired && p.online && p.platform == "android") return p.id;
+        return {};
+    }
+
+    void smsAsk(const char* kind, const std::string& body) {
+        std::string phone = smsPhone();
+        if (!node || phone.empty()) return;
+        smsLoading.set(true);
+        airlink_send_message(node, phone.c_str(), kind, body.c_str());
+    }
+
+    void smsRefresh() {
+        if (auto open = smsOpen.peek()) smsAsk("sms.thread_request", "{\"thread_id\":" + std::to_string(open->threadId) + "}");
+        smsAsk("sms.threads_request", "{}");
     }
 
     void track(uint64_t op, OpKind kind) {
@@ -298,6 +366,11 @@ void App::pump() const {
     if (++s.ticks % 40 == 0) {
         s.refreshPeers();
         s.notificationAccess.set(platform::notificationAccessGranted());
+        s.smsAccess.set(platform::smsAccessGranted());
+    }
+    if (s.smsRefreshAt >= 0 && s.ticks >= s.smsRefreshAt) {
+        s.smsRefreshAt = -1;
+        s.smsRefresh();
     }
 }
 
@@ -352,13 +425,65 @@ void App::openNotificationAccessSettings() const { platform::openNotificationAcc
 
 void App::broadcast(const std::string& kind, const std::string& bodyJson) const {
     if (!impl_->node) return;
-    int sent = 0;
-    for (const Peer& p : impl_->peers.peek())
-        if (p.paired && p.online) {
-            impl_->track(airlink_send_message(impl_->node, p.id.c_str(), kind.c_str(), bodyJson.c_str()), OpKind::Broadcast);
-            ++sent;
-        }
-    platform::log("broadcast " + kind + " to " + std::to_string(sent) + " of " + std::to_string(impl_->peers.peek().size()) + " devices");
+    std::vector<std::string> targets;
+    {
+        std::lock_guard lock(impl_->pickedMutex);
+        targets = impl_->onlinePaired;
+    }
+    for (const std::string& id : targets) airlink_send_message(impl_->node, id.c_str(), kind.c_str(), bodyJson.c_str());
+    platform::log("broadcast " + kind + " to " + std::to_string(targets.size()) + " devices");
+}
+
+void App::sendTo(const std::string& peerId, const std::string& kind, const std::string& bodyJson) const {
+    if (impl_->node) airlink_send_message(impl_->node, peerId.c_str(), kind.c_str(), bodyJson.c_str());
+}
+
+std::string App::smsPhone() const {
+    for (const Peer& p : impl_->peers.get())
+        if (p.paired && p.online && p.platform == "android") return p.id;
+    return {};
+}
+std::vector<SmsThread> App::smsThreads() const { return impl_->smsThreads.get(); }
+std::optional<SmsThread> App::smsOpenThread() const { return impl_->smsOpen.get(); }
+std::vector<SmsMessage> App::smsMessages() const { return impl_->smsMessages.get(); }
+std::string App::smsError() const { return impl_->smsError.get(); }
+bool App::smsLoading() const { return impl_->smsLoading.get(); }
+bool App::canShareSms() const { return platform::canShareSms(); }
+bool App::smsAccess() const { return impl_->smsAccess.get(); }
+
+void App::requestSmsThreads() const { impl_->smsAsk("sms.threads_request", "{}"); }
+
+void App::openSmsThread(const SmsThread& thread) const {
+    impl_->smsOpen.set(thread);
+    impl_->smsMessages.set({});
+    impl_->smsAsk("sms.thread_request", "{\"thread_id\":" + std::to_string(thread.threadId) + "}");
+}
+
+void App::closeSmsThread() const {
+    impl_->smsOpen.set(std::nullopt);
+    impl_->smsMessages.set({});
+}
+
+void App::sendSms(const std::string& address, const std::string& text) const {
+    if (address.empty() || text.empty()) return;
+    impl_->smsAsk("sms.send", "{\"address\":" + json::quote(address) + ",\"text\":" + json::quote(text) + "}");
+    // Shown at once; the phone's own record replaces it when the conversation is asked again.
+    impl_->smsMessages.update([&](std::vector<SmsMessage>& list) {
+        list.push_back(SmsMessage{.id = -1, .body = text, .date = int64_t(std::time(nullptr)) * 1000, .outgoing = true});
+    });
+}
+
+void App::requestSmsAccess() const { platform::requestSmsAccess(); }
+
+std::vector<ContactMatch> App::contactResults() const { return impl_->contactResults.get(); }
+
+void App::searchContacts(const std::string& query) const {
+    impl_->contactQuery = query;
+    if (query.empty()) return impl_->contactResults.set({});
+    std::string phone = impl_->smsPhone();
+    if (!impl_->node || phone.empty()) return;
+    std::string body = "{\"query\":" + json::quote(query) + "}";
+    airlink_send_message(impl_->node, phone.c_str(), "contacts.search", body.c_str());
 }
 
 void App::shareTo(const std::string& peerId) const {

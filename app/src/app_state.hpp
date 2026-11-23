@@ -85,6 +85,35 @@ struct PhoneNotification {
     bool operator==(const PhoneNotification&) const = default;
 };
 
+// A phone's SMS conversation, as the computer shows it.
+struct SmsThread {
+    int64_t threadId = 0;
+    std::string address;
+    std::string name;  // the contact's, or empty
+    std::string snippet;
+    int64_t date = 0;
+    int unread = 0;
+    std::string title() const { return name.empty() ? address : name; }
+    bool operator==(const SmsThread&) const = default;
+};
+
+struct SmsMessage {
+    int64_t id = 0;
+    std::string body;
+    int64_t date = 0;
+    bool outgoing = false;
+    bool failed = false;
+    bool operator==(const SmsMessage&) const = default;
+};
+
+// A contact of the phone, found by a search from the computer.
+struct ContactMatch {
+    std::string name;
+    std::string number;
+    std::string label;  // "Mobil", "Ev"...
+    bool operator==(const ContactMatch&) const = default;
+};
+
 class App {
 public:
     // The one app state of the process.
@@ -111,6 +140,17 @@ public:
     // This phone: may it share its notifications, and is it allowed to.
     bool canShareNotifications() const;
     bool notificationAccess() const;
+
+    // ---- SMS: on a computer, a paired phone's; on a phone, whether it shares them ----
+    std::string smsPhone() const;  // the online paired phone used for SMS (empty: none)
+    std::vector<SmsThread> smsThreads() const;
+    std::optional<SmsThread> smsOpenThread() const;
+    std::vector<SmsMessage> smsMessages() const;  // the open thread's, oldest first
+    std::string smsError() const;
+    bool smsLoading() const;
+    std::vector<ContactMatch> contactResults() const;  // for the latest searchContacts
+    bool canShareSms() const;
+    bool smsAccess() const;
     std::string peerName(const std::string& id) const;
 
     // Messages for a snackbar, and clipboard texts from other devices, since the last call.
@@ -135,7 +175,15 @@ public:
     void dismissPhoneNotification(const PhoneNotification& n) const;
     void replyPhoneNotification(const PhoneNotification& n, const std::string& text) const;
     void openNotificationAccessSettings() const;
-    // To every reachable paired device (this phone's notifications, as they come and go).
+    void requestSmsThreads() const;
+    void openSmsThread(const SmsThread& thread) const;
+    void closeSmsThread() const;
+    void sendSms(const std::string& address, const std::string& text) const;
+    void requestSmsAccess() const;
+    void searchContacts(const std::string& query) const;
+    // To one paired device, from any thread (answers this phone gives a computer).
+    void sendTo(const std::string& peerId, const std::string& kind, const std::string& bodyJson) const;
+    // To every reachable paired device, from any thread (this phone's notifications, new SMS).
     void broadcast(const std::string& kind, const std::string& bodyJson) const;
 
     bool operator==(const App& other) const { return impl_ == other.impl_; }

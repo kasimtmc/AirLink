@@ -91,6 +91,21 @@ public class MainActivity extends KompozActivity {
         stage(uris, true);
     }
 
+    // ---- SMS for paired computers (SmsBridge) ---------------------------------------------
+
+    /** From native code: whether paired computers may read and send this phone's SMS. */
+    static boolean smsGranted() {
+        return AirLinkService.appContext != null && SmsBridge.granted(AirLinkService.appContext);
+    }
+
+    /** From native code: asks for the SMS permissions (and contacts, for names). */
+    static void requestSmsPermissions() {
+        MainActivity a = current;
+        if (a == null) return;
+        a.requestPermissions(new String[]{Manifest.permission.READ_SMS, Manifest.permission.SEND_SMS,
+                Manifest.permission.RECEIVE_SMS, Manifest.permission.READ_CONTACTS}, 2);
+    }
+
     /** A request notification's button (PromptReceiver), on the UI thread. */
     static void respond(long requestId, boolean accept) {
         nativeRespond(requestId, accept);
