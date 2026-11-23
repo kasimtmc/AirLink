@@ -1,7 +1,9 @@
 // Android: what MainActivity.java tells native code, and the calls back into it.
 
 #include "platform.hpp"
+#include "app_state.hpp"
 
+#include <airlink.h>
 #include <jni.h>
 
 #include <mutex>
@@ -16,6 +18,12 @@ std::optional<Config> started;
 JavaVM* vm = nullptr;
 jobject activity = nullptr;  // global ref
 std::function<void(std::vector<std::string>)> pending;  // the picker's callback
+std::function<void(std::vector<std::string>)> shareHandler;
+std::vector<std::string> sharedEarly;  // shared before the handler was set
+// AirLinkService and its static onPrompt, looked up on the UI thread: the core's threads, attached
+// to the VM later, see only the system's classes through FindClass.
+jclass serviceClass = nullptr;
+jmethodID onPrompt = nullptr;
 
 std::string fromJava(JNIEnv* env, jstring s) {
     if (!s) return {};
@@ -86,6 +94,41 @@ void stageUris(const std::vector<std::string>& uris, std::function<void(std::vec
     e->DeleteLocalRef(array);
 }
 
+void handleLaunch(int, char**) {}  // Android: shares come as intents (MainActivity)
+
+void setShareHandler(std::function<void(std::vector<std::string>)> handler) {
+    std::vector<std::string> early;
+    {
+        std::lock_guard lock(mutex);
+        shareHandler = handler;
+        early.swap(sharedEarly);
+    }
+    if (!early.empty()) handler(std::move(early));
+}
+
+namespace {
+// The core's prompt events, on its own thread: AirLinkService shows them as notifications while
+// the app isn't on screen.
+void promptHeard(void*, const char* json) {
+    if (!vm || !serviceClass || !onPrompt) return;
+    JNIEnv* e = nullptr;
+    bool attached = false;
+    if (vm->GetEnv(reinterpret_cast<void**>(&e), JNI_VERSION_1_6) == JNI_EDETACHED) {
+        if (vm->AttachCurrentThread(&e, nullptr) != JNI_OK) return;
+        attached = true;  // detached again below: the core's threads aren't Java's
+    }
+    jstring s = e->NewStringUTF(json);
+    e->CallStaticVoidMethod(serviceClass, onPrompt, s);
+    if (e->ExceptionCheck()) e->ExceptionClear();
+    e->DeleteLocalRef(s);
+    if (attached) vm->DetachCurrentThread();
+}
+}  // namespace
+
+void nodeStarted(void* node) {
+    airlink_set_prompt_listener(static_cast<AirlinkNode*>(node), promptHeard, nullptr);
+}
+
 void filesReceived(const std::vector<std::string>& paths) {
     JNIEnv* e = env();
     jobject a;
@@ -120,9 +163,16 @@ extern "C" JNIEXPORT void JNICALL Java_dev_airlink_airlink_MainActivity_nativeIn
     if (activity) e->DeleteGlobalRef(activity);
     activity = e->NewGlobalRef(activityObject);
     started = Config{.dataDir = fromJava(e, filesDir), .downloadDir = fromJava(e, downloadDir), .fallbackName = fromJava(e, deviceName)};
+    if (!serviceClass) {
+        jclass local = e->FindClass("dev/airlink/airlink/AirLinkService");
+        serviceClass = static_cast<jclass>(e->NewGlobalRef(local));
+        e->DeleteLocalRef(local);
+        onPrompt = e->GetStaticMethodID(serviceClass, "onPrompt", "(Ljava/lang/String;)V");
+    }
 }
 
-extern "C" JNIEXPORT void JNICALL Java_dev_airlink_airlink_MainActivity_nativeFilesPicked(JNIEnv* e, jclass, jobjectArray paths) {
+namespace {
+std::vector<std::string> pathsOf(JNIEnv* e, jobjectArray paths) {
     std::vector<std::string> list;
     jsize n = paths ? e->GetArrayLength(paths) : 0;
     for (jsize i = 0; i < n; ++i) {
@@ -130,6 +180,31 @@ extern "C" JNIEXPORT void JNICALL Java_dev_airlink_airlink_MainActivity_nativeFi
         list.push_back(fromJava(e, s));
         e->DeleteLocalRef(s);
     }
+    return list;
+}
+}  // namespace
+
+extern "C" JNIEXPORT void JNICALL Java_dev_airlink_airlink_MainActivity_nativeShared(JNIEnv* e, jclass, jobjectArray paths) {
+    std::vector<std::string> list = pathsOf(e, paths);
+    if (list.empty()) return;
+    std::function<void(std::vector<std::string>)> handler;
+    {
+        std::lock_guard lock(mutex);
+        if (!shareHandler) {
+            sharedEarly.insert(sharedEarly.end(), list.begin(), list.end());
+            return;
+        }
+        handler = shareHandler;
+    }
+    handler(std::move(list));
+}
+
+extern "C" JNIEXPORT void JNICALL Java_dev_airlink_airlink_MainActivity_nativeRespond(JNIEnv*, jclass, jlong requestId, jboolean accept) {
+    airlink::App::get().respond(uint64_t(requestId), accept);
+}
+
+extern "C" JNIEXPORT void JNICALL Java_dev_airlink_airlink_MainActivity_nativeFilesPicked(JNIEnv* e, jclass, jobjectArray paths) {
+    std::vector<std::string> list = pathsOf(e, paths);
     std::function<void(std::vector<std::string>)> done;
     {
         std::lock_guard lock(mutex);

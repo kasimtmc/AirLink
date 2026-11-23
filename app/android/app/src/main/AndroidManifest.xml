@@ -11,6 +11,12 @@
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
     <uses-permission android:name="android.permission.CHANGE_WIFI_MULTICAST_STATE" />
+    <uses-permission android:name="android.permission.CHANGE_WIFI_STATE" />
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <!-- Reachable while the screen is closed: a foreground service, and notifications for requests -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CONNECTED_DEVICE" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <!-- Saving received files to Download/AirLink on Android 9 and older -->
     <uses-permission
         android:name="android.permission.WRITE_EXTERNAL_STORAGE"
@@ -35,6 +41,22 @@
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
+            <!-- "Share > AirLink" from other apps: files go to a device the user picks -->
+            <intent-filter android:label="AirLink ile gönder">
+                <action android:name="android.intent.action.SEND" />
+                <action android:name="android.intent.action.SEND_MULTIPLE" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="*/*" />
+            </intent-filter>
         </activity>
+
+        <service
+            android:name=".AirLinkService"
+            android:exported="false"
+            android:foregroundServiceType="connectedDevice" />
+
+        <receiver
+            android:name=".PromptReceiver"
+            android:exported="false" />
     </application>
 </manifest>

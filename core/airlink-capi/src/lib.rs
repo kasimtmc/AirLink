@@ -23,19 +23,49 @@ pub struct AirlinkNode {
     shared: Arc<Shared>,
 }
 
+/// `airlink_set_prompt_listener`'s callback and its context.
+pub type AirlinkPromptFn = extern "C" fn(ctx: *mut std::ffi::c_void, event_json: *const c_char);
+
+#[derive(Clone, Copy)]
+struct Listener {
+    f: AirlinkPromptFn,
+    ctx: usize, // the app's pointer, opaque here
+}
+
+/// Events the prompt listener hears: a request appears, or goes away.
+const PROMPT_EVENTS: [&str; 4] = [
+    "pairing_request",
+    "file_offer",
+    "request_cancelled",
+    "request_answered",
+];
+
 struct Shared {
     events: Mutex<VecDeque<String>>,
     pairings: Mutex<HashMap<u64, OutgoingPairing>>,
     next_id: AtomicU64,
+    listener: Mutex<Option<Listener>>,
 }
 
 impl Shared {
     fn push(&self, v: Value) {
-        let mut q = self.events.lock().unwrap();
-        if q.len() >= MAX_QUEUED_EVENTS {
-            q.pop_front();
+        let text = v.to_string();
+        let prompt = v["event"]
+            .as_str()
+            .is_some_and(|k| PROMPT_EVENTS.contains(&k));
+        {
+            let mut q = self.events.lock().unwrap();
+            if q.len() >= MAX_QUEUED_EVENTS {
+                q.pop_front();
+            }
+            q.push_back(text.clone());
         }
-        q.push_back(v.to_string());
+        let listener = *self.listener.lock().unwrap();
+        if let (true, Some(l)) = (prompt, listener)
+            && let Ok(c) = CString::new(text)
+        {
+            (l.f)(l.ctx as *mut std::ffi::c_void, c.as_ptr());
+        }
     }
 
     fn id(&self) -> u64 {
@@ -116,6 +146,7 @@ fn start(cfg: StartConfig) -> anyhow::Result<AirlinkNode> {
         events: Mutex::new(VecDeque::new()),
         pairings: Mutex::new(HashMap::new()),
         next_id: AtomicU64::new(1),
+        listener: Mutex::new(None),
     });
     let mut rx = node.subscribe();
     let pump = shared.clone();
@@ -269,7 +300,35 @@ pub unsafe extern "C" fn airlink_respond(
     let Some(n) = (unsafe { node_ref(node) }) else {
         return false;
     };
-    guard(false, || n.node.respond(request_id, accept))
+    guard(false, || {
+        let answered = n.node.respond(request_id, accept);
+        if answered {
+            // So another place showing the same request (a notification, the app) drops it.
+            n.shared.push(
+                json!({"event": "request_answered", "request_id": request_id, "accepted": accept}),
+            );
+        }
+        answered
+    })
+}
+
+/// # Safety
+/// `node` as for `node_ref`; `f` (if not None) stays callable, with `ctx`, until the node stops.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn airlink_set_prompt_listener(
+    node: *mut AirlinkNode,
+    f: Option<AirlinkPromptFn>,
+    ctx: *mut std::ffi::c_void,
+) {
+    let Some(n) = (unsafe { node_ref(node) }) else {
+        return;
+    };
+    guard((), || {
+        *n.shared.listener.lock().unwrap() = f.map(|f| Listener {
+            f,
+            ctx: ctx as usize,
+        });
+    })
 }
 
 /// # Safety

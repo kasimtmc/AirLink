@@ -92,6 +92,8 @@ public:
     std::vector<Transfer> transfers() const;  // newest first
     std::optional<Prompt> prompt() const;      // the oldest unanswered one
     std::optional<OutgoingPairing> outgoing() const;
+    // Files handed to the app from outside, waiting for the user to pick a device (empty: none).
+    std::vector<std::string> share() const;
     std::string peerName(const std::string& id) const;
 
     // Messages for a snackbar, and clipboard texts from other devices, since the last call.
@@ -110,6 +112,8 @@ public:
     void sendClipboard(const std::string& peerId, const std::string& text) const;
     void forget(const std::string& peerId) const;
     void clearFinishedTransfers() const;
+    void shareTo(const std::string& peerId) const;
+    void cancelShare() const;
 
     bool operator==(const App& other) const { return impl_ == other.impl_; }
 

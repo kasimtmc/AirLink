@@ -1,12 +1,12 @@
 package dev.airlink.airlink;
 
+import android.Manifest;
 import android.content.ClipData;
-import android.content.Context;
 import android.content.Intent;
+import android.content.pm.PackageManager;
 import android.database.Cursor;
 import android.media.MediaScannerConnection;
 import android.net.Uri;
-import android.net.wifi.WifiManager;
 import android.os.Build;
 import android.os.Bundle;
 import android.os.Environment;
@@ -23,32 +23,75 @@ import java.util.List;
 import dev.kompoz.KompozActivity;
 
 // All UI is drawn by Kompoz in native code (libmain.so). This activity adds what AirLink needs from
-// Android: the multicast lock for mDNS, where files go, the device's name, and the file picker.
+// Android: the background service, where files go, the device's name, the file picker, and files
+// shared to AirLink from other apps (the share sheet).
 public class MainActivity extends KompozActivity {
     private static final int PICK_FILES = 7001;
 
-    // Android drops incoming multicast (mDNS) unless an app holds this lock.
-    private WifiManager.MulticastLock multicastLock;
+    static volatile boolean visible;  // on screen: requests show as the app's dialogs, not notifications
+    private static MainActivity current;
+
+    static MainActivity current() {
+        return current;
+    }
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
-        WifiManager wifi = (WifiManager) getApplicationContext().getSystemService(Context.WIFI_SERVICE);
-        if (wifi != null) {
-            multicastLock = wifi.createMulticastLock("airlink-mdns");
-            multicastLock.setReferenceCounted(false);
-            multicastLock.acquire();
-        }
+        AirLinkService.appContext = getApplicationContext();
         super.onCreate(savedInstanceState);  // loads libmain.so
-        // Copies staged for sending by an earlier run.
-        new Thread(() -> deleteTree(new File(getCacheDir(), "airlink_send")), "airlink-clean").start();
+        current = this;
+        cleanStaged(System.nanoTime());
         nativeInit(this, getFilesDir().getAbsolutePath(), downloadDir(), deviceName());
+        AirLinkService.start(this);
+        if (Build.VERSION.SDK_INT >= 33 && checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED)
+            requestPermissions(new String[]{Manifest.permission.POST_NOTIFICATIONS}, 1);
+        shared(getIntent());
+    }
+
+    @Override
+    protected void onNewIntent(Intent intent) {
+        super.onNewIntent(intent);
+        shared(intent);
+    }
+
+    @Override
+    protected void onResume() {
+        super.onResume();
+        visible = true;
+    }
+
+    @Override
+    protected void onPause() {
+        visible = false;
+        super.onPause();
     }
 
     @Override
     protected void onDestroy() {
-        if (multicastLock != null) multicastLock.release();
-        multicastLock = null;
+        if (current == this) current = null;
         super.onDestroy();
+    }
+
+    // Files from another app's Share menu: copied, then the app asks which device gets them.
+    private void shared(Intent intent) {
+        if (intent == null) return;
+        String action = intent.getAction();
+        List<Uri> uris = new ArrayList<>();
+        if (Intent.ACTION_SEND.equals(action)) {
+            Uri uri = intent.getParcelableExtra(Intent.EXTRA_STREAM);
+            if (uri != null) uris.add(uri);
+        } else if (Intent.ACTION_SEND_MULTIPLE.equals(action)) {
+            ArrayList<Uri> list = intent.getParcelableArrayListExtra(Intent.EXTRA_STREAM);
+            if (list != null) uris.addAll(list);
+        }
+        if (uris.isEmpty()) return;
+        setIntent(new Intent(this, MainActivity.class));  // handled: not again when recreated
+        stage(uris, true);
+    }
+
+    /** A request notification's button (PromptReceiver), on the UI thread. */
+    static void respond(long requestId, boolean accept) {
+        nativeRespond(requestId, accept);
     }
 
     // Download/AirLink, so files are easy to find (apps may write there directly on Android 11+,
@@ -113,20 +156,20 @@ public class MainActivity extends KompozActivity {
                 uris.add(data.getData());
             }
         }
-        stage(uris);
+        stage(uris, false);
     }
 
     /** Files dropped from another app (content:// URIs): copied, then given to nativeFilesPicked. */
     public void stageUris(String[] uris) {
         List<Uri> list = new ArrayList<>();
         for (String u : uris) list.add(Uri.parse(u));
-        stage(list);
+        stage(list, false);
     }
 
     // content:// URIs have no path: copy them into the cache (each in a folder of its own, so
     // equal names don't collide), off the UI thread, then hand the paths to native code. A drop's
     // URIs stay readable until the next drop (KompozView holds its DragAndDropPermissions).
-    private void stage(List<Uri> uris) {
+    private void stage(List<Uri> uris, boolean share) {
         new Thread(() -> {
             List<String> paths = new ArrayList<>();
             // A folder per batch: an earlier batch may still be being sent.
@@ -146,7 +189,10 @@ public class MainActivity extends KompozActivity {
                 }
             }
             String[] result = paths.toArray(new String[0]);
-            runOnUiThread(() -> nativeFilesPicked(result));
+            runOnUiThread(() -> {
+                if (share) nativeShared(result);
+                else nativeFilesPicked(result);
+            });
         }, "airlink-pick").start();
     }
 
@@ -162,6 +208,22 @@ public class MainActivity extends KompozActivity {
         return last != null ? last.replace('/', '_') : "file";
     }
 
+    // Copies staged for sending by earlier runs (a folder per batch, named by System.nanoTime()).
+    private void cleanStaged(long before) {
+        File root = new File(getCacheDir(), "airlink_send");
+        new Thread(() -> {
+            File[] batches = root.listFiles();
+            if (batches == null) return;
+            for (File batch : batches) {
+                try {
+                    if (Long.parseLong(batch.getName()) < before) deleteTree(batch);
+                } catch (NumberFormatException e) {
+                    deleteTree(batch);
+                }
+            }
+        }, "airlink-clean").start();
+    }
+
     private static void deleteTree(File f) {
         File[] children = f.listFiles();
         if (children != null) for (File c : children) deleteTree(c);
@@ -171,4 +233,8 @@ public class MainActivity extends KompozActivity {
     private static native void nativeInit(MainActivity activity, String filesDir, String downloadDir, String deviceName);
 
     private static native void nativeFilesPicked(String[] paths);
+
+    private static native void nativeShared(String[] paths);
+
+    private static native void nativeRespond(long requestId, boolean accept);
 }

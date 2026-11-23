@@ -26,6 +26,18 @@ void pickFiles(std::function<void(std::vector<std::string>)> done);
 // paths, maybe on another thread.
 void stageUris(const std::vector<std::string>& uris, std::function<void(std::vector<std::string>)> done);
 
+// Handles the command line (desktop): `airlink --send FILE...` or `airlink FILE...` from a file
+// manager's menu. If AirLink already runs, the files go to it and this process exits; otherwise
+// they are kept for the share handler and this instance serves later launches.
+void handleLaunch(int argc, char** argv);
+
+// Files handed to the app from outside (a file manager's menu, Android's share sheet, the command
+// line). Files that came before a handler was set are given to it at once. May be called on any thread.
+void setShareHandler(std::function<void(std::vector<std::string>)> handler);
+
+// The core started: Android hooks its background notifications to it. `node` is an AirlinkNode*.
+void nodeStarted(void* node);
+
 // Files that arrived (Android makes them visible to the gallery and file apps).
 void filesReceived(const std::vector<std::string>& paths);
 

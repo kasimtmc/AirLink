@@ -47,6 +47,7 @@ struct App::Impl {
     MutableState<std::vector<Transfer>> transfers = mutableStateOf(std::vector<Transfer>{});
     MutableState<std::vector<Prompt>> prompts = mutableStateOf(std::vector<Prompt>{});
     MutableState<std::optional<OutgoingPairing>> outgoing = mutableStateOf(std::optional<OutgoingPairing>{});
+    MutableState<std::vector<std::string>> share = mutableStateOf(std::vector<std::string>{});
 
     std::vector<std::string> notices;
     std::vector<std::string> incomingClipboard;
@@ -56,6 +57,7 @@ struct App::Impl {
     // Filled by the platform's file picker on any thread, applied in pump().
     std::mutex pickedMutex;
     std::vector<std::pair<std::string, std::vector<std::string>>> picked;
+    std::vector<std::string> shared;  // from platform::setShareHandler, any thread
 
     ~Impl() {
         if (node) airlink_stop(node);
@@ -88,6 +90,7 @@ struct App::Impl {
                           .downloadDir = info["download_dir"].str()});
         refreshPeers();
         ready.set(true);
+        platform::nodeStarted(node);
     }
 
     void refreshPeers() {
@@ -137,6 +140,8 @@ struct App::Impl {
             Prompt p{.requestId = e["request_id"].u64(), .peerName = e["peer"]["name"].str(), .totalSize = e["total_size"].i64()};
             for (const auto& f : e["files"].array()) p.files.push_back({f["path"].str(), f["size"].i64()});
             prompts.update([&](std::vector<Prompt>& list) { list.push_back(std::move(p)); });
+        } else if (kind == "request_answered") {
+            removePrompt(e["request_id"].u64());  // answered elsewhere (a notification's button)
         } else if (kind == "request_cancelled") {
             uint64_t id = e["request_id"].u64();
             bool open = std::any_of(prompts.peek().begin(), prompts.peek().end(),
@@ -214,7 +219,17 @@ struct App::Impl {
 };
 
 App App::get() {
-    static App app(std::make_shared<Impl>());
+    static App app = [] {
+        auto impl = std::make_shared<Impl>();
+        std::weak_ptr<Impl> weak = impl;
+        platform::setShareHandler([weak](std::vector<std::string> paths) {
+            if (auto s = weak.lock()) {
+                std::lock_guard lock(s->pickedMutex);
+                s->shared.insert(s->shared.end(), paths.begin(), paths.end());
+            }
+        });
+        return App(impl);
+    }();
     return app;
 }
 
@@ -227,10 +242,14 @@ void App::pump() const {
     while (char* raw = airlink_poll_event(s.node)) s.handle(json::Value::parse(takeString(raw)));
 
     std::vector<std::pair<std::string, std::vector<std::string>>> picked;
+    std::vector<std::string> shared;
     {
         std::lock_guard lock(s.pickedMutex);
         picked.swap(s.picked);
+        shared.swap(s.shared);
     }
+    if (!shared.empty())
+        s.share.update([&](std::vector<std::string>& list) { list.insert(list.end(), shared.begin(), shared.end()); });
     for (auto& [peer, paths] : picked)
         if (!paths.empty()) sendFiles(peer, paths);
 
@@ -266,6 +285,15 @@ std::optional<Prompt> App::prompt() const {
 }
 
 std::optional<OutgoingPairing> App::outgoing() const { return impl_->outgoing.get(); }
+std::vector<std::string> App::share() const { return impl_->share.get(); }
+
+void App::shareTo(const std::string& peerId) const {
+    auto paths = impl_->share.peek();
+    impl_->share.set({});
+    if (!paths.empty()) sendFiles(peerId, paths);
+}
+
+void App::cancelShare() const { impl_->share.set({}); }
 
 std::string App::peerName(const std::string& id) const {
     for (const Peer& p : impl_->peers.get())

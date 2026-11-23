@@ -12,6 +12,7 @@
  *        peer_discovered, peer_lost, pairing_request, pairing_completed, request_cancelled,
  *        file_offer, transfer_pending, transfer_progress, transfer_completed,
  *        transfer_failed, clipboard_received
+ *      request_answered {"request_id","accepted"}: airlink_respond took an answer
  *      Operation results:
  *        {"event":"op_result","op":N,"ok":true,"value":...}
  *        {"event":"op_result","op":N,"ok":false,"error":"..."}
@@ -54,6 +55,14 @@ char* airlink_peers(AirlinkNode* node);
 
 /* Answers a pairing_request or file_offer event. False if it is no longer pending. */
 bool airlink_respond(AirlinkNode* node, uint64_t request_id, bool accept);
+
+/* Hears, on the library's own thread and as they happen, the events that ask the user something
+ * or take such a question back: pairing_request, file_offer, request_cancelled and
+ * request_answered (the JSON is only valid during the call). For showing them while the app's UI
+ * is not running (Android's notifications); they are still queued for airlink_poll_event too.
+ * NULL removes it. */
+typedef void (*airlink_prompt_fn)(void* ctx, const char* event_json);
+void airlink_set_prompt_listener(AirlinkNode* node, airlink_prompt_fn listener, void* ctx);
 
 /* Removes a paired device. */
 bool airlink_forget(AirlinkNode* node, const char* peer_id);

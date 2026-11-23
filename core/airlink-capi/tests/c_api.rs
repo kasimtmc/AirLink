@@ -57,6 +57,16 @@ impl Drop for N {
     }
 }
 
+static HEARD: std::sync::Mutex<Vec<String>> = std::sync::Mutex::new(Vec::new());
+
+extern "C" fn heard(_ctx: *mut std::ffi::c_void, json: *const c_char) {
+    let v: Value = serde_json::from_str(unsafe { CStr::from_ptr(json) }.to_str().unwrap()).unwrap();
+    HEARD
+        .lock()
+        .unwrap()
+        .push(v["event"].as_str().unwrap().to_owned());
+}
+
 #[test]
 fn pair_send_and_clipboard_through_the_c_api() {
     let tmp = tempfile::tempdir().unwrap();
@@ -80,6 +90,9 @@ fn pair_send_and_clipboard_through_the_c_api() {
         })
     });
 
+    // b shows prompts outside its UI too (Android's notifications).
+    unsafe { airlink_set_prompt_listener(b.0, Some(heard), std::ptr::null_mut()) };
+
     let op = unsafe { airlink_start_pairing(a.0, c(&b_id).as_ptr()) };
     let (pairing, code) = a.wait(|e| {
         if e["event"] == "op_result" && e["op"] == op {
@@ -93,6 +106,14 @@ fn pair_send_and_clipboard_through_the_c_api() {
     });
     assert_eq!(code, b_code);
     assert!(unsafe { airlink_respond(b.0, req, true) });
+    assert_eq!(
+        *HEARD.lock().unwrap(),
+        ["pairing_request", "request_answered"]
+    );
+    assert!(
+        !unsafe { airlink_respond(b.0, req, true) },
+        "answered once only"
+    );
     let done = a.op(unsafe { airlink_confirm_pairing(a.0, pairing, true) });
     assert_eq!(done["value"], true, "{done}");
 

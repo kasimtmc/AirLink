@@ -4,6 +4,7 @@
 
 #include "app_icons.hpp"
 #include "app_state.hpp"
+#include "platform.hpp"
 
 using namespace kompoz;
 using namespace airlink;
@@ -34,6 +35,11 @@ static std::vector<std::string> droppedUris(const DragAndDropEvent& e) {
     for (const auto& item : e.data->toClipEntry().items)
         if (item.uri && !item.uri->starts_with("file://")) uris.push_back(*item.uri);
     return uris;
+}
+
+static std::string fileName(const std::string& path) {
+    size_t slash = path.find_last_of("/\\");
+    return slash == std::string::npos ? path : path.substr(slash + 1);
 }
 
 static std::string spacedCode(const std::string& code) {
@@ -106,6 +112,39 @@ fun Home() {
 
     IncomingPrompt(app)
     OutgoingPairingDialog(app)
+    ShareDialog(app)
+}
+
+// Files handed to AirLink from outside (a file manager's "Send with AirLink", Android's share
+// sheet): which device gets them.
+@Kompozable
+fun ShareDialog(app: App) {
+    val files = app.share()
+    if (files.isNotEmpty() && app.ready()) {
+        val paired = app.pairedPeers()
+        AlertDialog(
+            onDismissRequest = { app.cancelShare() },
+            icon = { Icon(AppIcons.Upload, contentDescription = null) },
+            title = { Text(if (files.size == 1) "${fileName(files.first())} gönderilsin" else "${files.size} dosya gönderilsin") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    if (paired.isEmpty()) {
+                        Text("Henüz eşleşmiş cihaz yok. Önce bir cihazla eşleşin.")
+                    } else {
+                        Text("Hangi cihaza?", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        for (peer in paired) {
+                            OutlinedButton(onClick = { app.shareTo(peer.id) }, modifier = Modifier.fillMaxWidth(), enabled = peer.online) {
+                                Icon(AppIcons.forPlatform(peer.platform), contentDescription = null, modifier = Modifier.size(18.dp))
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text(if (peer.online) peer.name else "${peer.name} (çevrimdışı)", modifier = Modifier.weight(1f))
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton = { TextButton(onClick = { app.cancelShare() }) { Text("Vazgeç") } },
+        )
+    }
 }
 
 @Kompozable
@@ -383,7 +422,9 @@ fun OutgoingPairingDialog(app: App) {
     }
 }
 
-kompoz::Application kompoz::createApplication(int, char**) {
+kompoz::Application kompoz::createApplication(int argc, char** argv) {
+    // `airlink --send FILE...`: to the running instance if there is one (this process then exits).
+    airlink::platform::handleLaunch(argc, argv);
     // Create the app's states here, outside any composition's snapshot.
     App::get();
     return {.title = "AirLink", .content = [] { AirLinkApp(); }};
