@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["core/airlink-core", "core/airlink-cli", "app/rust"]
+members = ["core/airlink-core", "core/airlink-cli", "core/airlink-capi"]
 
 [workspace.package]
 version = "0.1.0"

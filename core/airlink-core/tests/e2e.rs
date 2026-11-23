@@ -202,3 +202,80 @@ async fn unpaired_device_cannot_send() {
     assert_eq!(a2.info().id, a_id);
     assert!(a2.is_trusted(&b.info().id));
 }
+
+#[tokio::test]
+async fn sender_giving_up_cancels_the_prompt() {
+    let tmp = tempfile::tempdir().unwrap();
+    let a = node(&tmp.path().join("a"), "Alpha", false).await;
+    let b = node(&tmp.path().join("b"), "Beta", false).await;
+    assert!(pair(&a, &b, true).await);
+    std::fs::write(tmp.path().join("x.txt"), b"x").unwrap();
+
+    let mut a_events = a.subscribe();
+    let mut b_events = b.subscribe();
+    let send = {
+        let a = a.clone();
+        let b_id = b.info().id.clone();
+        let p = vec![tmp.path().join("x.txt")];
+        tokio::spawn(async move { a.send_files(&b_id, &p).await })
+    };
+    // Sender sees "waiting for acceptance" right away.
+    let pending_total = next_matching(&mut a_events, |e| match e {
+        Event::TransferPending {
+            bytes_total,
+            file_count,
+            ..
+        } => Some((file_count, bytes_total)),
+        _ => None,
+    })
+    .await;
+    assert_eq!(pending_total, (1, 1));
+    let req = next_matching(&mut b_events, |e| match e {
+        Event::FileOffer { request_id, .. } => Some(request_id),
+        _ => None,
+    })
+    .await;
+
+    // Sender gives up before the receiver answers.
+    send.abort();
+    let cancelled = next_matching(&mut b_events, |e| match e {
+        Event::RequestCancelled { request_id } => Some(request_id),
+        _ => None,
+    })
+    .await;
+    assert_eq!(cancelled, req);
+    assert!(
+        !b.respond(req, true),
+        "a cancelled request can no longer be answered"
+    );
+}
+
+/// Reproduces the PC -> phone bug: after `a` pairs with `b` and `b` sends to
+/// `a`, `a` caches the connection `b` opened and reuses it to send back. `b`
+/// opened that connection itself, so it must still accept requests on it.
+#[tokio::test]
+async fn requests_work_over_a_reused_connection_in_both_directions() {
+    let tmp = tempfile::tempdir().unwrap();
+    let a = node(&tmp.path().join("a"), "Alpha", true).await;
+    let b = node(&tmp.path().join("b"), "Beta", true).await;
+    assert!(pair(&a, &b, true).await);
+    let f = tmp.path().join("f.txt");
+    std::fs::write(&f, b"ping").unwrap();
+
+    let wait = Duration::from_secs(10);
+    // b -> a: b opens a fresh connection; a caches it as its route to b.
+    timeout(wait, b.send_files(&a.info().id, std::slice::from_ref(&f)))
+        .await
+        .expect("b -> a timed out")
+        .unwrap();
+    // a -> b over the connection b opened (previously hung forever).
+    timeout(wait, a.send_files(&b.info().id, std::slice::from_ref(&f)))
+        .await
+        .expect("a -> b over reused connection timed out")
+        .unwrap();
+    timeout(wait, a.send_clipboard(&b.info().id, "geri"))
+        .await
+        .expect("clipboard over reused connection timed out")
+        .unwrap();
+    assert!(tmp.path().join("b/downloads/f.txt").exists());
+}

@@ -124,6 +124,18 @@ pub enum Event {
         files: Vec<FileMeta>,
         total_size: u64,
     },
+    /// A prompt (`PairingRequest` / `FileOffer`) is no longer answerable:
+    /// the other side gave up, disconnected, or it timed out. Dismiss it.
+    RequestCancelled {
+        request_id: u64,
+    },
+    /// Outgoing offer sent; waiting for the receiver to accept.
+    TransferPending {
+        transfer_id: String,
+        peer_id: String,
+        file_count: usize,
+        bytes_total: u64,
+    },
     TransferProgress {
         transfer_id: String,
         peer_id: String,
@@ -310,6 +322,7 @@ impl Node {
     /// to the user, then call [`OutgoingPairing::confirm`].
     pub async fn start_pairing(&self, addr: SocketAddr) -> Result<OutgoingPairing> {
         let (conn, peer) = self.inner.connect_addr(addr).await?;
+        self.inner.adopt(&conn, &peer, addr);
         if peer.id == self.inner.info.id {
             bail!("cannot pair with this device itself");
         }
@@ -467,7 +480,8 @@ impl OutgoingPairing {
 
 const DEVICE_FILE: &str = "device.json";
 
-fn read_saved_name(data_dir: &std::path::Path) -> Option<String> {
+/// The device name saved by a previous run, if any.
+pub fn read_saved_name(data_dir: &std::path::Path) -> Option<String> {
     let bytes = std::fs::read(data_dir.join(DEVICE_FILE)).ok()?;
     let v: serde_json::Value = serde_json::from_slice(&bytes).ok()?;
     v.get("device_name")?.as_str().map(str::to_owned)
@@ -568,11 +582,15 @@ async fn handle_connection(inner: Arc<Inner>, incoming: quinn::Incoming) -> Resu
             .insert(peer.id.clone(), (conn.clone(), peer.clone()));
     }
 
-    loop {
-        let (send, recv) = match conn.accept_bi().await {
-            Ok(s) => s,
-            Err(_) => break,
-        };
+    serve_streams(inner, conn, peer, addr).await;
+    Ok(())
+}
+
+/// Handles requests the peer opens on `conn` until it closes. Runs for every
+/// connection, whichever side opened it: both sides cache and reuse
+/// connections, so either may send requests over it.
+async fn serve_streams(inner: Arc<Inner>, conn: Connection, peer: DeviceInfo, addr: SocketAddr) {
+    while let Ok((send, recv)) = conn.accept_bi().await {
         let inner = inner.clone();
         let peer = peer.clone();
         tokio::spawn(async move {
@@ -581,7 +599,6 @@ async fn handle_connection(inner: Arc<Inner>, incoming: quinn::Incoming) -> Resu
             }
         });
     }
-    Ok(())
 }
 
 async fn handle_stream(
@@ -681,7 +698,7 @@ async fn pair_responder(
         peer: peer.clone(),
         code,
     });
-    let local = inner.await_prompt(request_id, rx).await;
+    let local = inner.await_prompt(request_id, rx, send).await;
 
     write_msg(send, &Message::PairConfirm { accepted: local }).await?;
     let remote = match check(timeout(REMOTE_PROMPT_TIMEOUT, read_msg(recv)).await??)? {
@@ -726,7 +743,7 @@ async fn receive_files(
             files: files.clone(),
             total_size: total,
         });
-        inner.await_prompt(request_id, rx).await
+        inner.await_prompt(request_id, rx, send).await
     };
     write_msg(send, &Message::FileOfferResponse { accepted }).await?;
     if !accepted {
@@ -820,10 +837,19 @@ impl Inner {
         (id, rx)
     }
 
-    async fn await_prompt(&self, id: u64, rx: oneshot::Receiver<bool>) -> bool {
-        let answer = matches!(timeout(PROMPT_TIMEOUT, rx).await, Ok(Ok(true)));
-        self.pending.lock().unwrap().remove(&id);
-        answer
+    /// Waits for the local answer to a prompt. Gives up (and emits
+    /// `RequestCancelled`) on timeout or when the remote side stops listening
+    /// on `send` (it cancelled, timed out, or the connection dropped).
+    async fn await_prompt(&self, id: u64, rx: oneshot::Receiver<bool>, send: &SendStream) -> bool {
+        let answer = tokio::select! {
+            r = timeout(PROMPT_TIMEOUT, rx) => r.ok().and_then(Result::ok),
+            _ = send.stopped() => None,
+        };
+        let unanswered = self.pending.lock().unwrap().remove(&id).is_some();
+        if answer.is_none() && unanswered {
+            self.emit(Event::RequestCancelled { request_id: id });
+        }
+        answer.unwrap_or(false)
     }
 
     fn finish_pairing(&self, peer: &DeviceInfo, addr: SocketAddr, success: bool) {
@@ -863,6 +889,16 @@ impl Inner {
             addrs.push(a);
         }
         addrs
+    }
+
+    /// Starts serving the peer's requests on an outgoing connection we keep.
+    fn adopt(self: &Arc<Self>, conn: &Connection, peer: &DeviceInfo, addr: SocketAddr) {
+        tokio::spawn(serve_streams(
+            self.clone(),
+            conn.clone(),
+            peer.clone(),
+            addr,
+        ));
     }
 
     /// Opens a connection and exchanges hellos. Does not check trust.
@@ -914,6 +950,7 @@ impl Inner {
                     if peer.id != self.info.id && expect.is_none_or(|e| e == peer.id) =>
                 {
                     set.abort_all();
+                    self.adopt(&conn, &peer, addr);
                     return Ok((conn, peer, addr));
                 }
                 Ok((conn, _)) => {
@@ -973,6 +1010,12 @@ impl Inner {
             },
         )
         .await?;
+        self.emit(Event::TransferPending {
+            transfer_id: transfer_id.to_owned(),
+            peer_id: peer_id.to_owned(),
+            file_count: files.len(),
+            bytes_total: total,
+        });
 
         match check(timeout(REMOTE_PROMPT_TIMEOUT, read_msg(&mut recv)).await??)? {
             Message::FileOfferResponse { accepted: true } => {}

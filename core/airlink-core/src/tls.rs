@@ -123,11 +123,13 @@ impl ClientCertVerifier for AcceptAnyCert {
 fn transport_config() -> Arc<quinn::TransportConfig> {
     let mut t = quinn::TransportConfig::default();
     t.max_idle_timeout(Some(
-        Duration::from_secs(30)
+        // Short enough that a vanished peer (crash, sleep, Wi-Fi loss) is
+        // noticed quickly; keep-alives stop idle-but-alive links from expiring.
+        Duration::from_secs(12)
             .try_into()
             .expect("valid idle timeout"),
     ));
-    t.keep_alive_interval(Some(Duration::from_secs(10)));
+    t.keep_alive_interval(Some(Duration::from_secs(4)));
     // Larger windows for high-throughput LAN transfers.
     t.stream_receive_window((16u32 * 1024 * 1024).into());
     t.receive_window((64u32 * 1024 * 1024).into());

@@ -108,7 +108,12 @@ async fn main() -> Result<()> {
             cfg.port = None;
             cfg.advertise = false;
             let node = Node::start(cfg).await?;
-            let res = one_shot(&node, cmd).await;
+            // Ctrl+C closes connections cleanly, so the other side cancels
+            // its prompt immediately instead of waiting for a timeout.
+            let res = tokio::select! {
+                r = one_shot(&node, cmd) => r,
+                _ = tokio::signal::ctrl_c() => Err(anyhow::anyhow!("cancelled")),
+            };
             node.shutdown().await;
             res
         }
@@ -368,6 +373,14 @@ async fn run(cfg: NodeConfig, clipboard_sync: bool, json: bool) -> Result<()> {
                     Event::PeerDiscovered { peer } if !json => {
                         let tag = if node.is_trusted(&peer.id) { " (paired)" } else { "" };
                         println!("• Found {} [{}]{tag}", peer.name, peer.platform);
+                    }
+                    Event::RequestCancelled { request_id } => {
+                        if let Some(pos) = prompts.iter().position(|&id| id == request_id) {
+                            prompts.remove(pos);
+                            if !json {
+                                println!("⨯ The other device cancelled the request; no answer needed.");
+                            }
+                        }
                     }
                     Event::PairingRequest { request_id, peer, code } => {
                         prompts.push_back(request_id);

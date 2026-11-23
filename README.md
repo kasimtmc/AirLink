@@ -21,11 +21,14 @@ Linux, Windows ve Android cihazlar arasında kesintisiz bağlantı sağlar:
 
 ```
 core/airlink-core   Rust çekirdek kütüphane (protokol, ağ, aktarım)
+core/airlink-capi   Çekirdeğin C arayüzü (include/airlink.h)
 core/airlink-cli    Geliştirme ve test için komut satırı aracı
-app/                Flutter arayüzü (Linux / Windows / Android)
-app/rust            Flutter ↔ Rust köprüsü (flutter_rust_bridge)
+app/                Kompoz (C++20) arayüzü: Linux, Windows, Android tek kod
+app/android         Android Gradle projesi (KompozActivity üzerine MainActivity)
 docs/protocol.md    Protokol tanımı
 ```
+
+Arayüz [Kompoz](../kompoz) ile yazılıyor; KompozR tamamlandığında arayüz Rust'a taşınacak.
 
 ## Hızlı başlangıç (CLI)
 
@@ -61,18 +64,21 @@ Eşleştikten sonra dosya ya da klasör gönderebilirsiniz:
 
 Gelen dosyalar varsayılan olarak `~/Downloads/AirLink` klasörüne kaydedilir.
 
-## Masaüstü uygulaması (Flutter)
+## Uygulama (Kompoz)
 
-Gerekenler: Flutter SDK, Rust, `flutter_rust_bridge_codegen` 2.13.0.
+Kompoz deposunun AirLink'in yanında (`../kompoz`) olması gerekir; başka yerdeyse `-DKOMPOZ_DIR=...`.
+
+Masaüstü (Linux):
 
 ```bash
-cd app && flutter run -d linux
+cmake -S app -B app/build -G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo && cmake --build app/build
+./app/build/airlink
 ```
 
-Rust API'si (`app/rust/src/api/`) değişirse Dart bağlantılarını yeniden üretin:
+Android (NDK 29.0.14206865, SDK CMake 4.1.2, `cargo-ndk`, Rust hedefi `aarch64-linux-android`):
 
 ```bash
-cd app && flutter_rust_bridge_codegen generate
+cd app/android && ./gradlew installDebug
 ```
 
 ## Lisans
