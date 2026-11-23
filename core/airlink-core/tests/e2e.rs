@@ -310,3 +310,45 @@ async fn app_messages_reach_paired_devices_only() {
         .unwrap_err();
     assert!(format!("{err:#}").contains("not paired"));
 }
+
+#[tokio::test]
+async fn media_frames_latest_wins() {
+    let tmp = tempfile::tempdir().unwrap();
+    let a = node(&tmp.path().join("a"), "Alpha", true).await;
+    let b = node(&tmp.path().join("b"), "Beta", true).await;
+    assert!(pair(&a, &b, true).await);
+    let mut b_events = b.subscribe();
+    let (a_id, b_id) = (a.info().id.clone(), b.info().id.clone());
+
+    for i in 0..5u8 {
+        a.send_media(&b_id, "screen", vec![i; 100_000]).unwrap();
+    }
+    next_matching(&mut b_events, |e| {
+        matches!(e, Event::MediaStarted { ref name, .. } if name == "screen").then_some(())
+    })
+    .await;
+    // Frames arrive; whatever was taken last is the newest one sent.
+    let last = timeout(Duration::from_secs(5), async {
+        loop {
+            if let Some(f) = b.take_media(&a_id, "screen")
+                && f[0] == 4
+            {
+                return f;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("the newest frame should arrive");
+    assert_eq!(last.len(), 100_000);
+    assert!(
+        b.take_media(&a_id, "screen").is_none(),
+        "taken frames are gone"
+    );
+
+    a.stop_media(&b_id, "screen");
+    next_matching(&mut b_events, |e| {
+        matches!(e, Event::MediaStopped { .. }).then_some(())
+    })
+    .await;
+}

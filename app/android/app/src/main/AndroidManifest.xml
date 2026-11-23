@@ -16,17 +16,34 @@
     <!-- Reachable while the screen is closed: a foreground service, and notifications for requests -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CONNECTED_DEVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PROJECTION" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <!-- A paired computer reads and sends this phone's SMS (asked for in the app); names from contacts -->
     <uses-permission android:name="android.permission.READ_SMS" />
     <uses-permission android:name="android.permission.SEND_SMS" />
     <uses-permission android:name="android.permission.RECEIVE_SMS" />
     <uses-permission android:name="android.permission.READ_CONTACTS" />
+    <!-- Calls on the computer: who rings, the call log, answering / declining, calling a number -->
+    <uses-permission android:name="android.permission.READ_PHONE_STATE" />
+    <uses-permission android:name="android.permission.READ_CALL_LOG" />
+    <uses-permission android:name="android.permission.ANSWER_PHONE_CALLS" />
+    <uses-permission android:name="android.permission.CALL_PHONE" />
+    <!-- A calling companion: Telecom may bind AirLinkInCallService during calls (hold, mute, audio route) -->
+    <uses-permission android:name="android.permission.CALL_COMPANION_APP" />
+    <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
     <uses-feature android:name="android.hardware.telephony" android:required="false" />
     <!-- Saving received files to Download/AirLink on Android 9 and older -->
     <uses-permission
         android:name="android.permission.WRITE_EXTERNAL_STORAGE"
         android:maxSdkVersion="28" />
+
+    <!-- Advanced mode: the computer lists this phone's apps (Android 11+ package visibility) -->
+    <queries>
+        <intent>
+            <action android:name="android.intent.action.MAIN" />
+            <category android:name="android.intent.category.LAUNCHER" />
+        </intent>
+    </queries>
 
     <application
         android:label="AirLink"
@@ -59,10 +76,27 @@
         <service
             android:name=".AirLinkService"
             android:exported="false"
-            android:foregroundServiceType="connectedDevice" />
+            android:foregroundServiceType="connectedDevice|mediaProjection" />
+
+        <!-- Carries out a paired computer's touches while the screen is shared (turned on in Accessibility) -->
+        <service
+            android:name=".AirLinkAccessibility"
+            android:exported="false"
+            android:label="AirLink ekran kontrolü"
+            android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE">
+            <intent-filter>
+                <action android:name="android.accessibilityservice.AccessibilityService" />
+            </intent-filter>
+            <meta-data android:name="android.accessibilityservice" android:resource="@xml/accessibility" />
+        </service>
 
         <receiver
             android:name=".PromptReceiver"
+            android:exported="false" />
+
+        <!-- Advanced mode setup: the wireless debugging pairing code, typed into a notification -->
+        <receiver
+            android:name=".AdbPairing$Receiver"
             android:exported="false" />
 
         <!-- New SMS: told to paired computers so an open conversation updates -->
@@ -74,6 +108,17 @@
                 <action android:name="android.provider.Telephony.SMS_RECEIVED" />
             </intent-filter>
         </receiver>
+
+        <!-- Calling companion, no UI of its own: in-call controls for paired computers -->
+        <service
+            android:name=".AirLinkInCallService"
+            android:exported="true"
+            android:permission="android.permission.BIND_INCALL_SERVICE">
+            <meta-data android:name="android.telecom.IN_CALL_SERVICE_UI" android:value="false" />
+            <intent-filter>
+                <action android:name="android.telecom.InCallService" />
+            </intent-filter>
+        </service>
 
         <!-- Shares notifications with paired computers once the user allows it (Notification access) -->
         <service

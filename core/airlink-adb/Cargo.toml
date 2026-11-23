@@ -1,0 +1,13 @@
+[package]
+name = "airlink-adb"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "AirLink's advanced mode: the phone pairs with and talks to its own wireless debugging (adbd), to run a helper with shell rights"
+
+[dependencies]
+anyhow.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+mdns-sd = "0.22"
+libadb = { version = "0.9", default-features = false, features = ["tokio", "pairing", "tls"] }

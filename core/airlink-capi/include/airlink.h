@@ -11,7 +11,7 @@
  *      Node events (see airlink_core::Event):
  *        peer_discovered, peer_lost, pairing_request, pairing_completed, request_cancelled,
  *        file_offer, transfer_pending, transfer_progress, transfer_completed,
- *        transfer_failed, clipboard_received, app_message
+ *        transfer_failed, clipboard_received, app_message, media_started, media_stopped
  *      request_answered {"request_id","accepted"}: airlink_respond took an answer
  *      Operation results:
  *        {"event":"op_result","op":N,"ok":true,"value":...}
@@ -25,6 +25,7 @@
 #define AIRLINK_H
 
 #include <stdbool.h>
+#include <stddef.h>
 #include <stdint.h>
 
 #ifdef __cplusplus
@@ -86,6 +87,22 @@ uint64_t airlink_send_clipboard(AirlinkNode* node, const char* peer_id, const ch
  * ("notification.posted"...), body_json is any JSON value. Result: op_result. The other side gets
  * an app_message event {"peer", "kind", "body"}. */
 uint64_t airlink_send_message(AirlinkNode* node, const char* peer_id, const char* kind, const char* body_json);
+
+/* Media: binary frames (a screen's JPEG images) on a stream `name` to a paired device. Sending
+ * returns at once; a frame not yet written when the next is sent is dropped (the latest wins).
+ * The receiver hears media_started / media_stopped {"peer_id","name"} events and takes the newest
+ * frame with airlink_media_take (false: none new since the last take; free it with
+ * airlink_free_bytes). */
+bool airlink_media_send(AirlinkNode* node, const char* peer_id, const char* name, const uint8_t* data, size_t len);
+void airlink_media_stop(AirlinkNode* node, const char* peer_id, const char* name);
+bool airlink_media_take(AirlinkNode* node, const char* peer_id, const char* name, uint8_t** data, size_t* len);
+void airlink_free_bytes(uint8_t* data, size_t len);
+
+/* Advanced mode (Android): the phone pairs with its own wireless debugging once (the six-digit
+ * code of "Pair device with pairing code"), then runs shell commands as adbd's shell user. `dir`
+ * keeps the key adbd trusts. Results: op_result (for shell, value = its standard output). */
+uint64_t airlink_adb_pair(AirlinkNode* node, const char* dir, const char* code);
+uint64_t airlink_adb_shell(AirlinkNode* node, const char* dir, const char* command);
 
 void airlink_free_string(char* s);
 

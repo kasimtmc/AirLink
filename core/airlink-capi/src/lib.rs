@@ -485,6 +485,155 @@ pub unsafe extern "C" fn airlink_send_message(
 }
 
 /// # Safety
+/// `node` as for `node_ref`; strings valid C strings; `data` points to `len` readable bytes.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn airlink_media_send(
+    node: *mut AirlinkNode,
+    peer_id: *const c_char,
+    name: *const c_char,
+    data: *const u8,
+    len: usize,
+) -> bool {
+    let (Some(n), Some(id), Some(name)) = (
+        unsafe { node_ref(node) },
+        unsafe { read_str(peer_id) },
+        unsafe { read_str(name) },
+    ) else {
+        return false;
+    };
+    if data.is_null() {
+        return false;
+    }
+    let frame = unsafe { std::slice::from_raw_parts(data, len) }.to_vec();
+    guard(false, || {
+        let _enter = n.rt.enter(); // the writer task is spawned on the node's runtime
+        n.node.send_media(&id, &name, frame).is_ok()
+    })
+}
+
+/// # Safety
+/// `node` as for `node_ref`; strings valid C strings.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn airlink_media_stop(
+    node: *mut AirlinkNode,
+    peer_id: *const c_char,
+    name: *const c_char,
+) {
+    let (Some(n), Some(id), Some(name)) = (
+        unsafe { node_ref(node) },
+        unsafe { read_str(peer_id) },
+        unsafe { read_str(name) },
+    ) else {
+        return;
+    };
+    guard((), || n.node.stop_media(&id, &name))
+}
+
+/// # Safety
+/// `node` as for `node_ref`; strings valid C strings; `out` and `len` writable.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn airlink_media_take(
+    node: *mut AirlinkNode,
+    peer_id: *const c_char,
+    name: *const c_char,
+    out: *mut *mut u8,
+    len: *mut usize,
+) -> bool {
+    let (Some(n), Some(id), Some(name)) = (
+        unsafe { node_ref(node) },
+        unsafe { read_str(peer_id) },
+        unsafe { read_str(name) },
+    ) else {
+        return false;
+    };
+    if out.is_null() || len.is_null() {
+        return false;
+    }
+    guard(false, || match n.node.take_media(&id, &name) {
+        Some(frame) => {
+            let boxed = frame.into_boxed_slice();
+            unsafe {
+                *len = boxed.len();
+                *out = Box::into_raw(boxed) as *mut u8;
+            }
+            true
+        }
+        None => false,
+    })
+}
+
+/// # Safety
+/// `data`/`len` as returned by `airlink_media_take`, not yet freed.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn airlink_free_bytes(data: *mut u8, len: usize) {
+    if !data.is_null() {
+        drop(unsafe { Box::from_raw(std::ptr::slice_from_raw_parts_mut(data, len)) });
+    }
+}
+
+/// Advanced mode (Android): pairs with this device's own wireless debugging. `dir` keeps the key.
+/// Result: op_result.
+///
+/// # Safety
+/// `node` as for `node_ref`; strings valid C strings.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn airlink_adb_pair(
+    node: *mut AirlinkNode,
+    dir: *const c_char,
+    code: *const c_char,
+) -> u64 {
+    let (Some(n), Some(dir), Some(code)) = (
+        unsafe { node_ref(node) },
+        unsafe { read_str(dir) },
+        unsafe { read_str(code) },
+    ) else {
+        return 0;
+    };
+    guard(0, || {
+        let op = n.shared.id();
+        let shared = n.shared.clone();
+        n.rt.spawn(async move {
+            shared.op_result(
+                op,
+                airlink_adb::pair(std::path::Path::new(&dir), &code).await,
+            );
+        });
+        op
+    })
+}
+
+/// Advanced mode: runs `command` as the shell user over this device's wireless debugging.
+/// Result: op_result, value = its standard output.
+///
+/// # Safety
+/// `node` as for `node_ref`; strings valid C strings.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn airlink_adb_shell(
+    node: *mut AirlinkNode,
+    dir: *const c_char,
+    command: *const c_char,
+) -> u64 {
+    let (Some(n), Some(dir), Some(command)) = (
+        unsafe { node_ref(node) },
+        unsafe { read_str(dir) },
+        unsafe { read_str(command) },
+    ) else {
+        return 0;
+    };
+    guard(0, || {
+        let op = n.shared.id();
+        let shared = n.shared.clone();
+        n.rt.spawn(async move {
+            shared.op_result(
+                op,
+                airlink_adb::shell(std::path::Path::new(&dir), &command).await,
+            );
+        });
+        op
+    })
+}
+
+/// # Safety
 /// `s` is NULL or a string returned by this library, not yet freed.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn airlink_free_string(s: *mut c_char) {

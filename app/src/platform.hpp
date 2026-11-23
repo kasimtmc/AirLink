@@ -58,8 +58,31 @@ void showDesktopNotification(const std::string& title, const std::string& body);
 bool canShareSms();
 bool smsAccessGranted();
 void requestSmsAccess();
-// A computer's "sms.*" request to this phone (body: JSON); answered with App::sendTo.
+// A computer's "sms.*", "contacts.*", "call.*" or "calls.*" request to this phone (body: JSON);
+// answered with App::sendTo.
 void smsRequest(const std::string& peerId, const std::string& kind, const std::string& bodyJson);
+
+// ---- Calls (a phone's, seen and handled from a paired computer) -----------------------------
+
+bool canShareCalls();
+bool callAccessGranted();
+void requestCallAccess();
+
+// ---- Screen sharing (a phone's screen on a paired computer) ---------------------------------
+
+bool canShareScreen();
+bool screenControlEnabled();  // the phone carries out a computer's touches (Accessibility on)
+void openScreenControlSettings();
+
+// ---- Advanced mode (Android): the phone's own wireless debugging ----------------------------
+
+bool canUseAdvancedMode();
+// Opens Developer options and posts the notification the pairing code is typed into.
+void startAdvancedSetup();
+// The pairing's outcome, for that notification.
+void advancedSetupResult(bool ok, const std::string& message);
+// The command that starts the helper ran (or not).
+void helperStarted(bool ok, const std::string& message);
 
 // A line in the platform's log (Android's logcat, stderr on the desktop).
 void log(const std::string& line);

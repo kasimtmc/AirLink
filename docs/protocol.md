@@ -125,7 +125,20 @@ Yalnızca eşleşmiş cihazlar arasında gider. Tanımlı türler:
 | `sms.error` | telefon → PC | `{ error, request }` (`no_permission`: SMS izni verilmemiş) |
 | `contacts.search` | PC → telefon | `{ query }` → `contacts.results { query, contacts: [{ name, number, label }] }` |
 
-## 10. Gelecek sürümler (ayrılmış)
+## 10. Medya akışları
+
+Ekran görüntüsü gibi sürekli ikili veri, tek yönlü bir QUIC akışında gider:
+
+```
+[u32 uzunluk]["media" başlığı: { "type": "media", "name": "screen" }]
+[u32 uzunluk][kare baytları] [u32 uzunluk][kare baytları] ...
+```
+
+Alıcı her akışın yalnızca en son karesini tutar; gönderen, yazılamamış bir kareyi yenisi gelince atar.
+Böylece yavaş bir bağlantıda gecikme birikmez. Akışın başlatılması ve durdurulması uygulama mesajlarıyla
+istenir (`screen.start`, `screen.stop`); dokunuşlar da öyle gider (`screen.input`).
+
+## 11. Gelecek sürümler (ayrılmış)
 
 Şu mesaj aileleri sonraki fazlarda eklenecek:
 

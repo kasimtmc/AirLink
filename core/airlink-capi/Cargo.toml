@@ -11,6 +11,7 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 
 [dependencies]
 airlink-core = { path = "../airlink-core" }
+airlink-adb = { path = "../airlink-adb" }
 anyhow.workspace = true
 tokio.workspace = true
 serde.workspace = true

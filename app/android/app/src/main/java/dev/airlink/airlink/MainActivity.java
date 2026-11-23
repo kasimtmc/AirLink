@@ -48,12 +48,26 @@ public class MainActivity extends KompozActivity {
         if (Build.VERSION.SDK_INT >= 33 && checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED)
             requestPermissions(new String[]{Manifest.permission.POST_NOTIFICATIONS}, 1);
         shared(getIntent());
+        if ("dev.airlink.airlink.SHARE_SCREEN".equals(getIntent().getAction())) ScreenShare.askConsent(this);
     }
 
     @Override
     protected void onNewIntent(Intent intent) {
         super.onNewIntent(intent);
         shared(intent);
+        if ("dev.airlink.airlink.SHARE_SCREEN".equals(intent.getAction())) ScreenShare.askConsent(this);
+    }
+
+    // ---- Screen sharing (ScreenShare, AirLinkAccessibility) --------------------------------
+
+    /** From native code: may a computer's touches be carried out (Accessibility turned on). */
+    static boolean screenControlEnabled() {
+        return AirLinkAccessibility.enabled();
+    }
+
+    /** From native code: opens Accessibility settings, where the user turns AirLink on. */
+    static void openScreenControlSettings() {
+        AirLinkAccessibility.openSettings();
     }
 
     @Override
@@ -104,6 +118,17 @@ public class MainActivity extends KompozActivity {
         if (a == null) return;
         a.requestPermissions(new String[]{Manifest.permission.READ_SMS, Manifest.permission.SEND_SMS,
                 Manifest.permission.RECEIVE_SMS, Manifest.permission.READ_CONTACTS}, 2);
+    }
+
+    /** From native code: whether paired computers see this phone's calls. */
+    static boolean callsGranted() {
+        return AirLinkService.appContext != null && CallBridge.granted(AirLinkService.appContext);
+    }
+
+    /** From native code: asks for the call permissions. */
+    static void requestCallPermissions() {
+        MainActivity a = current;
+        if (a != null) a.requestPermissions(CallBridge.permissions(), 3);
     }
 
     /** A request notification's button (PromptReceiver), on the UI thread. */
@@ -163,6 +188,10 @@ public class MainActivity extends KompozActivity {
     @Override
     protected void onActivityResult(int requestCode, int resultCode, Intent data) {
         super.onActivityResult(requestCode, resultCode, data);
+        if (requestCode == ScreenShare.REQUEST) {
+            ScreenShare.consentResult(this, resultCode, data);
+            return;
+        }
         if (requestCode != PICK_FILES) return;
         List<Uri> uris = new ArrayList<>();
         if (resultCode == RESULT_OK && data != null) {
@@ -252,6 +281,27 @@ public class MainActivity extends KompozActivity {
     private static native void nativeFilesPicked(String[] paths);
 
     private static native void nativeShared(String[] paths);
+
+    /** Applies the core's pending events (AirLinkService calls it while the UI loop is stopped). */
+    static void pump() {
+        nativePump();
+    }
+
+    private static native void nativePump();
+
+    /** The code typed into the advanced mode setup notification (AdbPairing). */
+    static void adbPair(String code) {
+        nativeAdbPair(code);
+    }
+
+    private static native void nativeAdbPair(String code);
+
+    /** Runs the shell command that starts the helper (AppStreams), over wireless debugging. */
+    static void startHelper(String command) {
+        nativeStartHelper(command);
+    }
+
+    private static native void nativeStartHelper(String command);
 
     private static native void nativeRespond(long requestId, boolean accept);
 }

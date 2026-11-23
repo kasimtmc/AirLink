@@ -65,6 +65,12 @@ pub enum Message {
         text: String,
     },
 
+    /// Opens a media stream (on a unidirectional stream): binary frames follow, each
+    /// `[u32 BE length][bytes]`. `name` says what it carries ("screen").
+    Media {
+        name: String,
+    },
+
     /// A message between the two devices' apps, opaque to the core: `kind` names it
     /// ("notification.posted", "sms.send"…), `body` is its JSON. Features beyond files and the
     /// clipboard ride on it.

@@ -114,6 +114,64 @@ struct ContactMatch {
     bool operator==(const ContactMatch&) const = default;
 };
 
+// An app of a paired phone (advanced mode), for its launcher on the computer.
+struct PhoneApp {
+    std::string label;
+    std::string component;  // "package/.Activity"
+    kompoz::ImageBitmap icon;
+    bool operator==(const PhoneApp&) const = default;
+};
+
+// A phone app open on the computer, on a display of its own on the phone (advanced mode).
+struct AppWindow {
+    int session = 0;
+    std::string label;
+    std::string component;
+    std::string status;  // "starting", "live", or an error
+    bool minimized = false;
+    kompoz::ImageBitmap frame;
+    bool operator==(const AppWindow&) const = default;
+};
+
+// A call ringing on a paired phone.
+struct IncomingCall {
+    std::string peerId;
+    std::string number;
+    std::string name;
+    std::string title() const { return !name.empty() ? name : !number.empty() ? number : "Bilinmeyen numara"; }
+    bool operator==(const IncomingCall&) const = default;
+};
+
+// A paired phone's call in progress, and what can be done with it from here.
+struct ActiveCall {
+    std::string peerId;
+    std::string number;
+    std::string name;
+    std::string state;  // dialing, active, held
+    bool held = false;
+    bool canHold = false;
+    bool muted = false;
+    std::string route;                // earpiece, speaker, bluetooth, wired
+    std::vector<std::string> routes;  // the ones available
+    int volume = 0;
+    int volumeMax = 0;
+    int64_t since = 0;         // ms since the epoch, for the timer
+    bool fullControl = false;  // the phone's companion InCallService is bound (hold, routes)
+    std::string title() const { return !name.empty() ? name : !number.empty() ? number : "Arama"; }
+    bool operator==(const ActiveCall&) const = default;
+};
+
+// An entry of a phone's call log.
+struct CallEntry {
+    std::string number;
+    std::string name;
+    std::string type;  // incoming, outgoing, missed, rejected, blocked, other
+    int64_t date = 0;
+    int64_t duration = 0;  // seconds
+    std::string title() const { return name.empty() ? number : name; }
+    bool operator==(const CallEntry&) const = default;
+};
+
 class App {
 public:
     // The one app state of the process.
@@ -149,6 +207,29 @@ public:
     std::string smsError() const;
     bool smsLoading() const;
     std::vector<ContactMatch> contactResults() const;  // for the latest searchContacts
+    std::optional<IncomingCall> incomingCall() const;
+    std::vector<CallEntry> callLog() const;
+    std::optional<ActiveCall> activeCall() const;
+
+    // ---- A paired phone's screen on this computer ----
+    std::string screenPeer() const;    // whose screen is open (empty: none)
+    std::string screenStatus() const;  // "asking" (the phone's user must agree), "live"
+    kompoz::ImageBitmap screenFrame() const;
+    bool canShareScreen() const;       // this phone can share its screen
+    bool screenControl() const;        // and carry out a computer's touches
+
+    // ---- Advanced mode (this phone's own wireless debugging) ----
+    bool canUseAdvancedMode() const;
+    bool advancedReady() const;        // paired, and a shell command ran as the shell user
+    std::string advancedStatus() const;
+    // On a computer: the phone's apps, and the ones open here.
+    std::vector<PhoneApp> phoneApps() const;
+    bool phoneAppsLoading() const;
+    std::vector<AppWindow> appWindows() const;
+    int activeWindow() const;  // the session shown (0: none)
+    std::string callsError() const;
+    bool canShareCalls() const;
+    bool callAccess() const;
     bool canShareSms() const;
     bool smsAccess() const;
     std::string peerName(const std::string& id) const;
@@ -181,6 +262,34 @@ public:
     void sendSms(const std::string& address, const std::string& text) const;
     void requestSmsAccess() const;
     void searchContacts(const std::string& query) const;
+    void answerCall() const;
+    void rejectCall() const;
+    void dismissCall() const;  // hides the alert; the phone goes on ringing
+    void dial(const std::string& number) const;
+    // To the phone of the call in progress: "call.hangup", "call.hold" {on}, "call.mute" {on},
+    // "call.route" {route}, "call.volume" {delta}.
+    void callControl(const std::string& kind, const std::string& bodyJson) const;
+    void startScreen(const std::string& peerId) const;
+    void stopScreen() const;
+    // A touch on the shared screen: {"type":"tap"|"long_press"|"swipe"|"back"|"home"|"recents", ...}
+    void screenInput(const std::string& bodyJson) const;
+    void openScreenControlSettings() const;
+    void startAdvancedSetup() const;
+    void advancedPair(const std::string& code) const;  // the code typed into the setup notification
+    void advancedTest() const;                         // runs `id` over wireless debugging
+    void startHelper(const std::string& command) const;  // the phone: starts the helper (AppStreams)
+    void requestPhoneApps() const;
+    void openPhoneApp(const PhoneApp& app) const;
+    void closeAppWindow(int session) const;
+    void showAppWindow(int session) const;
+    void minimizeAppWindow(int session) const;
+    // Input for an open app: {"cmd":"touch","action":"down","x":..,"y":..} and the like (helper/Server.java).
+    void appInput(int session, const std::string& bodyJson) const;
+    // This phone's frames (from any thread).
+    void sendMedia(const std::string& peerId, const std::string& name, const std::vector<uint8_t>& frame) const;
+    void stopMedia(const std::string& peerId, const std::string& name) const;
+    void requestCallLog() const;
+    void requestCallAccess() const;
     // To one paired device, from any thread (answers this phone gives a computer).
     void sendTo(const std::string& peerId, const std::string& kind, const std::string& bodyJson) const;
     // To every reachable paired device, from any thread (this phone's notifications, new SMS).

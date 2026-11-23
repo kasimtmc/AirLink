@@ -33,7 +33,25 @@ std::string cleanError(std::string e) {
     return e;
 }
 
-enum class OpKind { StartPairing, ConfirmPairing, SendFiles, SendClipboard, SendReply };
+enum class OpKind { StartPairing, ConfirmPairing, SendFiles, SendClipboard, SendReply, AdbPair, AdbTest, AdbHelper };
+
+std::vector<uint8_t> base64(const std::string& in) {
+    static const std::string chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    std::vector<uint8_t> out;
+    uint32_t buf = 0;
+    int bits = 0;
+    for (char c : in) {
+        size_t v = chars.find(c);
+        if (v == std::string::npos) continue;  // '=', newlines
+        buf = (buf << 6) | uint32_t(v);
+        bits += 6;
+        if (bits >= 8) {
+            bits -= 8;
+            out.push_back(uint8_t(buf >> bits));
+        }
+    }
+    return out;
+}
 
 }  // namespace
 
@@ -59,6 +77,39 @@ struct App::Impl {
     MutableState<bool> smsAccess = mutableStateOf(false);
     MutableState<std::vector<ContactMatch>> contactResults = mutableStateOf(std::vector<ContactMatch>{});
     std::string contactQuery;  // answers to older searches are dropped
+    MutableState<std::optional<IncomingCall>> incomingCall = mutableStateOf(std::optional<IncomingCall>{});
+    MutableState<std::vector<CallEntry>> callLog = mutableStateOf(std::vector<CallEntry>{});
+    MutableState<std::string> callsError = mutableStateOf(std::string());
+    MutableState<bool> callAccess = mutableStateOf(false);
+    MutableState<std::optional<ActiveCall>> activeCall = mutableStateOf(std::optional<ActiveCall>{});
+    MutableState<std::string> screenPeer = mutableStateOf(std::string());
+    MutableState<std::string> screenStatus = mutableStateOf(std::string());
+    MutableState<kompoz::ImageBitmap> screenFrame = mutableStateOf(kompoz::ImageBitmap());
+    MutableState<bool> screenControl = mutableStateOf(false);
+    MutableState<bool> advancedReady = mutableStateOf(false);
+    MutableState<std::string> advancedStatus = mutableStateOf(std::string());
+    MutableState<std::vector<PhoneApp>> phoneApps = mutableStateOf(std::vector<PhoneApp>{});
+    MutableState<bool> phoneAppsLoading = mutableStateOf(false);
+    MutableState<std::vector<AppWindow>> appWindows = mutableStateOf(std::vector<AppWindow>{});
+    MutableState<int> activeWindow = mutableStateOf(0);
+    int nextSession = 1;
+
+    void updateWindow(int session, const std::function<void(AppWindow&)>& change) {
+        appWindows.update([&](std::vector<AppWindow>& list) {
+            for (AppWindow& w : list)
+                if (w.session == session) change(w);
+        });
+    }
+
+    void removeWindow(int session) {
+        appWindows.update([&](std::vector<AppWindow>& list) { std::erase_if(list, [&](const AppWindow& w) { return w.session == session; }); });
+        if (activeWindow.peek() == session) activeWindow.set(0);
+    }
+
+    std::string adbDir() const {
+        auto cfg = platform::config();
+        return (cfg && !cfg->dataDir.empty() ? cfg->dataDir : std::string(".")) + "/adb";
+    }
     int smsRefreshAt = -1;  // a tick to ask the open conversation again (a sent SMS is recorded late)
 
     std::vector<std::string> notices;
@@ -199,6 +250,10 @@ struct App::Impl {
                 t.waiting = false;
                 t.error = cleanError(e["error"].str());
             });
+        } else if (kind == "media_started") {
+            if (e["name"].str() == "screen" && e["peer_id"].str() == screenPeer.peek()) screenStatus.set("live");
+        } else if (kind == "media_stopped") {
+            if (e["name"].str() == "screen" && e["peer_id"].str() == screenPeer.peek()) closeScreen();
         } else if (kind == "app_message") {
             handleAppMessage(e["peer"], e["kind"].str(), e["body"]);
         } else if (kind == "clipboard_received") {
@@ -230,11 +285,42 @@ struct App::Impl {
                 case OpKind::SendClipboard:
                     notices.push_back(ok ? "Pano gönderildi" : "Pano gönderilemedi: " + err);
                     break;
+                case OpKind::AdbPair:
+                    if (ok) {
+                        advancedStatus.set("Eşleşildi, kabuk yetkisi deneniyor…");
+                        track(airlink_adb_shell(node, adbDir().c_str(), "id"), OpKind::AdbTest);
+                    } else {
+                        advancedStatus.set("Eşleşme olmadı: " + err);
+                        platform::advancedSetupResult(false, err);
+                    }
+                    break;
+                case OpKind::AdbTest: {
+                    std::string out = e["value"].str();
+                    bool shell = ok && out.find("uid=2000") != std::string::npos;
+                    advancedReady.set(shell);
+                    advancedStatus.set(shell ? "Hazır: kabuk yetkisiyle çalışıyor (" + out.substr(0, out.find(' ')) + ")"
+                                             : ok ? "Beklenmeyen yanıt: " + out : "Bağlanılamadı: " + err);
+                    platform::advancedSetupResult(shell, shell ? "Gelişmiş mod hazır" : (ok ? out : err));
+                    break;
+                }
+                case OpKind::AdbHelper:
+                    platform::helperStarted(ok, err);
+                    break;
                 case OpKind::SendReply:
                     notices.push_back(ok ? "Yanıt gönderildi" : "Yanıt gönderilemedi: " + err);
                     break;
             }
         }
+    }
+
+    // What a computer asks of this phone (answered by the platform: SmsBridge, CallBridge).
+    static bool isPhoneRequest(const std::string& kind) {
+        static const char* const kinds[] = {"sms.threads_request", "sms.thread_request", "sms.send", "contacts.search",
+                                            "calls.log_request", "call.answer", "call.reject", "call.dial", "call.hangup",
+                                            "call.hold", "call.mute", "call.route", "call.volume", "call.status_request",
+                                            "screen.start", "screen.stop", "screen.input",
+                                            "apps.list", "apps.open", "apps.close", "apps.input"};
+        return std::find(std::begin(kinds), std::end(kinds), kind) != std::end(kinds);
     }
 
     void handleAppMessage(const json::Value& peer, const std::string& kind, const json::Value& body) {
@@ -264,7 +350,7 @@ struct App::Impl {
             });
         } else if (kind == "notification.dismiss" || kind == "notification.reply") {
             platform::notificationAction(kind, body["key"].str(), body["text"].str());
-        } else if (kind == "sms.threads_request" || kind == "sms.thread_request" || kind == "sms.send" || kind == "contacts.search") {
+        } else if (isPhoneRequest(kind)) {
             platform::smsRequest(peerId, kind, body.dump());  // this phone answers
         } else if (kind == "sms.threads") {
             std::vector<SmsThread> list;
@@ -290,6 +376,71 @@ struct App::Impl {
             auto open = smsOpen.peek();
             if (open && (open->threadId == body["thread_id"].i64() || open->address == body["address"].str())) smsRefreshAt = ticks + 4;
             else if (!smsThreads.peek().empty()) smsRefreshAt = ticks + 4;
+        } else if (kind == "apps.list_result") {
+            // In parts: the first replaces the list, the last ends the loading.
+            std::vector<PhoneApp> list = body["first"].boolean() ? std::vector<PhoneApp>{} : phoneApps.peek();
+            for (const auto& a : body["apps"].array())
+                list.push_back(PhoneApp{.label = a["label"].str(), .component = a["component"].str(),
+                                        .icon = kompoz::decodeToImageBitmap(base64(a["icon"].str()))});
+            phoneApps.set(std::move(list));
+            if (body["done"].boolean()) phoneAppsLoading.set(false);
+        } else if (kind == "apps.event") {
+            int session = int(body["session"].i64());
+            std::string ev = body["event"].str();
+            if (ev == "opened") updateWindow(session, [](AppWindow& w) { w.status = "live"; });
+            else if (ev == "closed") removeWindow(session);
+            else if (ev == "error") {
+                std::string message = body["message"].str();
+                notices.push_back(message.empty() ? "Uygulama açılamadı" : message);
+                removeWindow(session);
+            }
+        } else if (kind == "screen.started") {
+            if (peerId == screenPeer.peek()) screenStatus.set("live");
+        } else if (kind == "screen.stopped") {
+            if (peerId != screenPeer.peek()) return;
+            std::string why = body["reason"].str();
+            if (why == "declined") notices.push_back("Ekran paylaşımı telefonda reddedildi");
+            else if (why == "user") notices.push_back("Ekran paylaşımı telefonda durduruldu");
+            closeScreen();
+        } else if (kind == "call.ringing") {
+            IncomingCall call{.peerId = peerId, .number = body["number"].str(), .name = body["name"].str()};
+            incomingCall.set(call);
+            platform::showDesktopNotification("📞 " + call.title() + " arıyor", peer["name"].str());
+        } else if (kind == "call.status") {
+            std::string state = body["state"].str();
+            if (state == "ended" || state == "ringing" || state.empty()) {
+                if (state == "ended") activeCall.set(std::nullopt);
+                return;
+            }
+            ActiveCall c{.peerId = peerId, .number = body["number"].str(), .name = body["name"].str(), .state = state,
+                         .held = body["held"].boolean(), .canHold = body["can_hold"].boolean(), .muted = body["muted"].boolean(),
+                         .route = body["route"].str(), .volume = int(body["volume"].i64()), .volumeMax = int(body["volume_max"].i64()),
+                         .since = body["since"].i64(), .fullControl = body["full_control"].boolean()};
+            for (const auto& r : body["routes"].array()) c.routes.push_back(r.str());
+            if (auto prev = activeCall.peek(); prev && c.since == 0) c.since = prev->since;
+            if (c.since == 0) c.since = int64_t(std::time(nullptr)) * 1000;
+            activeCall.set(c);
+            incomingCall.set(std::nullopt);
+        } else if (kind == "call.state") {
+            incomingCall.set(std::nullopt);  // answered or hung up
+            if (body["state"].str() == "idle") activeCall.set(std::nullopt);
+            if (body["state"].str() == "idle") {  // the log has a new entry
+                callLogStale = true;
+                smsRefreshAt = ticks + 20;
+            }
+        } else if (kind == "calls.log") {
+            std::vector<CallEntry> list;
+            for (const auto& c : body["calls"].array())
+                list.push_back(CallEntry{.number = c["number"].str(), .name = c["name"].str(), .type = c["type"].str(),
+                                         .date = c["date"].i64(), .duration = c["duration"].i64()});
+            callLog.set(std::move(list));
+            callsError.set({});
+        } else if (kind == "calls.error") {
+            callsError.set(body["error"].str() == "no_permission" ? "Telefonda AirLink'e arama izinleri verilmemiş. Telefondaki AirLink'ten izin verin."
+                                                                  : body["error"].str());
+        } else if (kind == "call.dial_result") {
+            if (body["ok"].boolean()) notices.push_back(body["number"].str() + " telefondan aranıyor");
+            else notices.push_back(body["error"].str() == "no_permission" ? "Telefonda arama izni yok" : "Aranamadı");
         } else if (kind == "contacts.results") {
             if (body["query"].str() != contactQuery) return;
             std::vector<ContactMatch> list;
@@ -309,14 +460,31 @@ struct App::Impl {
         return {};
     }
 
-    void smsAsk(const char* kind, const std::string& body) {
+    // A request to the phone used for SMS and calls.
+    void phoneAsk(const char* kind, const std::string& body) {
         std::string phone = smsPhone();
-        if (!node || phone.empty()) return;
-        smsLoading.set(true);
-        airlink_send_message(node, phone.c_str(), kind, body.c_str());
+        if (node && !phone.empty()) airlink_send_message(node, phone.c_str(), kind, body.c_str());
     }
 
+    void smsAsk(const char* kind, const std::string& body) {
+        if (smsPhone().empty()) return;
+        smsLoading.set(true);
+        phoneAsk(kind, body);
+    }
+
+    void closeScreen() {
+        screenPeer.set({});
+        screenStatus.set({});
+        screenFrame.set(kompoz::ImageBitmap());
+    }
+
+    bool callLogStale = false;  // asked again on the next refresh
+
     void smsRefresh() {
+        if (callLogStale && !callLog.peek().empty()) {
+            callLogStale = false;
+            phoneAsk("calls.log_request", "{}");
+        }
         if (auto open = smsOpen.peek()) smsAsk("sms.thread_request", "{\"thread_id\":" + std::to_string(open->threadId) + "}");
         smsAsk("sms.threads_request", "{}");
     }
@@ -367,6 +535,36 @@ void App::pump() const {
         s.refreshPeers();
         s.notificationAccess.set(platform::notificationAccessGranted());
         s.smsAccess.set(platform::smsAccessGranted());
+        s.callAccess.set(platform::callAccessGranted());
+        s.screenControl.set(platform::screenControlEnabled());
+    }
+    // Open phone apps' newest frames.
+    if (!s.appWindows.peek().empty()) {
+        std::string phone = s.smsPhone();
+        for (const AppWindow& w : s.appWindows.peek()) {
+            uint8_t* data = nullptr;
+            size_t len = 0;
+            if (phone.empty() || w.minimized) continue;
+            std::string name = "app:" + std::to_string(w.session);
+            if (airlink_media_take(s.node, phone.c_str(), name.c_str(), &data, &len)) {
+                kompoz::ImageBitmap frame = kompoz::decodeToImageBitmap(std::vector<uint8_t>(data, data + len));
+                airlink_free_bytes(data, len);
+                if (!frame.empty()) s.updateWindow(w.session, [&](AppWindow& x) { x.frame = frame; x.status = "live"; });
+            }
+        }
+    }
+    // The shared screen's newest frame.
+    if (const std::string& from = s.screenPeer.peek(); !from.empty()) {
+        uint8_t* data = nullptr;
+        size_t len = 0;
+        if (airlink_media_take(s.node, from.c_str(), "screen", &data, &len)) {
+            kompoz::ImageBitmap frame = kompoz::decodeToImageBitmap(std::vector<uint8_t>(data, data + len));
+            airlink_free_bytes(data, len);
+            if (!frame.empty()) {
+                s.screenFrame.set(frame);
+                s.screenStatus.set("live");
+            }
+        }
     }
     if (s.smsRefreshAt >= 0 && s.ticks >= s.smsRefreshAt) {
         s.smsRefreshAt = -1;
@@ -476,6 +674,142 @@ void App::sendSms(const std::string& address, const std::string& text) const {
 void App::requestSmsAccess() const { platform::requestSmsAccess(); }
 
 std::vector<ContactMatch> App::contactResults() const { return impl_->contactResults.get(); }
+
+std::optional<IncomingCall> App::incomingCall() const { return impl_->incomingCall.get(); }
+std::vector<CallEntry> App::callLog() const { return impl_->callLog.get(); }
+std::string App::callsError() const { return impl_->callsError.get(); }
+bool App::canShareCalls() const { return platform::canShareCalls(); }
+bool App::callAccess() const { return impl_->callAccess.get(); }
+void App::requestCallAccess() const { platform::requestCallAccess(); }
+void App::requestCallLog() const { impl_->phoneAsk("calls.log_request", "{}"); }
+
+void App::answerCall() const {
+    if (auto call = impl_->incomingCall.peek()) sendTo(call->peerId, "call.answer", "{}");
+    impl_->incomingCall.set(std::nullopt);
+}
+
+void App::rejectCall() const {
+    if (auto call = impl_->incomingCall.peek()) sendTo(call->peerId, "call.reject", "{}");
+    impl_->incomingCall.set(std::nullopt);
+}
+
+void App::dismissCall() const { impl_->incomingCall.set(std::nullopt); }
+
+std::optional<ActiveCall> App::activeCall() const { return impl_->activeCall.get(); }
+
+std::string App::screenPeer() const { return impl_->screenPeer.get(); }
+std::string App::screenStatus() const { return impl_->screenStatus.get(); }
+kompoz::ImageBitmap App::screenFrame() const { return impl_->screenFrame.get(); }
+bool App::canShareScreen() const { return platform::canShareScreen(); }
+bool App::screenControl() const { return impl_->screenControl.get(); }
+void App::openScreenControlSettings() const { platform::openScreenControlSettings(); }
+
+bool App::canUseAdvancedMode() const { return platform::canUseAdvancedMode(); }
+bool App::advancedReady() const { return impl_->advancedReady.get(); }
+std::string App::advancedStatus() const { return impl_->advancedStatus.get(); }
+
+void App::startAdvancedSetup() const {
+    impl_->advancedStatus.set("Bildirimdeki alana eşleme kodunu yazın…");
+    platform::startAdvancedSetup();
+}
+
+void App::advancedPair(const std::string& code) const {
+    if (!impl_->node) return;
+    impl_->advancedStatus.set("Eşleniyor…");
+    impl_->track(airlink_adb_pair(impl_->node, impl_->adbDir().c_str(), code.c_str()), OpKind::AdbPair);
+}
+
+void App::startHelper(const std::string& command) const {
+    if (!impl_->node) return platform::helperStarted(false, "not started");
+    impl_->track(airlink_adb_shell(impl_->node, impl_->adbDir().c_str(), command.c_str()), OpKind::AdbHelper);
+}
+
+std::vector<PhoneApp> App::phoneApps() const { return impl_->phoneApps.get(); }
+bool App::phoneAppsLoading() const { return impl_->phoneAppsLoading.get(); }
+std::vector<AppWindow> App::appWindows() const { return impl_->appWindows.get(); }
+int App::activeWindow() const { return impl_->activeWindow.get(); }
+
+void App::requestPhoneApps() const {
+    if (impl_->smsPhone().empty()) return;
+    impl_->phoneAppsLoading.set(true);
+    impl_->phoneAsk("apps.list", "{}");
+}
+
+void App::openPhoneApp(const PhoneApp& app) const {
+    for (const AppWindow& w : impl_->appWindows.peek())
+        if (w.component == app.component) return showAppWindow(w.session);
+    int session = impl_->nextSession++;
+    impl_->appWindows.update([&](std::vector<AppWindow>& list) {
+        list.push_back(AppWindow{.session = session, .label = app.label, .component = app.component, .status = "starting"});
+    });
+    impl_->activeWindow.set(session);
+    impl_->phoneAsk("apps.open", "{\"session\":" + std::to_string(session) + ",\"component\":" + json::quote(app.component) +
+                                     ",\"width\":720,\"height\":1560,\"dpi\":320,\"fps\":24,\"quality\":70}");
+}
+
+void App::closeAppWindow(int session) const {
+    impl_->phoneAsk("apps.close", "{\"session\":" + std::to_string(session) + "}");
+    impl_->removeWindow(session);
+}
+
+void App::showAppWindow(int session) const {
+    impl_->updateWindow(session, [](AppWindow& w) { w.minimized = false; });
+    impl_->activeWindow.set(session);
+}
+
+void App::minimizeAppWindow(int session) const {
+    impl_->updateWindow(session, [](AppWindow& w) { w.minimized = true; });
+    if (impl_->activeWindow.peek() == session) impl_->activeWindow.set(0);
+}
+
+void App::appInput(int session, const std::string& bodyJson) const {
+    if (bodyJson.empty()) return;
+    // {"cmd":...} + the session
+    std::string body = "{\"session\":" + std::to_string(session) + "," + bodyJson.substr(1);
+    impl_->phoneAsk("apps.input", body);
+}
+
+void App::advancedTest() const {
+    if (!impl_->node) return;
+    impl_->advancedStatus.set("Kablosuz hata ayıklamaya bağlanılıyor…");
+    impl_->track(airlink_adb_shell(impl_->node, impl_->adbDir().c_str(), "id"), OpKind::AdbTest);
+}
+
+void App::startScreen(const std::string& peerId) const {
+    impl_->screenPeer.set(peerId);
+    impl_->screenStatus.set("asking");
+    impl_->screenFrame.set(kompoz::ImageBitmap());
+    sendTo(peerId, "screen.start", "{\"quality\":60}");
+}
+
+void App::stopScreen() const {
+    std::string peer = impl_->screenPeer.peek();
+    if (!peer.empty()) sendTo(peer, "screen.stop", "{}");
+    impl_->closeScreen();
+}
+
+void App::screenInput(const std::string& bodyJson) const {
+    platform::log("screen input: " + (bodyJson.empty() ? std::string("(outside the image)") : bodyJson));
+    std::string peer = impl_->screenPeer.peek();
+    if (!peer.empty() && !bodyJson.empty()) sendTo(peer, "screen.input", bodyJson);
+}
+
+void App::sendMedia(const std::string& peerId, const std::string& name, const std::vector<uint8_t>& frame) const {
+    if (impl_->node) airlink_media_send(impl_->node, peerId.c_str(), name.c_str(), frame.data(), frame.size());
+}
+
+void App::stopMedia(const std::string& peerId, const std::string& name) const {
+    if (impl_->node) airlink_media_stop(impl_->node, peerId.c_str(), name.c_str());
+}
+
+void App::callControl(const std::string& kind, const std::string& bodyJson) const {
+    if (auto call = impl_->activeCall.peek()) sendTo(call->peerId, kind, bodyJson);
+}
+
+void App::dial(const std::string& number) const {
+    if (number.empty()) return;
+    impl_->phoneAsk("call.dial", "{\"number\":" + json::quote(number) + "}");
+}
 
 void App::searchContacts(const std::string& query) const {
     impl_->contactQuery = query;

@@ -44,6 +44,22 @@ final class SmsBridge {
         worker.execute(() -> {
             try {
                 JSONObject req = new JSONObject(body);
+                if (kind.startsWith("apps.")) {  // advanced mode: apps on displays of their own
+                    AppStreams.handle(c, peerId, kind, req);
+                    return;
+                }
+                if (kind.startsWith("screen.")) {  // screen sharing and its input: on the UI thread
+                    new android.os.Handler(android.os.Looper.getMainLooper()).post(() -> {
+                        if (kind.equals("screen.start")) ScreenShare.requested(c, peerId, req);
+                        else if (kind.equals("screen.stop")) ScreenShare.stop("computer");
+                        else if (kind.equals("screen.input")) AirLinkAccessibility.input(req);
+                    });
+                    return;
+                }
+                if (kind.startsWith("call")) {  // call.* and calls.*
+                    CallBridge.handle(c, peerId, kind, req);
+                    return;
+                }
                 if (kind.equals("contacts.search")) {  // only needs the contacts permission
                     reply(peerId, "contacts.results", searchContacts(c, req.optString("query")));
                     return;
@@ -183,7 +199,7 @@ final class SmsBridge {
     }
 
     // The contact's name for a number, or "" (without the contacts permission too).
-    private static String contactName(Context c, String address) {
+    static String contactName(Context c, String address) {
         if (address == null || address.isEmpty()) return "";
         if (c.checkSelfPermission(Manifest.permission.READ_CONTACTS) != PackageManager.PERMISSION_GRANTED) return "";
         Uri uri = Uri.withAppendedPath(ContactsContract.PhoneLookup.CONTENT_FILTER_URI, Uri.encode(address));
@@ -195,7 +211,17 @@ final class SmsBridge {
     }
 
     private static void reply(String peerId, String kind, JSONObject body) {
+        send(peerId, kind, body);
+    }
+
+    /** An app message to one paired computer (any thread). */
+    static void send(String peerId, String kind, JSONObject body) {
         if (MainActivity.nativeReady) nativeSendTo(peerId, kind, body.toString());
+    }
+
+    /** An app message to every reachable paired computer (any thread). */
+    static void broadcastAll(String kind, String body) {
+        if (MainActivity.nativeReady) nativeBroadcast(kind, body);
     }
 
     private static native void nativeSendTo(String peerId, String kind, String body);

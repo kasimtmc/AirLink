@@ -29,6 +29,12 @@ jclass listenerClass = nullptr;  // AirLinkNotificationListener
 jmethodID listenerGranted = nullptr, listenerOpenSettings = nullptr, listenerAct = nullptr;
 jclass smsClass = nullptr, activityClass = nullptr;  // SmsBridge, MainActivity
 jmethodID smsHandle = nullptr, smsGranted = nullptr, smsRequestPermissions = nullptr;
+jmethodID callsGranted = nullptr, callRequestPermissions = nullptr;
+jmethodID screenControlOn = nullptr, screenControlSettings = nullptr;
+jclass adbPairingClass = nullptr;
+jmethodID adbStart = nullptr, adbDone = nullptr;
+jclass appStreamsClass = nullptr;
+jmethodID appStreamsHelperStarted = nullptr;
 
 std::string fromJava(JNIEnv* env, jstring s) {
     if (!s) return {};
@@ -164,6 +170,67 @@ void notificationAction(const std::string& kind, const std::string& key, const s
 
 void showDesktopNotification(const std::string&, const std::string&) {}  // a phone shows its own
 
+bool canUseAdvancedMode() { return true; }
+
+void startAdvancedSetup() {
+    JNIEnv* e = env();
+    if (!e || !adbPairingClass) return;
+    e->CallStaticVoidMethod(adbPairingClass, adbStart);
+    if (e->ExceptionCheck()) e->ExceptionClear();
+}
+
+void advancedSetupResult(bool ok, const std::string& message) {
+    JNIEnv* e = env();
+    if (!e || !adbPairingClass) return;
+    jstring m = e->NewStringUTF(message.c_str());
+    e->CallStaticVoidMethod(adbPairingClass, adbDone, jboolean(ok), m);
+    if (e->ExceptionCheck()) e->ExceptionClear();
+    e->DeleteLocalRef(m);
+}
+
+void helperStarted(bool ok, const std::string& message) {
+    JNIEnv* e = env();
+    if (!e || !appStreamsClass) return;
+    jstring m = e->NewStringUTF(message.c_str());
+    e->CallStaticVoidMethod(appStreamsClass, appStreamsHelperStarted, jboolean(ok), m);
+    if (e->ExceptionCheck()) e->ExceptionClear();
+    e->DeleteLocalRef(m);
+}
+
+bool canShareScreen() { return true; }
+
+bool screenControlEnabled() {
+    JNIEnv* e = env();
+    if (!e || !activityClass) return false;
+    bool on = e->CallStaticBooleanMethod(activityClass, screenControlOn);
+    if (e->ExceptionCheck()) e->ExceptionClear(), on = false;
+    return on;
+}
+
+void openScreenControlSettings() {
+    JNIEnv* e = env();
+    if (!e || !activityClass) return;
+    e->CallStaticVoidMethod(activityClass, screenControlSettings);
+    if (e->ExceptionCheck()) e->ExceptionClear();
+}
+
+bool canShareCalls() { return true; }
+
+bool callAccessGranted() {
+    JNIEnv* e = env();
+    if (!e || !activityClass) return false;
+    bool granted = e->CallStaticBooleanMethod(activityClass, callsGranted);
+    if (e->ExceptionCheck()) e->ExceptionClear(), granted = false;
+    return granted;
+}
+
+void requestCallAccess() {
+    JNIEnv* e = env();
+    if (!e || !activityClass) return;
+    e->CallStaticVoidMethod(activityClass, callRequestPermissions);
+    if (e->ExceptionCheck()) e->ExceptionClear();
+}
+
 bool canShareSms() { return true; }
 
 bool smsAccessGranted() {
@@ -248,6 +315,19 @@ extern "C" JNIEXPORT void JNICALL Java_dev_airlink_airlink_MainActivity_nativeIn
         e->DeleteLocalRef(local);
         smsGranted = e->GetStaticMethodID(activityClass, "smsGranted", "()Z");
         smsRequestPermissions = e->GetStaticMethodID(activityClass, "requestSmsPermissions", "()V");
+        callsGranted = e->GetStaticMethodID(activityClass, "callsGranted", "()Z");
+        callRequestPermissions = e->GetStaticMethodID(activityClass, "requestCallPermissions", "()V");
+        screenControlOn = e->GetStaticMethodID(activityClass, "screenControlEnabled", "()Z");
+        screenControlSettings = e->GetStaticMethodID(activityClass, "openScreenControlSettings", "()V");
+        local = e->FindClass("dev/airlink/airlink/AdbPairing");
+        adbPairingClass = static_cast<jclass>(e->NewGlobalRef(local));
+        e->DeleteLocalRef(local);
+        adbStart = e->GetStaticMethodID(adbPairingClass, "start", "()V");
+        adbDone = e->GetStaticMethodID(adbPairingClass, "done", "(ZLjava/lang/String;)V");
+        local = e->FindClass("dev/airlink/airlink/AppStreams");
+        appStreamsClass = static_cast<jclass>(e->NewGlobalRef(local));
+        e->DeleteLocalRef(local);
+        appStreamsHelperStarted = e->GetStaticMethodID(appStreamsClass, "helperStarted", "(ZLjava/lang/String;)V");
     }
 }
 
@@ -282,6 +362,41 @@ extern "C" JNIEXPORT void JNICALL Java_dev_airlink_airlink_MainActivity_nativeSh
 extern "C" JNIEXPORT void JNICALL Java_dev_airlink_airlink_AirLinkNotificationListener_nativeBroadcast(JNIEnv* e, jclass, jstring kind,
                                                                                                     jstring body) {
     airlink::App::get().broadcast(fromJava(e, kind), fromJava(e, body));
+}
+
+extern "C" JNIEXPORT void JNICALL Java_dev_airlink_airlink_MainActivity_nativeStartHelper(JNIEnv* e, jclass, jstring command) {
+    airlink::App::get().startHelper(fromJava(e, command));
+}
+
+extern "C" JNIEXPORT void JNICALL Java_dev_airlink_airlink_AppStreams_nativeSendFrame(JNIEnv* e, jclass, jstring peer, jstring name,
+                                                                                     jbyteArray jpeg) {
+    jsize n = e->GetArrayLength(jpeg);
+    std::vector<uint8_t> bytes(static_cast<size_t>(n));
+    e->GetByteArrayRegion(jpeg, 0, n, reinterpret_cast<jbyte*>(bytes.data()));
+    airlink::App::get().sendMedia(fromJava(e, peer), fromJava(e, name), bytes);
+}
+
+extern "C" JNIEXPORT void JNICALL Java_dev_airlink_airlink_AppStreams_nativeStopFrames(JNIEnv* e, jclass, jstring peer, jstring name) {
+    airlink::App::get().stopMedia(fromJava(e, peer), fromJava(e, name));
+}
+
+extern "C" JNIEXPORT void JNICALL Java_dev_airlink_airlink_MainActivity_nativeAdbPair(JNIEnv* e, jclass, jstring code) {
+    airlink::App::get().advancedPair(fromJava(e, code));
+}
+
+extern "C" JNIEXPORT void JNICALL Java_dev_airlink_airlink_MainActivity_nativePump(JNIEnv*, jclass) {
+    airlink::App::get().pump();  // on the main (UI) thread, as the UI loop pumps
+}
+
+extern "C" JNIEXPORT void JNICALL Java_dev_airlink_airlink_ScreenShare_nativeSendFrame(JNIEnv* e, jclass, jstring peer, jbyteArray jpeg) {
+    jsize n = e->GetArrayLength(jpeg);
+    std::vector<uint8_t> bytes(static_cast<size_t>(n));
+    e->GetByteArrayRegion(jpeg, 0, n, reinterpret_cast<jbyte*>(bytes.data()));
+    airlink::App::get().sendMedia(fromJava(e, peer), "screen", bytes);
+}
+
+extern "C" JNIEXPORT void JNICALL Java_dev_airlink_airlink_ScreenShare_nativeStopFrames(JNIEnv* e, jclass, jstring peer) {
+    airlink::App::get().stopMedia(fromJava(e, peer), "screen");
 }
 
 extern "C" JNIEXPORT void JNICALL Java_dev_airlink_airlink_SmsBridge_nativeSendTo(JNIEnv* e, jclass, jstring peer, jstring kind, jstring body) {

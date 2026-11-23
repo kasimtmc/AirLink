@@ -431,6 +431,19 @@ bool smsAccessGranted() { return false; }
 void requestSmsAccess() {}
 void smsRequest(const std::string&, const std::string&, const std::string&) {}
 
+bool canShareCalls() { return false; }
+bool callAccessGranted() { return false; }
+void requestCallAccess() {}
+
+bool canShareScreen() { return false; }
+bool screenControlEnabled() { return false; }
+void openScreenControlSettings() {}
+
+bool canUseAdvancedMode() { return false; }
+void startAdvancedSetup() {}
+void advancedSetupResult(bool, const std::string&) {}
+void helperStarted(bool, const std::string&) {}
+
 void log(const std::string& line) { std::fprintf(stderr, "airlink: %s\n", line.c_str()); }
 
 // ---- Phone notifications: the computer only shows them ---------------------------------------

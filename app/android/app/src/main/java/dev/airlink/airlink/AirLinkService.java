@@ -29,6 +29,18 @@ public class AirLinkService extends Service {
     private static final int STATUS_ID = 1;
 
     static Context appContext;  // set by MainActivity; what onPrompt posts with
+    private static AirLinkService self;
+
+    // The core's events (a computer's requests: touches, SMS, calls…) are applied by the app's
+    // UI loop, which Android stops while another app is on screen: pump them from here too.
+    private final android.os.Handler pumper = new android.os.Handler(android.os.Looper.getMainLooper());
+    private final Runnable pump = new Runnable() {
+        @Override
+        public void run() {
+            if (MainActivity.nativeReady) MainActivity.pump();
+            pumper.postDelayed(this, 50);
+        }
+    };
 
     private WifiManager.MulticastLock multicastLock;  // Android drops mDNS without it
     private WifiManager.WifiLock wifiLock;            // Wi-Fi stays fast and awake while sending
@@ -42,6 +54,7 @@ public class AirLinkService extends Service {
     @Override
     public void onCreate() {
         super.onCreate();
+        self = this;
         channels(this);
         WifiManager wifi = (WifiManager) getApplicationContext().getSystemService(Context.WIFI_SERVICE);
         if (wifi != null) {
@@ -53,6 +66,8 @@ public class AirLinkService extends Service {
             wifiLock.setReferenceCounted(false);
             wifiLock.acquire();
         }
+        CallBridge.start(this);
+        pumper.post(pump);
     }
 
     @Override
@@ -74,9 +89,26 @@ public class AirLinkService extends Service {
 
     @Override
     public void onDestroy() {
+        if (self == this) self = null;
+        pumper.removeCallbacks(pump);
+        CallBridge.stop(this);
         if (multicastLock != null) multicastLock.release();
         if (wifiLock != null) wifiLock.release();
         super.onDestroy();
+    }
+
+    /** Screen sharing began: Android 14+ needs the service to be of the mediaProjection type too. */
+    static void startProjectionForeground(Context c) {
+        AirLinkService s = self;
+        if (s == null || Build.VERSION.SDK_INT < 29) return;
+        s.startForeground(STATUS_ID, s.statusNotification(),
+                ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE | ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION);
+    }
+
+    static void stopProjectionForeground() {
+        AirLinkService s = self;
+        if (s == null || Build.VERSION.SDK_INT < 29) return;
+        s.startForeground(STATUS_ID, s.statusNotification(), ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE);
     }
 
     @Override

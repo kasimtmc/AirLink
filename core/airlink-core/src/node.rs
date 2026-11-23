@@ -161,6 +161,16 @@ pub enum Event {
         peer: DeviceInfo,
         text: String,
     },
+    /// A paired device began a media stream (`name`, e.g. "screen"): take its frames with
+    /// [`Node::take_media`].
+    MediaStarted {
+        peer_id: String,
+        name: String,
+    },
+    MediaStopped {
+        peer_id: String,
+        name: String,
+    },
     /// From a paired device's app (see [`Message::AppMessage`]).
     AppMessage {
         peer: DeviceInfo,
@@ -185,7 +195,22 @@ struct Inner {
     discovered: Mutex<HashMap<String, DiscoveredPeer>>,
     connections: Mutex<HashMap<String, (Connection, DeviceInfo)>>,
     discovery: Mutex<Option<Discovery>>,
+    /// Outgoing media streams by (peer id, name): the frame waiting to be written.
+    media_out: Mutex<HashMap<(String, String), Arc<MediaOut>>>,
+    /// The latest frame received on each (peer id, name), not yet taken.
+    media_in: Mutex<HashMap<(String, String), Vec<u8>>>,
 }
+
+/// One outgoing media stream: frames are written by a task of its own, and a new frame replaces
+/// one not yet written (a slow link drops frames instead of falling behind).
+struct MediaOut {
+    latest: Mutex<Option<Vec<u8>>>,
+    wake: tokio::sync::Notify,
+    stopped: std::sync::atomic::AtomicBool,
+}
+
+/// Largest media frame accepted.
+pub const MAX_MEDIA_FRAME: usize = 16 * 1024 * 1024;
 
 impl Node {
     pub async fn start(cfg: NodeConfig) -> Result<Self> {
@@ -225,6 +250,8 @@ impl Node {
             discovered: Mutex::new(HashMap::new()),
             connections: Mutex::new(HashMap::new()),
             discovery: Mutex::new(None),
+            media_out: Mutex::new(HashMap::new()),
+            media_in: Mutex::new(HashMap::new()),
         });
 
         tokio::spawn(accept_loop(inner.clone()));
@@ -443,6 +470,57 @@ impl Node {
         }
     }
 
+    /// Sends a frame on the media stream `name` to a paired device. Returns at once: a task writes
+    /// it, and a frame not yet written when the next comes is dropped (the latest wins).
+    pub fn send_media(&self, peer_id: &str, name: &str, frame: Vec<u8>) -> Result<()> {
+        if frame.len() > MAX_MEDIA_FRAME {
+            bail!("media frame too large");
+        }
+        let key = (peer_id.to_owned(), name.to_owned());
+        let out = {
+            let mut map = self.inner.media_out.lock().unwrap();
+            if let Some(o) = map.get(&key) {
+                o.clone()
+            } else {
+                let o = Arc::new(MediaOut {
+                    latest: Mutex::new(None),
+                    wake: tokio::sync::Notify::new(),
+                    stopped: std::sync::atomic::AtomicBool::new(false),
+                });
+                map.insert(key.clone(), o.clone());
+                tokio::spawn(media_writer(self.inner.clone(), key, o.clone()));
+                o
+            }
+        };
+        *out.latest.lock().unwrap() = Some(frame);
+        out.wake.notify_one();
+        Ok(())
+    }
+
+    /// Ends the media stream `name` to a device (it hears MediaStopped).
+    pub fn stop_media(&self, peer_id: &str, name: &str) {
+        if let Some(o) = self
+            .inner
+            .media_out
+            .lock()
+            .unwrap()
+            .remove(&(peer_id.to_owned(), name.to_owned()))
+        {
+            o.stopped.store(true, Ordering::Relaxed);
+            o.wake.notify_one();
+        }
+    }
+
+    /// The latest frame received on media stream `name` from `peer_id`, if a new one came since
+    /// the last call.
+    pub fn take_media(&self, peer_id: &str, name: &str) -> Option<Vec<u8>> {
+        self.inner
+            .media_in
+            .lock()
+            .unwrap()
+            .remove(&(peer_id.to_owned(), name.to_owned()))
+    }
+
     pub async fn shutdown(&self) {
         if let Some(d) = self.inner.discovery.lock().unwrap().take() {
             d.shutdown();
@@ -611,6 +689,20 @@ async fn handle_connection(inner: Arc<Inner>, incoming: quinn::Incoming) -> Resu
 /// connection, whichever side opened it: both sides cache and reuse
 /// connections, so either may send requests over it.
 async fn serve_streams(inner: Arc<Inner>, conn: Connection, peer: DeviceInfo, addr: SocketAddr) {
+    // Media comes on unidirectional streams.
+    {
+        let (inner, conn, peer) = (inner.clone(), conn.clone(), peer.clone());
+        tokio::spawn(async move {
+            while let Ok(recv) = conn.accept_uni().await {
+                let (inner, peer) = (inner.clone(), peer.clone());
+                tokio::spawn(async move {
+                    if let Err(e) = receive_media(inner, peer, recv).await {
+                        debug!("media stream ended: {e:#}");
+                    }
+                });
+            }
+        });
+    }
     while let Ok((send, recv)) = conn.accept_bi().await {
         let inner = inner.clone();
         let peer = peer.clone();
@@ -619,6 +711,86 @@ async fn serve_streams(inner: Arc<Inner>, conn: Connection, peer: DeviceInfo, ad
                 debug!("stream failed: {e:#}");
             }
         });
+    }
+}
+
+/// A media stream: `media { name }`, then frames, each `[u32 BE length][bytes]`, until it ends.
+async fn receive_media(inner: Arc<Inner>, peer: DeviceInfo, mut recv: RecvStream) -> Result<()> {
+    let Message::Media { name } = read_msg(&mut recv).await? else {
+        bail!("expected a media header");
+    };
+    if !inner.trust.lock().unwrap().is_trusted(&peer.id) {
+        bail!("media from an unpaired device");
+    }
+    let key = (peer.id.clone(), name.clone());
+    inner.emit(Event::MediaStarted {
+        peer_id: peer.id.clone(),
+        name: name.clone(),
+    });
+    let result: Result<()> = async {
+        loop {
+            let mut len = [0u8; 4];
+            match recv.read_exact(&mut len).await {
+                Ok(()) => {}
+                Err(quinn::ReadExactError::FinishedEarly(0)) => return Ok(()), // the sender ended it
+                Err(e) => return Err(e.into()),
+            }
+            let len = u32::from_be_bytes(len) as usize;
+            if len > MAX_MEDIA_FRAME {
+                bail!("media frame too large ({len} bytes)");
+            }
+            let mut frame = vec![0u8; len];
+            recv.read_exact(&mut frame).await?;
+            inner.media_in.lock().unwrap().insert(key.clone(), frame);
+        }
+    }
+    .await;
+    inner.media_in.lock().unwrap().remove(&key);
+    inner.emit(Event::MediaStopped {
+        peer_id: peer.id,
+        name,
+    });
+    result
+}
+
+/// Writes an outgoing media stream's frames as they come, reconnecting if its connection drops.
+async fn media_writer(inner: Arc<Inner>, key: (String, String), out: Arc<MediaOut>) {
+    let mut stream: Option<SendStream> = None;
+    loop {
+        out.wake.notified().await;
+        if out.stopped.load(Ordering::Relaxed) {
+            if let Some(mut s) = stream.take() {
+                let _ = s.finish();
+            }
+            return;
+        }
+        let Some(frame) = out.latest.lock().unwrap().take() else {
+            continue;
+        };
+        let written: Result<()> = async {
+            if stream.is_none() {
+                let (conn, _) = inner.connection_to(&key.0).await?;
+                let mut s = conn.open_uni().await?;
+                write_msg(
+                    &mut s,
+                    &Message::Media {
+                        name: key.1.clone(),
+                    },
+                )
+                .await?;
+                stream = Some(s);
+            }
+            let s = stream.as_mut().unwrap();
+            s.write_all(&(frame.len() as u32).to_be_bytes()).await?;
+            s.write_all(&frame).await?;
+            Ok(())
+        }
+        .await;
+        if let Err(e) = written {
+            debug!("media frame not sent ({e:#}); a new stream next time");
+            stream = None;
+            inner.connections.lock().unwrap().remove(&key.0);
+        }
     }
 }
 
