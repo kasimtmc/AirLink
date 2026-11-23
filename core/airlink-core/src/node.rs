@@ -489,14 +489,31 @@ fn on_discovery(weak: &Weak<Inner>, ev: DiscoveryEvent) {
     let Some(inner) = weak.upgrade() else { return };
     match ev {
         DiscoveryEvent::Found(peer) => {
-            let changed = inner
-                .discovered
-                .lock()
-                .unwrap()
-                .insert(peer.id.clone(), peer.clone())
-                .as_ref()
-                != Some(&peer);
-            if changed {
+            // mDNS reports the same device once per interface, each time with a
+            // partial address set: merge addresses, and only announce devices
+            // that are new or whose visible details changed.
+            let announce = {
+                let mut map = inner.discovered.lock().unwrap();
+                match map.get_mut(&peer.id) {
+                    Some(known) => {
+                        for a in &peer.addrs {
+                            if !known.addrs.contains(a) {
+                                known.addrs.push(*a);
+                            }
+                        }
+                        known.addrs.sort_by_key(|a| (a.ip().is_loopback(), *a));
+                        let renamed = known.name != peer.name || known.platform != peer.platform;
+                        known.name = peer.name;
+                        known.platform = peer.platform;
+                        renamed.then(|| known.clone())
+                    }
+                    None => {
+                        map.insert(peer.id.clone(), peer.clone());
+                        Some(peer)
+                    }
+                }
+            };
+            if let Some(peer) = announce {
                 inner.emit(Event::PeerDiscovered { peer });
             }
         }
