@@ -2,7 +2,21 @@
 
 ## 24 Kasım 2026
 
-Yayımlanmış başlangıç noktası `4fa0abc`. Bu oturumdaki değişiklikler çalışma ağacında duruyor. AirLink, Rust çekirdeğini ve Kompoz C++ arayüzünü kullanıyor. KompozR’a geçiş ayrı bir iş.
+Bu dönemin başlangıç noktası `4fa0abc`. AirLink, Rust çekirdeğini ve Kompoz C++ arayüzünü kullanıyor. KompozR’a geçiş ayrı bir iş.
+
+## 25 Kasım 2026: masaüstü tepsisi ve Android arka planı
+
+- AirLink tepsi menüsüne cihaz başına Dosya gönder, Panoyu gönder ve Android için Ekranı göster eklendi. Cihaz alt menüsü yalnızca eşleşmiş cihaz çevrimiçi olduğunda etkin. Ayrıca Gelen dosyaları aç ve Paylaşımı duraklat/sürdür var. Duraklatma Rust düğümünü gerçekten kapatıyor; açık aktarım ve istekleri duraklatılmış olarak temizliyor. KDE oturumunda menü yapısı DBus üzerinden doğrulandı; duraklatınca UDP 47820 kapandı, sürdürünce aynı süreçte tekrar açıldı ve telefon yeniden çevrimiçi göründü. Açılış hatası sonrası menüden bağlantıyı yeniden deneme yolu var.
+- Tepsi simgesi başlatılırken mavi, bağlı cihaz varken yeşil, bağlı cihaz yokken turuncu, paylaşım duraklatılınca gri ve hata durumunda kırmızı. İşlem/aktarım hatasının kırmızısı 30 saniye sonra temizleniyor. KDE StatusNotifierItem verisinde yeşil, turuncu, gri ve kırmızı simge pikselleri ile ilgili ipuçları doğrulandı. Linux, Windows ve Android derlemeleri geçti; kullanıcı WinBoat tepsi denemesini tamamladı.
+- Kullanıcı, cihaz alt menüsünün KDE'de hâlâ gri göründüğünü bildirdi. Kompoz'un Linux DBusMenu sunucusu, bir öğe yeniden etkinleştiğinde `enabled` özelliğini çıkarmak yerine açıkça `enabled=true` gönderiyor. Gerçek AirLink tepsisinde duraklat → `enabled=false`, sürdür → `enabled=true` geçişi doğrulandı. Kullanıcı Xiaomi'nin bağlıyken etkin olduğunu doğruladı; çevrimdışı eşleşmiş cihaz da etkin göründüğü için AirLink menüsü tekrar `peer.online` koşuluna bağlandı. Yeniden derlenip açılan KDE tepsisinde çevrimdışı KASIMWI için `enabled=false`, bağlı Xiaomi için `enabled=true` okundu; Linux ve Windows derlemeleri geçti.
+- Linux/Wayland'da tepsiden her geri açışta eski pencerenin ekranda kalması düzeltildi. Kompoz'un `setWindowShown(false)` yolu `wl_proxy_destroy` ile yalnızca istemci tutamağını bırakıyordu; artık frame callback, dekorasyon, `xdg_toplevel` ve `xdg_surface` için gerçek protokol yok etme çağrıları yapılıyor. KDE oturumunda ayrı bir Kompoz test uygulaması DBus tepsi menüsüyle beş kez gizlenip açıldı: KWin her turda `removed 0`, `added 1` pencere kaydetti. Eski AirLink tepsi menüsünden kapatıldı, düzeltmeli Linux derlemesi açıldı.
+- Kompoz deposunda herkese açık `Tray`, `setAppWindowVisible`, `isTraySupported` ve `exitApplication` API'leri eklendi. Linux StatusNotifierItem/DBusMenu, Windows bildirim alanı uygulamaları var. AirLink masaüstünde tepsi simgesini, bağlı cihazları, açma ve çıkış menüsünü kullanıyor; pencere kapatılınca tepsi destekleniyorsa gizleniyor.
+- Linux tepsi etkinleştirmesi ve menü tıklamasında DBus olay kilidinin ikinci kez alınmasıyla oluşan kilitlenme giderildi. KDE oturumunda simge kaydı, DBus `Activate`, menüden Aç ve Çık gerçek AirLink sürecinde denendi; süreç Çık ile temiz biçimde sonlandı.
+- Android `AirLinkService` ön plan servisi süreç yeniden başlatıldığında çekirdeği Activity açılmadan kuruyor ve `START_STICKY` ile geri geliyor. Activity yok edildiğinde JNI Activity başvurusu temizleniyor; açık dosya seçimi iptal ediliyor. Kullanıcının Durdur eylemi servisi durdurmaya devam ediyor.
+- Kompoz birim testleri: 763 test, 0 başarısız. AirLink Linux ve Windows derlemeleri geçti. Android x86_64 APK, Android 14 test emülatörüne kuruldu: ana ekran üzerinden arka plana alındı; yalnızca emülatörde uygulama süreci sonlandırıldı. Servis yeni PID ile ön planda yeniden başladı, aynı veri dizininde Rust kimliği kaldı ve UDP 47820 dinlemeye döndü. Activity yeniden açıldı, yeni süreç yerinde kaldı. arm64 debug APK yeniden derlendi.
+- Xiaomi 14 Ultra'ya güncel arm64 APK USB üzerinden kuruldu. AirLink açıldı, ön plan servisi başladı. Ana ekrana geçince süreç PID 19780 olarak kaldı; servis hâlâ foreground ve UDP 47820 dinliyor. AndroidRuntime hata günlüğünde çökme yok. Bu, gerçek telefonda temel arka plan çalışmasını doğruluyor; gerçek cihazda süreç öldürülüp otomatik yeniden başlatma henüz yapılmadı.
+- Kullanıcı Android bildirimine dokununca uygulama ekranının geldiğini ve bağlantının sürdüğünü doğruladı. Telefonu iterek gönderme hareketi gerçek cihazda çalıştı. Bu deneme, Android sürecini zorla sonlandırıp servisin `START_STICKY` ile yeniden başlamasını ayrıca doğrulamıyor.
+- WinBoat paylaşımındaki `/home/kasim/AirLink-Windows-ANGLE.zip`, son tepsi düzeltmelerini içeren Windows derlemesiyle yenilendi. ZIP bütünlüğü, içindeki `airlink.exe` ile yerel derlemenin eşitliği ve paylaşılan kopyanın eşitliği doğrulandı. Kullanıcı WinBoat tepsi denemesinin de tamamlandığını bildirdi.
 
 - Telefon uygulamaları Kompoz `Window` ile oturum başına bir masaüstü penceresinde açılıyor. Pencereler sekme değiştirildiğinde açık kalıyor. Uygulamalar sekmesindeki düğme açık pencereyi öne getiriyor. Pencerenin kapatma düğmesi mevcut uzak oturum kapatma akışını kullanıyor.
 - Odaktaki uygulama görüntüsünde Kompoz’un UTF-8 metin olayları mevcut Android metin yoluna aktarılıyor. Gezinme tuşları ve klavye kısayolları Android tuş kodlarını kullanıyor. Klavye haritasının üretemediği metin mevcut telefon panosu üzerinden yapıştırılıyor.
@@ -69,7 +83,7 @@ Kullanıcı canlı H.264 penceresi ve ekran paylaşımını, `kod:port` ile ilk 
 
 Çalışma ağacı `ffdbb52` ile commit'lendi. Lisans PolyForm Strict 1.0.0 olarak seçildi; katkı izni `CONTRIBUTING.md`, ad ve logo `TRADEMARKS.md` içinde.
 
-Açık işler: (1) servis açıkken Android etkinliğinin yeniden oluşturulması, (2) Faz 4, (3) Faz 5.
+Açık işler: (1) gerçek telefonda süreç öldürüldükten sonra Android servisinin yeniden başlamasını doğrulama, (2) Faz 4B+ ve 4C, (3) Faz 5.
 
 ## Faz 4 ve Faz 5 planı (24 Kasım 2026)
 
@@ -78,7 +92,8 @@ Sıra kullanıcı kararıyla: A → B → C, ardından son faz olarak arayüz iy
 | İş | Kapsam | Durum |
 |---|---|---|
 | 4A Bilgisayarı telefondan kontrol | Bilgisayar ekranı telefonda (H.264), dokunma fare, iki parmak kaydırma, tuşlar ve yazı; bilgisayarda onay ve "Durdur" çubuğu | Tamam; kullanıcı gerçek cihazda doğruladı |
-| 4B El hareketiyle aktarım | Telefonda bir hareketle dosya/pano gönderme (`gesture.*`) | Başlanmadı |
+| 4B El hareketiyle aktarım | Telefonu bilgisayara doğru itme ("fırlatarak gönder") | Gerçek cihazda kullanıcı tarafından doğrulandı |
+| 4B+ Havada tut-bırak (Huawei tarzı) | Kamerayla yumruk (tut) ve açık avuç (bırak) tanıma; telefon ⇄ bilgisayar | Tasarım aşamasında |
 | 4C Bluetooth ile arama sesi | Bilgisayar telefonun kulaklığı gibi (HFP) | Başlanmadı |
 | 5 Arayüz iyileştirmeleri | Görsel düzen, gezinme ve kullanılabilirlik | Başlanmadı |
 
@@ -93,3 +108,10 @@ Sıra kullanıcı kararıyla: A → B → C, ardından son faz olarak arayüz iy
 Kompoz’un Android Java kaynakları AirLink deposunun dışında, Kompoz deposunda tutuluyor.
 
 Commit ve push kullanıcı istediğinde yapılır. Commit yazarı yalnızca Kasim olur. Commit mesajlarına ortak yazar veya model atfı eklenmez.
+
+4B ayrıntıları:
+
+- `FlingDetector.kt`: doğrusal ivme sensörü (yerçekimi çıkarılmış). Telefon kullanıcıya dönükken ekranın dik ekseninde (cihaz -Z) 11 m/s² üstü itme, 450 ms içinde ters yönde 7 m/s² üstü durma; yanal ivme Z tepesinin %60'ından az olmalı. Tetiklemeler arası 2 sn. Yalnızca AirLink ekrandayken dinler (Android panoyu yalnızca ön plandaki uygulamaya verir; pil). Titreşimle onay.
+- Hedef: son dosya/pano gönderilen ya da kontrol edilen bilgisayar (`fling-target`, veri klasöründe); çevrimiçi değilse tek çevrimiçi bilgisayar. Paylaşım menüsünden gelip bekleyen dosyalar varsa onlar, yoksa panodaki metin gider. Yeni protokol mesajı yok: mevcut dosya ve pano aktarımı kullanılır.
+- Arayüz: telefonda "Fırlatarak gönder" kartı (aç/kapat, hedef), paylaşım penceresinde fırlatma ipucu.
+- Eşikler sabit; gerçek cihazda yanlış tetikleme ya da kaçırma olursa ayarlanacak.

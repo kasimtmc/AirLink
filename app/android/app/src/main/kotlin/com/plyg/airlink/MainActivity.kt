@@ -40,15 +40,18 @@ class MainActivity : KompozActivity() {
     override fun onResume() {
         super.onResume()
         visible = true
+        FlingDetector.resume(this)
     }
 
     override fun onPause() {
         visible = false
+        FlingDetector.pause()
         super.onPause()
     }
 
     override fun onDestroy() {
         if (currentActivity === this) currentActivity = null
+        nativeDetachActivity(this)
         super.onDestroy()
     }
 
@@ -160,6 +163,18 @@ class MainActivity : KompozActivity() {
         @Volatile private var currentActivity: MainActivity? = null
 
         @JvmStatic fun current(): MainActivity? = currentActivity
+        /** A restarted foreground service must bring the core back without opening a window. */
+        @JvmStatic fun ensureBackgroundNative(context: android.content.Context) {
+            if (nativeReady) return
+            System.loadLibrary("main")
+            val public = File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS), "AirLink")
+            val download = if (writable(public)) public else File(context.getExternalFilesDir(null) ?: context.filesDir, "AirLink")
+            val chosen = Settings.Global.getString(context.contentResolver, Settings.Global.DEVICE_NAME)
+            val name = chosen?.takeIf { it.isNotBlank() } ?: (Build.MODEL ?: "Android")
+            nativeInit(null, context.filesDir.absolutePath, download.absolutePath, name)
+            nativeReady = true
+            pump()
+        }
         @JvmStatic fun screenControlEnabled(): Boolean = AirLinkAccessibility.enabled()
         @JvmStatic fun openScreenControlSettings() = AirLinkAccessibility.openSettings()
         @JvmStatic fun smsGranted(): Boolean = AirLinkService.appContext?.let(SmsBridge::granted) == true
@@ -174,6 +189,12 @@ class MainActivity : KompozActivity() {
             currentActivity?.requestPermissions(CallBridge.permissions(), 3)
         }
 
+        @JvmStatic fun flingAvailable(): Boolean = AirLinkService.appContext?.let(FlingDetector::available) == true
+        @JvmStatic fun flingEnabled(): Boolean = AirLinkService.appContext?.let(FlingDetector::enabled) == true
+        @JvmStatic fun setFlingEnabled(on: Boolean) {
+            val context = currentActivity ?: AirLinkService.appContext ?: return
+            FlingDetector.setEnabled(context, on)
+        }
         @JvmStatic fun respond(requestId: Long, accept: Boolean) = nativeRespond(requestId, accept)
         @JvmStatic fun pump() = nativePump()
         @JvmStatic fun adbPair(code: String) = nativeAdbPair(code)
@@ -189,7 +210,8 @@ class MainActivity : KompozActivity() {
             file.delete()
         }
 
-        @JvmStatic private external fun nativeInit(activity: MainActivity, filesDir: String, downloadDir: String, deviceName: String)
+        @JvmStatic private external fun nativeInit(activity: MainActivity?, filesDir: String, downloadDir: String, deviceName: String)
+        @JvmStatic private external fun nativeDetachActivity(activity: MainActivity)
         @JvmStatic private external fun nativeFilesPicked(paths: Array<String>)
         @JvmStatic private external fun nativeShared(paths: Array<String>)
         @JvmStatic private external fun nativePump()

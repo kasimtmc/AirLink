@@ -18,6 +18,7 @@
 #include <objbase.h>
 #include <shlobj.h>
 #include <shobjidl.h>
+#include <shellapi.h>
 #endif
 
 #if defined(__linux__)
@@ -33,6 +34,28 @@ namespace airlink::platform {
 
 std::optional<Config> config() {
     return Config{};  // the core's defaults: per-user data dir, Downloads/AirLink, hostname
+}
+
+void openFolder(const std::string& path) {
+    if (path.empty()) return;
+    const auto utf8 = std::u8string(reinterpret_cast<const char8_t*>(path.data()), path.size());
+    const std::filesystem::path folder(utf8);
+    std::error_code error;
+    std::filesystem::create_directories(folder, error);
+    if (error) return log("cannot open folder: " + error.message());
+#if defined(__linux__)
+    pid_t pid = 0;
+    const char* args[] = {"xdg-open", path.c_str(), nullptr};
+    if (posix_spawnp(&pid, "xdg-open", nullptr, nullptr, const_cast<char* const*>(args), environ) != 0) {
+        log("cannot open folder: xdg-open failed");
+        return;
+    }
+    std::thread([pid] { waitpid(pid, nullptr, 0); }).detach();
+#elif defined(_WIN32)
+    std::wstring wide = folder.wstring();
+    if (reinterpret_cast<std::intptr_t>(ShellExecuteW(nullptr, L"open", wide.c_str(), nullptr, nullptr, SW_SHOWNORMAL)) <= 32)
+        log("cannot open folder: ShellExecuteW failed");
+#endif
 }
 
 #if defined(__linux__)
@@ -442,6 +465,9 @@ bool screenControlEnabled() { return false; }
 void openScreenControlSettings() {}
 
 bool canUseAdvancedMode() { return false; }
+bool canFling() { return false; }
+bool flingEnabled() { return false; }
+void setFlingEnabled(bool) {}
 void startAdvancedSetup() {}
 void advancedSetupResult(bool, const std::string&) {}
 void helperStarted(bool, const std::string&) {}

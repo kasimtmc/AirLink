@@ -22,6 +22,9 @@ std::optional<Config> config();
 // called on any thread.
 void pickFiles(std::function<void(std::vector<std::string>)> done);
 
+// Open a local folder in the platform file manager (used by the desktop tray).
+void openFolder(const std::string& path);
+
 // Copies URIs that aren't local files (Android's content://) to local files; `done` gets their
 // paths, maybe on another thread.
 void stageUris(const std::vector<std::string>& uris, std::function<void(std::vector<std::string>)> done);
@@ -73,6 +76,12 @@ void requestCallAccess();
 bool canShareScreen();
 bool screenControlEnabled();  // the phone carries out a computer's touches (Accessibility on)
 void openScreenControlSettings();
+
+// ---- Fling to send (phase 4B, Android): push the phone toward the computer -----------------
+
+bool canFling();      // the phone has a linear acceleration sensor
+bool flingEnabled();
+void setFlingEnabled(bool on);
 
 // ---- Advanced mode (Android): the phone's own wireless debugging ----------------------------
 

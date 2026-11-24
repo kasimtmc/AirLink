@@ -45,7 +45,7 @@ std::optional<uint16_t> parseAdbPort(const std::string& text) {
     return static_cast<uint16_t>(port);
 }
 
-enum class OpKind { StartPairing, ConfirmPairing, SendFiles, SendClipboard, SendReply, AdbPair, AdbTest, AdbHelper, DesktopShare };
+enum class OpKind { StartPairing, ConfirmPairing, SendFiles, SendClipboard, SendReply, ScreenStart, AdbPair, AdbTest, AdbHelper, DesktopShare };
 
 std::vector<uint8_t> base64(const std::string& in) {
     static const std::string chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
@@ -72,6 +72,9 @@ struct App::Impl {
     bool startAttempted = false;
 
     MutableState<bool> ready = mutableStateOf(false);
+    MutableState<bool> sharingPaused = mutableStateOf(false);
+    MutableState<bool> recentError = mutableStateOf(false);
+    int recentErrorUntilTick = 0;
     MutableState<std::string> startError = mutableStateOf(std::string());
     MutableState<DeviceInfo> me = mutableStateOf(DeviceInfo{});
     MutableState<std::vector<Peer>> peers = mutableStateOf(std::vector<Peer>{});
@@ -114,6 +117,8 @@ struct App::Impl {
     MutableState<kompoz::ImageBitmap> desktopFrame = mutableStateOf(kompoz::ImageBitmap());
     MutableState<std::optional<DesktopRequest>> desktopRequest = mutableStateOf(std::optional<DesktopRequest>{});
     MutableState<std::string> desktopViewer = mutableStateOf(std::string());
+    MutableState<bool> flingOn = mutableStateOf(false);
+    std::string lastComputer;  // the computer last sent to or controlled: a fling's target
     MutableState<bool> advancedReady = mutableStateOf(false);
     MutableState<std::string> advancedStatus = mutableStateOf(std::string());
     MutableState<std::string> advancedPort = mutableStateOf(std::string());
@@ -197,7 +202,10 @@ struct App::Impl {
             std::ifstream saved(cfg.dataDir + "/adb/connect-port");
             std::string port;
             if (std::getline(saved, port) && parseAdbPort(port)) advancedPort.set(port);
+            std::ifstream target(cfg.dataDir + "/fling-target");
+            std::getline(target, lastComputer);
         }
+        flingOn.set(platform::flingEnabled());
         std::string json = "{";
         auto field = [&](const char* key, const std::string& value) {
             if (value.empty()) return;
@@ -223,6 +231,8 @@ struct App::Impl {
                           .port = int(info["port"].i64()),
                           .downloadDir = info["download_dir"].str()});
         refreshPeers();
+        startError.set({});
+        recentError.set(false);
         ready.set(true);
         platform::nodeStarted(node);
     }
@@ -257,6 +267,11 @@ struct App::Impl {
             }
             change(*it);
         });
+    }
+
+    void markRecentError() {
+        recentError.set(true);
+        recentErrorUntilTick = ticks + 600;  // 30 seconds at the 50 ms pump interval
     }
 
     void removePrompt(uint64_t requestId) {
@@ -316,6 +331,7 @@ struct App::Impl {
             notices.push_back(std::to_string(files.size()) + (incoming ? " dosya alındı" : " dosya gönderildi"));
             if (incoming) platform::filesReceived(files);
         } else if (kind == "transfer_failed") {
+            markRecentError();
             updateTransfer(e["transfer_id"].str(), e["peer_id"].str(), e["direction"].str() == "incoming", [&](Transfer& t) {
                 t.waiting = false;
                 t.error = cleanError(e["error"].str());
@@ -349,6 +365,7 @@ struct App::Impl {
             OpKind what = it->second;
             ops.erase(it);
             bool ok = e["ok"].boolean();
+            if (!ok) markRecentError();
             std::string err = cleanError(e["error"].str());
             switch (what) {
                 case OpKind::StartPairing:
@@ -364,6 +381,12 @@ struct App::Impl {
                     break;  // shown by the transfer's own events
                 case OpKind::SendClipboard:
                     notices.push_back(ok ? "Pano gönderildi" : "Pano gönderilemedi: " + err);
+                    break;
+                case OpKind::ScreenStart:
+                    if (!ok) {
+                        closeScreen();
+                        notices.push_back("Ekran açılamadı: " + err);
+                    }
                     break;
                 case OpKind::AdbPair:
                     if (ok) {
@@ -665,6 +688,26 @@ struct App::Impl {
         smsAsk("sms.threads_request", "{}");
     }
 
+    // A computer this phone used: kept (data dir) as the fling's target.
+    void noteComputer(const std::string& id) {
+        for (const Peer& p : peers.peek())
+            if (p.id == id && p.platform != "android" && lastComputer != id) {
+                lastComputer = id;
+                if (auto cfg = platform::config(); cfg && !cfg->dataDir.empty()) std::ofstream(cfg->dataDir + "/fling-target") << id;
+            }
+    }
+
+    // The fling's target: the last computer used if it is online, else the only online one.
+    std::string flingTarget() const {
+        std::vector<std::string> online;
+        for (const Peer& p : peers.peek())
+            if (p.paired && p.online && p.platform != "android") {
+                if (p.id == lastComputer) return p.id;
+                online.push_back(p.id);
+            }
+        return online.size() == 1 ? online.front() : std::string();
+    }
+
     std::string peerNameOf(const std::string& id) const {
         for (const Peer& p : peers.peek())
             if (p.id == id) return p.name;
@@ -717,7 +760,8 @@ void App::pump() const {
 
     // Reachability changes without an event (a paired device's connection drops), and the user may
     // have granted notification access in Settings meanwhile: look now and then.
-    if (++s.ticks % 40 == 0) {
+    if (++s.ticks >= s.recentErrorUntilTick && s.recentError.peek()) s.recentError.set(false);
+    if (s.ticks % 40 == 0) {
         s.refreshPeers();
         s.notificationAccess.set(platform::notificationAccessGranted());
         s.smsAccess.set(platform::smsAccessGranted());
@@ -796,6 +840,8 @@ void App::pump() const {
 }
 
 bool App::ready() const { return impl_->ready.get(); }
+bool App::sharingPaused() const { return impl_->sharingPaused.get(); }
+bool App::recentError() const { return impl_->recentError.get(); }
 std::string App::startError() const { return impl_->startError.get(); }
 DeviceInfo App::me() const { return impl_->me.get(); }
 std::vector<Peer> App::peers() const { return impl_->peers.get(); }
@@ -966,6 +1012,7 @@ bool App::canShareDesktop() const { return airlink_desktop_supported(); }
 void App::startDesktop(const std::string& peerId) const {
     if (!impl_->node || peerId.empty()) return;
     impl_->closeDesktop();
+    impl_->noteComputer(peerId);
     impl_->desktopPeer.set(peerId);
     impl_->desktopStatus.set("asking");
     // Sized for a phone: its screen is about this wide; fewer frames keep it smooth on Wi-Fi.
@@ -994,6 +1041,37 @@ void App::answerDesktop(bool accept) const {
 void App::endDesktopShare() const {
     if (impl_->node) airlink_desktop_stop(impl_->node, nullptr, "user");
     impl_->desktopViewer.set({});
+}
+
+bool App::canFling() const { return platform::canFling(); }
+bool App::flingEnabled() const { return impl_->flingOn.get(); }
+
+std::string App::flingTarget() const {
+    impl_->peers.get();  // subscribes: the target changes as devices come and go
+    return impl_->flingTarget();
+}
+
+void App::setFlingEnabled(bool on) const {
+    platform::setFlingEnabled(on);
+    impl_->flingOn.set(on);
+}
+
+void App::fling(const std::string& clipboardText) const {
+    std::string target = impl_->flingTarget();
+    if (target.empty()) {
+        impl_->notices.push_back("Fırlatma için çevrimiçi bir bilgisayar yok");
+        return;
+    }
+    std::string name = impl_->peerNameOf(target);
+    if (auto files = impl_->share.peek(); !files.empty()) {
+        impl_->share.set({});
+        sendFiles(target, files);
+        impl_->notices.push_back(std::to_string(files.size()) + " dosya " + name + " cihazına fırlatıldı");
+    } else if (!clipboardText.empty()) {
+        sendClipboard(target, clipboardText);
+    } else {
+        impl_->notices.push_back("Gönderilecek bir şey yok: dosya paylaşın ya da metin kopyalayın");
+    }
 }
 
 bool App::canUseAdvancedMode() const { return platform::canUseAdvancedMode(); }
@@ -1097,10 +1175,12 @@ void App::advancedTest() const {
 }
 
 void App::startScreen(const std::string& peerId) const {
+    if (!impl_->node) return;
     impl_->screenPeer.set(peerId);
     impl_->screenStatus.set("asking");
     impl_->screenFrame.set(kompoz::ImageBitmap());
-    sendTo(peerId, "screen.start", "{\"quality\":60,\"codec\":\"h264\"}");
+    impl_->track(airlink_send_message(impl_->node, peerId.c_str(), "screen.start", "{\"quality\":60,\"codec\":\"h264\"}"),
+                 OpKind::ScreenStart);
 }
 
 void App::stopScreen() const {
@@ -1221,6 +1301,7 @@ void App::sendDropped(const std::string& peerId, const std::vector<std::string>&
 }
 
 void App::sendFiles(const std::string& peerId, const std::vector<std::string>& paths) const {
+    impl_->noteComputer(peerId);
     std::string list = "[";
     for (const auto& p : paths) list += (list.size() > 1 ? "," : "") + json::quote(p);
     list += "]";
@@ -1228,6 +1309,7 @@ void App::sendFiles(const std::string& peerId, const std::vector<std::string>& p
 }
 
 void App::sendClipboard(const std::string& peerId, const std::string& text) const {
+    impl_->noteComputer(peerId);
     if (text.empty()) {
         impl_->notices.push_back("Pano boş");
         return;
@@ -1242,6 +1324,46 @@ void App::forget(const std::string& peerId) const {
 
 void App::clearFinishedTransfers() const {
     impl_->transfers.update([](std::vector<Transfer>& list) { std::erase_if(list, [](const Transfer& t) { return !t.active(); }); });
+}
+
+void App::setSharingPaused(bool paused) const {
+    Impl& s = *impl_;
+    if (s.sharingPaused.peek() == paused && (paused || s.node)) return;
+    if (paused) {
+        // An in-flight operation no longer has a running node to report its result.
+        s.ready.set(false);
+        s.sharingPaused.set(true);
+        s.transfers.update([](std::vector<Transfer>& list) {
+            for (Transfer& t : list)
+                if (t.active()) t.error = "Paylaşım duraklatıldı";
+        });
+        s.prompts.set({});
+        s.outgoing.set(std::nullopt);
+        s.ops.clear();
+        s.closeScreen();
+        s.closeDesktop();
+        s.desktopViewer.set({});
+        s.appWindows.set({});
+        s.phoneApps.set({});
+        s.phoneAppsLoading.set(false);
+        s.incomingCall.set(std::nullopt);
+        s.activeCall.set(std::nullopt);
+        s.smsLoading.set(false);
+        s.phoneContactsLoading.set(false);
+        s.callLogLoading.set(false);
+        s.peers.update([](std::vector<Peer>& list) {
+            for (Peer& p : list) p.online = false;
+        });
+        {
+            std::lock_guard lock(s.pickedMutex);
+            s.onlinePaired.clear();
+        }
+        AirlinkNode* node = std::exchange(s.node, nullptr);
+        if (node) airlink_stop(node);
+    } else {
+        s.sharingPaused.set(false);
+        s.start();
+    }
 }
 
 std::string humanSize(int64_t bytes) {

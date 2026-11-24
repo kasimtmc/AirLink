@@ -30,6 +30,7 @@ class AirLinkService : Service() {
     override fun onCreate() {
         super.onCreate()
         self = this
+        appContext = applicationContext
         channels(this)
         (applicationContext.getSystemService(Context.WIFI_SERVICE) as? WifiManager)?.let { wifi ->
             multicastLock = wifi.createMulticastLock("airlink-mdns").apply {
@@ -60,7 +61,8 @@ class AirLinkService : Service() {
         } else {
             startForeground(STATUS_ID, statusNotification())
         }
-        return START_NOT_STICKY
+        MainActivity.ensureBackgroundNative(applicationContext)
+        return START_STICKY
     }
 
     override fun onDestroy() {

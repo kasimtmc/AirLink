@@ -31,6 +31,7 @@ jclass smsClass = nullptr, activityClass = nullptr;  // SmsBridge, MainActivity
 jmethodID smsHandle = nullptr, smsGranted = nullptr, smsRequestPermissions = nullptr;
 jmethodID callsGranted = nullptr, callRequestPermissions = nullptr;
 jmethodID screenControlOn = nullptr, screenControlSettings = nullptr;
+jmethodID flingAvailableId = nullptr, flingEnabledId = nullptr, setFlingEnabledId = nullptr;
 jclass adbPairingClass = nullptr;
 jmethodID adbStart = nullptr, adbDone = nullptr;
 jclass appStreamsClass = nullptr;
@@ -58,6 +59,8 @@ std::optional<Config> config() {
     std::lock_guard lock(mutex);
     return started;
 }
+
+void openFolder(const std::string&) {}  // the tray is desktop-only
 
 void pickFiles(std::function<void(std::vector<std::string>)> done) {
     JNIEnv* e = env();
@@ -171,6 +174,29 @@ void notificationAction(const std::string& kind, const std::string& key, const s
 void showDesktopNotification(const std::string&, const std::string&) {}  // a phone shows its own
 
 bool canUseAdvancedMode() { return true; }
+
+bool canFling() {
+    JNIEnv* e = env();
+    if (!e || !activityClass || !flingAvailableId) return false;
+    bool on = e->CallStaticBooleanMethod(activityClass, flingAvailableId);
+    if (e->ExceptionCheck()) e->ExceptionClear(), on = false;
+    return on;
+}
+
+bool flingEnabled() {
+    JNIEnv* e = env();
+    if (!e || !activityClass || !flingEnabledId) return false;
+    bool on = e->CallStaticBooleanMethod(activityClass, flingEnabledId);
+    if (e->ExceptionCheck()) e->ExceptionClear(), on = false;
+    return on;
+}
+
+void setFlingEnabled(bool on) {
+    JNIEnv* e = env();
+    if (!e || !activityClass || !setFlingEnabledId) return;
+    e->CallStaticVoidMethod(activityClass, setFlingEnabledId, jboolean(on));
+    if (e->ExceptionCheck()) e->ExceptionClear();
+}
 
 void startAdvancedSetup() {
     JNIEnv* e = env();
@@ -288,8 +314,10 @@ extern "C" JNIEXPORT void JNICALL Java_com_plyg_airlink_MainActivity_nativeInit(
     JNIEnv* e, jclass, jobject activityObject, jstring filesDir, jstring downloadDir, jstring deviceName) {
     std::lock_guard lock(mutex);
     e->GetJavaVM(&vm);
-    if (activity) e->DeleteGlobalRef(activity);
-    activity = e->NewGlobalRef(activityObject);
+    if (activityObject) {
+        if (activity) e->DeleteGlobalRef(activity);
+        activity = e->NewGlobalRef(activityObject);
+    }
     started = Config{.dataDir = fromJava(e, filesDir), .downloadDir = fromJava(e, downloadDir), .fallbackName = fromJava(e, deviceName)};
     if (!serviceClass) {
         jclass local = e->FindClass("com/plyg/airlink/AirLinkService");
@@ -315,6 +343,9 @@ extern "C" JNIEXPORT void JNICALL Java_com_plyg_airlink_MainActivity_nativeInit(
         e->DeleteLocalRef(local);
         smsGranted = e->GetStaticMethodID(activityClass, "smsGranted", "()Z");
         smsRequestPermissions = e->GetStaticMethodID(activityClass, "requestSmsPermissions", "()V");
+        flingAvailableId = e->GetStaticMethodID(activityClass, "flingAvailable", "()Z");
+        flingEnabledId = e->GetStaticMethodID(activityClass, "flingEnabled", "()Z");
+        setFlingEnabledId = e->GetStaticMethodID(activityClass, "setFlingEnabled", "(Z)V");
         callsGranted = e->GetStaticMethodID(activityClass, "callsGranted", "()Z");
         callRequestPermissions = e->GetStaticMethodID(activityClass, "requestCallPermissions", "()V");
         screenControlOn = e->GetStaticMethodID(activityClass, "screenControlEnabled", "()Z");
@@ -329,6 +360,20 @@ extern "C" JNIEXPORT void JNICALL Java_com_plyg_airlink_MainActivity_nativeInit(
         e->DeleteLocalRef(local);
         appStreamsHelperStarted = e->GetStaticMethodID(appStreamsClass, "helperStarted", "(ZLjava/lang/String;)V");
     }
+}
+
+extern "C" JNIEXPORT void JNICALL Java_com_plyg_airlink_MainActivity_nativeDetachActivity(JNIEnv* e, jclass, jobject oldActivity) {
+    std::function<void(std::vector<std::string>)> done;
+    {
+        std::lock_guard lock(mutex);
+        if (activity && e->IsSameObject(activity, oldActivity)) {
+            e->DeleteGlobalRef(activity);
+            activity = nullptr;
+            done = std::move(pending);
+            pending = {};
+        }
+    }
+    if (done) done({});
 }
 
 namespace {
@@ -420,4 +465,8 @@ extern "C" JNIEXPORT void JNICALL Java_com_plyg_airlink_MainActivity_nativeFiles
         pending = nullptr;
     }
     if (done) done(std::move(list));
+}
+
+extern "C" JNIEXPORT void JNICALL Java_com_plyg_airlink_FlingDetector_nativeFlung(JNIEnv* e, jclass, jstring clipboardText) {
+    airlink::App::get().fling(fromJava(e, clipboardText));  // on the main thread (the sensor's)
 }

@@ -3,6 +3,7 @@
 #include <kompoz/kompoz.hpp>
 
 #include <algorithm>
+#include <array>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -12,6 +13,7 @@
 #include "app_state.hpp"
 #include "json.hpp"
 #include "platform.hpp"
+#include "tray_icon.hpp"
 
 using namespace kompoz;
 using namespace airlink;
@@ -19,6 +21,31 @@ using namespace airlink;
 // ---- C++ helpers the composables call ------------------------------------------------------
 
 static App appState() { return App::get(); }
+static void openDownloads(const std::string& path) { airlink::platform::openFolder(path); }
+
+enum class TrayIconStatus { Starting, Connected, NoDevices, Paused, Error };
+
+// Preserve the white link mark and the disc's soft edge while tinting its blue background.
+static ImageBitmap statusTrayIcon(TrayIconStatus status) {
+    ImageBitmap base = decodeToImageBitmap(trayIconPng());
+    if (base.empty() || !base.pixels()) return base;
+    std::array<int, 3> color{37, 99, 235};  // starting: original blue
+    switch (status) {
+    case TrayIconStatus::Connected: color = {22, 163, 74}; break;
+    case TrayIconStatus::NoDevices: color = {217, 119, 6}; break;
+    case TrayIconStatus::Paused: color = {107, 114, 128}; break;
+    case TrayIconStatus::Error: color = {220, 38, 38}; break;
+    case TrayIconStatus::Starting: break;
+    }
+    std::vector<uint8_t> rgba(base.pixels(), base.pixels() + size_t(base.width()) * size_t(base.height()) * 4);
+    for (size_t i = 0; i < rgba.size(); i += 4) {
+        if (!rgba[i + 3]) continue;
+        int white = std::clamp((int(rgba[i]) - 37) * 255 / 218, 0, 255);
+        for (int channel = 0; channel < 3; ++channel)
+            rgba[i + size_t(channel)] = uint8_t((color[size_t(channel)] * (255 - white) + 255 * white + 127) / 255);
+    }
+    return ImageBitmap::fromPixels(base.width(), base.height(), std::move(rgba));
+}
 
 static std::string shortId(const std::string& id) { return id.substr(0, 8); }
 
@@ -318,6 +345,46 @@ fun AirLinkApp() {
     MaterialTheme(colorScheme = scheme) {
         Home()
         if (isDesktop()) PhoneAppWindows(appState())
+        if (isDesktop()) AirLinkTray(appState())
+    }
+}
+
+// The tray icon on a computer: AirLink goes on in the background when its window is closed (it
+// keeps the device reachable), and comes back from here.
+@Kompozable
+fun AirLinkTray(app: App) {
+    val clipboard = clipboardManager()
+    val paused = app.sharingPaused()
+    val online = app.pairedPeers().filter { it.online }
+    val status = if (paused) TrayIconStatus.Paused else if (app.startError().isNotEmpty() || app.recentError()) TrayIconStatus.Error
+                 else if (!app.ready()) TrayIconStatus.Starting else if (online.isEmpty()) TrayIconStatus.NoDevices
+                 else TrayIconStatus.Connected
+    val icon = remember(status) { statusTrayIcon(status) }
+    val tip = if (paused) "AirLink · paylaşım duraklatıldı" else if (status == TrayIconStatus.Error) "AirLink · işlem hatası"
+              else if (status == TrayIconStatus.Starting) "AirLink · başlatılıyor"
+              else if (online.isEmpty()) "AirLink · bağlı cihaz yok" else "AirLink · ${online.size} cihaz bağlı"
+    Tray(icon = icon, tooltip = tip, onAction = { setAppWindowVisible(true) }) {
+        Item("AirLink'i aç", onClick = { setAppWindowVisible(true) })
+        val paired = app.pairedPeers()
+        if (paired.isNotEmpty()) {
+            Separator()
+            for (peer in paired) {
+                Menu(peer.name, enabled = app.ready() && !paused && peer.online) {
+                    Item("Dosya gönder…", onClick = { app.pickAndSend(peer.id) })
+                    Item("Panoyu gönder", onClick = { app.sendClipboard(peer.id, clipboard.getText()) })
+                    if (peer.platform == "android") {
+                        Separator()
+                        Item("Ekranı göster", onClick = { app.startScreen(peer.id); setAppWindowVisible(true) })
+                    }
+                }
+            }
+        }
+        Separator()
+        Item("Gelen dosyaları aç", onClick = { openDownloads(app.me().downloadDir) })
+        Item(if (paused) "Paylaşımı sürdür" else if (!app.ready()) "Bağlantıyı yeniden dene" else "Paylaşımı duraklat",
+             onClick = { app.setSharingPaused(!paused && app.ready()) })
+        Separator()
+        Item("Çık", onClick = { exitApplication() })
     }
 }
 
@@ -376,6 +443,11 @@ fun Home() {
                     else if (tabs && tab == 2) PhoneScreen(app)
                     else if (tabs && tab == 3) AppsScreen(app)
                     else DeviceList(app, clipboard)
+                } else if (app.sharingPaused()) {
+                    Column(modifier = Modifier.align(Alignment.Center), horizontalAlignment = Alignment.CenterHorizontally) {
+                        Text("Paylaşım duraklatıldı")
+                        TextButton(onClick = { app.setSharingPaused(false) }) { Text("Paylaşımı sürdür") }
+                    }
                 } else if (app.startError().isNotEmpty()) {
                     Text("Başlatılamadı:\n${app.startError()}", modifier = Modifier.align(Alignment.Center).padding(24.dp))
                 } else {
@@ -476,6 +548,10 @@ fun ShareDialog(app: App) {
                         Text("Henüz eşleşmiş cihaz yok. Önce bir cihazla eşleşin.")
                     } else {
                         Text("Hangi cihaza?", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        if (app.canFling() && app.flingEnabled() && app.flingTarget().isNotEmpty()) {
+                            Text("Ya da telefonu ${app.peerName(app.flingTarget())} cihazına doğru fırlatın.",
+                                 style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary)
+                        }
                         for (peer in paired) {
                             OutlinedButton(onClick = { app.shareTo(peer.id) }, modifier = Modifier.fillMaxWidth(), enabled = peer.online) {
                                 Icon(AppIcons.forPlatform(peer.platform), contentDescription = null, modifier = Modifier.size(18.dp))
@@ -520,6 +596,9 @@ fun DeviceList(app: App, clipboard: ClipboardManager) {
         }
         if (app.canShareScreen()) {
             item { ScreenControlCard(app) }
+        }
+        if (app.canFling()) {
+            item { FlingCard(app) }
         }
         if (app.canUseAdvancedMode()) {
             item { AdvancedModeCard(app) }
@@ -690,6 +769,25 @@ fun ScreenControlCard(app: App) {
                      color = MaterialTheme.colorScheme.onSurfaceVariant)
                 FilledTonalButton(onClick = { app.openScreenControlSettings() }) { Text("Erişilebilirliği aç") }
             }
+        }
+    }
+}
+
+// Fling to send (phase 4B): push the phone toward the computer.
+@Kompozable
+fun FlingCard(app: App) {
+    val target = app.flingTarget()
+    OutlinedCard(modifier = Modifier.fillMaxWidth()) {
+        Row(modifier = Modifier.fillMaxWidth().padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+            Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text("Fırlatarak gönder", style = MaterialTheme.typography.titleMedium)
+                Text("AirLink açıkken telefonu bilgisayara doğru kısa ve hızlı bir hareketle itin: paylaşılan dosyalar ya da kopyalanan metin gider.",
+                     style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text(if (target.isEmpty()) "Hedef: çevrimiçi bilgisayar yok" else "Hedef: ${app.peerName(target)}",
+                     style = MaterialTheme.typography.labelMedium)
+            }
+            Spacer(modifier = Modifier.width(12.dp))
+            Switch(checked = app.flingEnabled(), onCheckedChange = { app.setFlingEnabled(it) })
         }
     }
 }
@@ -1590,5 +1688,9 @@ kompoz::Application kompoz::createApplication(int argc, char** argv) {
     airlink::platform::handleLaunch(argc, argv);
     // Create the app's states here, outside any composition's snapshot.
     App::get();
-    return {.title = "AirLink", .content = [] { AirLinkApp(); }};
+    // On a computer, closing the window keeps AirLink running in the tray (where there is one).
+    return {.title = "AirLink", .content = [] { AirLinkApp(); }, .onCloseRequest = [] {
+                if (kompoz::isTraySupported()) kompoz::setAppWindowVisible(false);
+                else kompoz::exitApplication();
+            }};
 }

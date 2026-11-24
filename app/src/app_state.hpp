@@ -191,6 +191,8 @@ public:
 
     // ---- What the UI reads (each read subscribes the composable) ----
     bool ready() const;
+    bool sharingPaused() const;
+    bool recentError() const;  // a failed operation briefly marks the desktop tray
     std::string startError() const;
     DeviceInfo me() const;
     std::vector<Peer> peers() const;
@@ -242,6 +244,11 @@ public:
     std::string desktopViewer() const;
     bool canShareDesktop() const;  // this computer can share its screen (Linux, Windows)
 
+    // ---- Fling to send (phase 4B, a phone): push the phone toward a computer ----
+    bool canFling() const;
+    bool flingEnabled() const;
+    std::string flingTarget() const;  // the computer a fling goes to (empty: none online)
+
     // ---- Advanced mode (this phone's own wireless debugging) ----
     bool canUseAdvancedMode() const;
     bool advancedReady() const;        // paired, and a shell command ran as the shell user
@@ -275,6 +282,7 @@ public:
     void sendClipboard(const std::string& peerId, const std::string& text) const;
     void forget(const std::string& peerId) const;
     void clearFinishedTransfers() const;
+    void setSharingPaused(bool paused) const;
     void shareTo(const std::string& peerId) const;
     void cancelShare() const;
     // A phone's notification: dismiss it there, or answer it (messaging apps).
@@ -308,6 +316,9 @@ public:
     // The shared computer: answers a request, or ends the share.
     void answerDesktop(bool accept) const;
     void endDesktopShare() const;
+    void setFlingEnabled(bool on) const;
+    // A fling happened: files waiting to be shared go to flingTarget(), else the clipboard's text.
+    void fling(const std::string& clipboardText) const;
     void startAdvancedSetup() const;
     void advancedPair(const std::string& code) const;  // the code typed into the setup notification
     void advancedTest() const;                         // runs `id` over wireless debugging
