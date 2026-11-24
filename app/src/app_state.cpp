@@ -3,9 +3,13 @@
 #include <airlink.h>
 
 #include <algorithm>
+#include <charconv>
+#include <cmath>
 #include <ctime>
 #include <cstdio>
 #include <cstdlib>
+#include <filesystem>
+#include <fstream>
 #include <map>
 #include <mutex>
 
@@ -31,6 +35,14 @@ std::string cleanError(std::string e) {
     if (e.find("offline") != std::string::npos) return "Cihaz çevrimdışı";
     if (e.find("not paired") != std::string::npos) return "Cihaz eşleşmemiş";
     return e;
+}
+
+std::optional<uint16_t> parseAdbPort(const std::string& text) {
+    if (text.empty()) return 0;
+    unsigned port = 0;
+    auto [end, error] = std::from_chars(text.data(), text.data() + text.size(), port);
+    if (error != std::errc() || end != text.data() + text.size() || port == 0 || port > 65535) return std::nullopt;
+    return static_cast<uint16_t>(port);
 }
 
 enum class OpKind { StartPairing, ConfirmPairing, SendFiles, SendClipboard, SendReply, AdbPair, AdbTest, AdbHelper };
@@ -77,8 +89,19 @@ struct App::Impl {
     MutableState<bool> smsAccess = mutableStateOf(false);
     MutableState<std::vector<ContactMatch>> contactResults = mutableStateOf(std::vector<ContactMatch>{});
     std::string contactQuery;  // answers to older searches are dropped
+    MutableState<std::vector<ContactMatch>> phoneContacts = mutableStateOf(std::vector<ContactMatch>{});
+    MutableState<bool> phoneContactsLoading = mutableStateOf(false);
+    MutableState<bool> phoneContactsHasMore = mutableStateOf(false);
+    MutableState<std::string> phoneContactsError = mutableStateOf(std::string());
+    std::string phoneContactsQuery;
+    std::string phoneContactsPeer;
+    int phoneContactsOffset = 0;
     MutableState<std::optional<IncomingCall>> incomingCall = mutableStateOf(std::optional<IncomingCall>{});
     MutableState<std::vector<CallEntry>> callLog = mutableStateOf(std::vector<CallEntry>{});
+    MutableState<bool> callLogLoading = mutableStateOf(false);
+    MutableState<bool> callLogHasMore = mutableStateOf(false);
+    int callLogOffset = 0;
+    std::string callLogPeer;
     MutableState<std::string> callsError = mutableStateOf(std::string());
     MutableState<bool> callAccess = mutableStateOf(false);
     MutableState<std::optional<ActiveCall>> activeCall = mutableStateOf(std::optional<ActiveCall>{});
@@ -88,17 +111,45 @@ struct App::Impl {
     MutableState<bool> screenControl = mutableStateOf(false);
     MutableState<bool> advancedReady = mutableStateOf(false);
     MutableState<std::string> advancedStatus = mutableStateOf(std::string());
+    MutableState<std::string> advancedPort = mutableStateOf(std::string());
     MutableState<std::vector<PhoneApp>> phoneApps = mutableStateOf(std::vector<PhoneApp>{});
     MutableState<bool> phoneAppsLoading = mutableStateOf(false);
     struct Wheel {
         double x = 0, y = 0, h = 0, v = 0;
     };
     std::map<int, Wheel> wheels;  // per app session: the turns not sent yet
+    Wheel screenWheel;
+    bool screenWheelPending = false;
+    int nextScreenWheelTick = 0;
     std::string appsListing;                          // the listing whose parts are arriving
     std::map<int, std::vector<PhoneApp>> appsParts;   // its parts so far
     MutableState<std::vector<AppWindow>> appWindows = mutableStateOf(std::vector<AppWindow>{});
-    MutableState<int> activeWindow = mutableStateOf(0);
     int nextSession = 1;
+    std::map<std::string, AirlinkH264Decoder*> videoDecoders;
+
+    kompoz::ImageBitmap decodeMedia(const std::string& stream, const uint8_t* data, size_t len) {
+        if (len >= 4 && std::equal(data, data + 4, "ALH1")) {
+            auto& decoder = videoDecoders[stream];
+            if (!decoder) decoder = airlink_h264_decoder_new();
+            uint8_t* pixels = nullptr;
+            size_t bytes = 0;
+            int width = 0, height = 0;
+            if (decoder && airlink_h264_decode(decoder, data, len, &pixels, &bytes, &width, &height)) {
+                std::vector<uint8_t> rgba(pixels, pixels + bytes);
+                airlink_free_bytes(pixels, bytes);
+                return kompoz::ImageBitmap::fromPixels(width, height, std::move(rgba));
+            }
+            return {};
+        }
+        return kompoz::decodeToImageBitmap(std::vector<uint8_t>(data, data + len));
+    }
+
+    void removeDecoder(const std::string& stream) {
+        auto it = videoDecoders.find(stream);
+        if (it == videoDecoders.end()) return;
+        airlink_h264_decoder_free(it->second);
+        videoDecoders.erase(it);
+    }
 
     void updateWindow(int session, const std::function<void(AppWindow&)>& change) {
         appWindows.update([&](std::vector<AppWindow>& list) {
@@ -108,8 +159,8 @@ struct App::Impl {
     }
 
     void removeWindow(int session) {
+        removeDecoder("app:" + std::to_string(session));
         appWindows.update([&](std::vector<AppWindow>& list) { std::erase_if(list, [&](const AppWindow& w) { return w.session == session; }); });
-        if (activeWindow.peek() == session) activeWindow.set(0);
     }
 
     std::string adbDir() const {
@@ -130,12 +181,18 @@ struct App::Impl {
     std::vector<std::string> onlinePaired;  // for sends from any thread (under pickedMutex)
 
     ~Impl() {
+        for (auto& [_, decoder] : videoDecoders) airlink_h264_decoder_free(decoder);
         if (node) airlink_stop(node);
     }
 
     void start() {
         startAttempted = true;
         auto cfg = *platform::config();
+        if (!cfg.dataDir.empty()) {
+            std::ifstream saved(cfg.dataDir + "/adb/connect-port");
+            std::string port;
+            if (std::getline(saved, port) && parseAdbPort(port)) advancedPort.set(port);
+        }
         std::string json = "{";
         auto field = [&](const char* key, const std::string& value) {
             if (value.empty()) return;
@@ -149,7 +206,9 @@ struct App::Impl {
         char* err = nullptr;
         node = airlink_start(json.c_str(), &err);
         if (!node) {
-            startError.set(takeString(err));
+            std::string message = takeString(err);
+            startError.set(message);
+            platform::log("core start failed: " + message);
             return;
         }
         auto info = json::Value::parse(takeString(airlink_info(node)));
@@ -259,7 +318,9 @@ struct App::Impl {
         } else if (kind == "media_started") {
             if (e["name"].str() == "screen" && e["peer_id"].str() == screenPeer.peek()) screenStatus.set("live");
         } else if (kind == "media_stopped") {
-            if (e["name"].str() == "screen" && e["peer_id"].str() == screenPeer.peek()) closeScreen();
+            std::string name = e["name"].str();
+            removeDecoder(name);
+            if (name == "screen" && e["peer_id"].str() == screenPeer.peek()) closeScreen();
         } else if (kind == "app_message") {
             handleAppMessage(e["peer"], e["kind"].str(), e["body"]);
         } else if (kind == "clipboard_received") {
@@ -294,7 +355,8 @@ struct App::Impl {
                 case OpKind::AdbPair:
                     if (ok) {
                         advancedStatus.set("Eşleşildi, kabuk yetkisi deneniyor…");
-                        track(airlink_adb_shell(node, adbDir().c_str(), "id"), OpKind::AdbTest);
+                        auto port = parseAdbPort(advancedPort.peek());
+                        track(airlink_adb_shell_port(node, adbDir().c_str(), "id", port.value_or(0)), OpKind::AdbTest);
                     } else {
                         advancedStatus.set("Eşleşme olmadı: " + err);
                         platform::advancedSetupResult(false, err);
@@ -321,7 +383,7 @@ struct App::Impl {
 
     // What a computer asks of this phone (answered by the platform: SmsBridge, CallBridge).
     static bool isPhoneRequest(const std::string& kind) {
-        static const char* const kinds[] = {"sms.threads_request", "sms.thread_request", "sms.send", "contacts.search",
+        static const char* const kinds[] = {"sms.threads_request", "sms.thread_request", "sms.send", "contacts.search", "contacts.list",
                                             "calls.log_request", "call.answer", "call.reject", "call.dial", "call.hangup",
                                             "call.hold", "call.mute", "call.route", "call.volume", "call.status_request",
                                             "screen.start", "screen.stop", "screen.input",
@@ -447,13 +509,19 @@ struct App::Impl {
                 smsRefreshAt = ticks + 20;
             }
         } else if (kind == "calls.log") {
+            if (peerId != callLogPeer || int(body["offset"].i64()) != callLogOffset) return;
             std::vector<CallEntry> list;
             for (const auto& c : body["calls"].array())
                 list.push_back(CallEntry{.number = c["number"].str(), .name = c["name"].str(), .type = c["type"].str(),
                                          .date = c["date"].i64(), .duration = c["duration"].i64()});
-            callLog.set(std::move(list));
+            callLog.update([&](std::vector<CallEntry>& all) { all.insert(all.end(), list.begin(), list.end()); });
+            callLogOffset = int(body["next_offset"].i64());
+            callLogHasMore.set(body["has_more"].boolean());
+            callLogLoading.set(false);
             callsError.set({});
         } else if (kind == "calls.error") {
+            callLogLoading.set(false);
+            callLogHasMore.set(false);
             callsError.set(body["error"].str() == "no_permission" ? "Telefonda AirLink'e arama izinleri verilmemiş. Telefondaki AirLink'ten izin verin."
                                                                   : body["error"].str());
         } else if (kind == "call.dial_result") {
@@ -465,6 +533,22 @@ struct App::Impl {
             for (const auto& c : body["contacts"].array())
                 list.push_back(ContactMatch{.name = c["name"].str(), .number = c["number"].str(), .label = c["label"].str()});
             contactResults.set(std::move(list));
+        } else if (kind == "contacts.page") {
+            if (peerId != phoneContactsPeer || body["query"].str() != phoneContactsQuery ||
+                int(body["offset"].i64()) != phoneContactsOffset) return;
+            phoneContactsLoading.set(false);
+            if (body["error"].str() == "no_permission") {
+                phoneContactsError.set("Telefonda AirLink'e rehber izni verilmemiş.");
+                phoneContactsHasMore.set(false);
+                return;
+            }
+            phoneContactsError.set({});
+            std::vector<ContactMatch> page;
+            for (const auto& c : body["contacts"].array())
+                page.push_back(ContactMatch{.name = c["name"].str(), .number = c["number"].str(), .label = c["label"].str()});
+            phoneContacts.update([&](std::vector<ContactMatch>& list) { list.insert(list.end(), page.begin(), page.end()); });
+            phoneContactsOffset = int(body["next_offset"].i64());
+            phoneContactsHasMore.set(body["has_more"].boolean());
         } else if (kind == "sms.error") {
             smsLoading.set(false);
             smsError.set(body["error"].str() == "no_permission" ? "Telefonda AirLink'e SMS izni verilmemiş. Telefondaki AirLink'ten izin verin."
@@ -491,6 +575,9 @@ struct App::Impl {
     }
 
     void closeScreen() {
+        removeDecoder("screen");
+        screenWheel = {};
+        screenWheelPending = false;
         screenPeer.set({});
         screenStatus.set({});
         screenFrame.set(kompoz::ImageBitmap());
@@ -498,10 +585,28 @@ struct App::Impl {
 
     bool callLogStale = false;  // asked again on the next refresh
 
+    void requestCallLog() {
+        callLogPeer = smsPhone();
+        callLogOffset = 0;
+        callLog.set({});
+        callLogHasMore.set(false);
+        callsError.set({});
+        callLogLoading.set(!callLogPeer.empty());
+        if (node && !callLogPeer.empty())
+            airlink_send_message(node, callLogPeer.c_str(), "calls.log_request", "{\"offset\":0}");
+    }
+
+    void loadMoreCallLog() {
+        if (!node || callLogPeer.empty() || callLogLoading.peek() || !callLogHasMore.peek()) return;
+        callLogLoading.set(true);
+        std::string body = "{\"offset\":" + std::to_string(callLogOffset) + "}";
+        airlink_send_message(node, callLogPeer.c_str(), "calls.log_request", body.c_str());
+    }
+
     void smsRefresh() {
         if (callLogStale && !callLog.peek().empty()) {
             callLogStale = false;
-            phoneAsk("calls.log_request", "{}");
+            requestCallLog();
         }
         if (auto open = smsOpen.peek()) smsAsk("sms.thread_request", "{\"thread_id\":" + std::to_string(open->threadId) + "}");
         smsAsk("sms.threads_request", "{}");
@@ -564,16 +669,32 @@ void App::pump() const {
         s.phoneAsk("apps.input", buf);
     }
     s.wheels.clear();
+    // Accessibility gestures are short swipes. Group wheel ticks until the previous gesture
+    // finishes, so rapid wheel events do not cancel each other on Android.
+    if (s.screenWheelPending && s.ticks >= s.nextScreenWheelTick) {
+        auto w = s.screenWheel;
+        s.screenWheel = {};
+        s.screenWheelPending = false;
+        s.nextScreenWheelTick = s.ticks + 4;  // 200 ms at the 50 ms pump interval
+        double dx = std::clamp(w.h * 0.12, -0.42, 0.42);
+        double dy = std::clamp(w.v * 0.12, -0.42, 0.42);
+        double cx = std::clamp(w.x, 0.05 + std::abs(dx) / 2, 0.95 - std::abs(dx) / 2);
+        double cy = std::clamp(w.y, 0.05 + std::abs(dy) / 2, 0.95 - std::abs(dy) / 2);
+        char buf[192];
+        std::snprintf(buf, sizeof buf, "{\"type\":\"swipe\",\"x\":%.4f,\"y\":%.4f,\"x2\":%.4f,\"y2\":%.4f,\"ms\":130}",
+                      cx + dx / 2, cy + dy / 2, cx - dx / 2, cy - dy / 2);
+        screenInput(buf);
+    }
     // Open phone apps' newest frames.
     if (!s.appWindows.peek().empty()) {
         std::string phone = s.smsPhone();
         for (const AppWindow& w : s.appWindows.peek()) {
             uint8_t* data = nullptr;
             size_t len = 0;
-            if (phone.empty() || w.minimized) continue;
+            if (phone.empty()) continue;
             std::string name = "app:" + std::to_string(w.session);
             if (airlink_media_take(s.node, phone.c_str(), name.c_str(), &data, &len)) {
-                kompoz::ImageBitmap frame = kompoz::decodeToImageBitmap(std::vector<uint8_t>(data, data + len));
+                kompoz::ImageBitmap frame = s.decodeMedia(name, data, len);
                 airlink_free_bytes(data, len);
                 if (!frame.empty()) s.updateWindow(w.session, [&](AppWindow& x) { x.frame = frame; x.status = "live"; });
             }
@@ -584,7 +705,7 @@ void App::pump() const {
         uint8_t* data = nullptr;
         size_t len = 0;
         if (airlink_media_take(s.node, from.c_str(), "screen", &data, &len)) {
-            kompoz::ImageBitmap frame = kompoz::decodeToImageBitmap(std::vector<uint8_t>(data, data + len));
+            kompoz::ImageBitmap frame = s.decodeMedia("screen", data, len);
             airlink_free_bytes(data, len);
             if (!frame.empty()) {
                 s.screenFrame.set(frame);
@@ -700,14 +821,43 @@ void App::sendSms(const std::string& address, const std::string& text) const {
 void App::requestSmsAccess() const { platform::requestSmsAccess(); }
 
 std::vector<ContactMatch> App::contactResults() const { return impl_->contactResults.get(); }
+std::vector<ContactMatch> App::phoneContacts() const { return impl_->phoneContacts.get(); }
+bool App::phoneContactsLoading() const { return impl_->phoneContactsLoading.get(); }
+bool App::phoneContactsHasMore() const { return impl_->phoneContactsHasMore.get(); }
+std::string App::phoneContactsError() const { return impl_->phoneContactsError.get(); }
 
 std::optional<IncomingCall> App::incomingCall() const { return impl_->incomingCall.get(); }
 std::vector<CallEntry> App::callLog() const { return impl_->callLog.get(); }
+bool App::callLogLoading() const { return impl_->callLogLoading.get(); }
+bool App::callLogHasMore() const { return impl_->callLogHasMore.get(); }
 std::string App::callsError() const { return impl_->callsError.get(); }
 bool App::canShareCalls() const { return platform::canShareCalls(); }
 bool App::callAccess() const { return impl_->callAccess.get(); }
 void App::requestCallAccess() const { platform::requestCallAccess(); }
-void App::requestCallLog() const { impl_->phoneAsk("calls.log_request", "{}"); }
+void App::requestCallLog() const { impl_->requestCallLog(); }
+void App::loadMoreCallLog() const { impl_->loadMoreCallLog(); }
+
+void App::requestContacts(const std::string& query) const {
+    impl_->phoneContactsQuery = query;
+    impl_->phoneContactsPeer = impl_->smsPhone();
+    impl_->phoneContactsOffset = 0;
+    impl_->phoneContacts.set({});
+    impl_->phoneContactsHasMore.set(false);
+    impl_->phoneContactsError.set({});
+    impl_->phoneContactsLoading.set(!impl_->phoneContactsPeer.empty());
+    if (!impl_->phoneContactsPeer.empty()) {
+        std::string body = "{\"query\":" + json::quote(query) + ",\"offset\":0}";
+        sendTo(impl_->phoneContactsPeer, "contacts.list", body);
+    }
+}
+
+void App::loadMoreContacts() const {
+    if (impl_->phoneContactsPeer.empty() || impl_->phoneContactsLoading.peek() || !impl_->phoneContactsHasMore.peek()) return;
+    impl_->phoneContactsLoading.set(true);
+    std::string body = "{\"query\":" + json::quote(impl_->phoneContactsQuery) +
+                       ",\"offset\":" + std::to_string(impl_->phoneContactsOffset) + "}";
+    sendTo(impl_->phoneContactsPeer, "contacts.list", body);
+}
 
 void App::answerCall() const {
     if (auto call = impl_->incomingCall.peek()) sendTo(call->peerId, "call.answer", "{}");
@@ -733,6 +883,23 @@ void App::openScreenControlSettings() const { platform::openScreenControlSetting
 bool App::canUseAdvancedMode() const { return platform::canUseAdvancedMode(); }
 bool App::advancedReady() const { return impl_->advancedReady.get(); }
 std::string App::advancedStatus() const { return impl_->advancedStatus.get(); }
+std::string App::advancedPort() const { return impl_->advancedPort.get(); }
+
+void App::setAdvancedPort(const std::string& port) const {
+    impl_->advancedPort.set(port);
+    impl_->advancedReady.set(false);
+    auto cfg = platform::config();
+    if (!cfg || cfg->dataDir.empty()) return;
+    std::filesystem::path path = std::filesystem::path(cfg->dataDir) / "adb" / "connect-port";
+    if (port.empty()) {
+        std::error_code error;
+        std::filesystem::remove(path, error);
+    } else if (parseAdbPort(port)) {
+        std::error_code error;
+        std::filesystem::create_directories(path.parent_path(), error);
+        if (!error) std::ofstream(path) << port;
+    }
+}
 
 void App::startAdvancedSetup() const {
     impl_->advancedStatus.set("Bildirimdeki alana eşleme kodunu yazın…");
@@ -741,19 +908,28 @@ void App::startAdvancedSetup() const {
 
 void App::advancedPair(const std::string& code) const {
     if (!impl_->node) return;
+    size_t colon = code.find(':');
+    std::string pairingCode = code.substr(0, colon);
+    std::string portText = colon == std::string::npos ? std::string() : code.substr(colon + 1);
+    auto port = parseAdbPort(portText);
+    if (!port || (colon != std::string::npos && *port == 0)) {
+        impl_->advancedStatus.set("Eşleme portu 1–65535 arasında olmalı");
+        return platform::advancedSetupResult(false, "Eşleme portu geçersiz");
+    }
     impl_->advancedStatus.set("Eşleniyor…");
-    impl_->track(airlink_adb_pair(impl_->node, impl_->adbDir().c_str(), code.c_str()), OpKind::AdbPair);
+    impl_->track(airlink_adb_pair_port(impl_->node, impl_->adbDir().c_str(), pairingCode.c_str(), *port), OpKind::AdbPair);
 }
 
 void App::startHelper(const std::string& command) const {
     if (!impl_->node) return platform::helperStarted(false, "not started");
-    impl_->track(airlink_adb_shell(impl_->node, impl_->adbDir().c_str(), command.c_str()), OpKind::AdbHelper);
+    auto port = parseAdbPort(impl_->advancedPort.peek());
+    if (!port) return platform::helperStarted(false, "Kablosuz hata ayıklama portu geçersiz");
+    impl_->track(airlink_adb_shell_port(impl_->node, impl_->adbDir().c_str(), command.c_str(), *port), OpKind::AdbHelper);
 }
 
 std::vector<PhoneApp> App::phoneApps() const { return impl_->phoneApps.get(); }
 bool App::phoneAppsLoading() const { return impl_->phoneAppsLoading.get(); }
 std::vector<AppWindow> App::appWindows() const { return impl_->appWindows.get(); }
-int App::activeWindow() const { return impl_->activeWindow.get(); }
 
 void App::requestPhoneApps() const {
     if (impl_->smsPhone().empty()) return;
@@ -768,9 +944,8 @@ void App::openPhoneApp(const PhoneApp& app) const {
     impl_->appWindows.update([&](std::vector<AppWindow>& list) {
         list.push_back(AppWindow{.session = session, .label = app.label, .component = app.component, .status = "starting"});
     });
-    impl_->activeWindow.set(session);
     impl_->phoneAsk("apps.open", "{\"session\":" + std::to_string(session) + ",\"component\":" + json::quote(app.component) +
-                                     ",\"width\":720,\"height\":1560,\"dpi\":320,\"fps\":24,\"quality\":70}");
+                                     ",\"width\":720,\"height\":1560,\"dpi\":320,\"fps\":24,\"quality\":70,\"codec\":\"h264\"}");
 }
 
 void App::closeAppWindow(int session) const {
@@ -779,13 +954,7 @@ void App::closeAppWindow(int session) const {
 }
 
 void App::showAppWindow(int session) const {
-    impl_->updateWindow(session, [](AppWindow& w) { w.minimized = false; });
-    impl_->activeWindow.set(session);
-}
-
-void App::minimizeAppWindow(int session) const {
-    impl_->updateWindow(session, [](AppWindow& w) { w.minimized = true; });
-    if (impl_->activeWindow.peek() == session) impl_->activeWindow.set(0);
+    impl_->updateWindow(session, [](AppWindow& w) { ++w.frontRequests; });
 }
 
 void App::appWheel(int session, double x, double y, double h, double v) const {
@@ -805,15 +974,17 @@ void App::appInput(int session, const std::string& bodyJson) const {
 
 void App::advancedTest() const {
     if (!impl_->node) return;
+    auto port = parseAdbPort(impl_->advancedPort.peek());
+    if (!port) return impl_->advancedStatus.set("Kablosuz hata ayıklama portu 1–65535 arasında olmalı");
     impl_->advancedStatus.set("Kablosuz hata ayıklamaya bağlanılıyor…");
-    impl_->track(airlink_adb_shell(impl_->node, impl_->adbDir().c_str(), "id"), OpKind::AdbTest);
+    impl_->track(airlink_adb_shell_port(impl_->node, impl_->adbDir().c_str(), "id", *port), OpKind::AdbTest);
 }
 
 void App::startScreen(const std::string& peerId) const {
     impl_->screenPeer.set(peerId);
     impl_->screenStatus.set("asking");
     impl_->screenFrame.set(kompoz::ImageBitmap());
-    sendTo(peerId, "screen.start", "{\"quality\":60}");
+    sendTo(peerId, "screen.start", "{\"quality\":60,\"codec\":\"h264\"}");
 }
 
 void App::stopScreen() const {
@@ -826,6 +997,16 @@ void App::screenInput(const std::string& bodyJson) const {
     platform::log("screen input: " + (bodyJson.empty() ? std::string("(outside the image)") : bodyJson));
     std::string peer = impl_->screenPeer.peek();
     if (!peer.empty() && !bodyJson.empty()) sendTo(peer, "screen.input", bodyJson);
+}
+
+void App::screenWheel(double x, double y, double h, double v) const {
+    if (impl_->screenPeer.peek().empty()) return;
+    auto& w = impl_->screenWheel;
+    w.x = x;
+    w.y = y;
+    w.h += h;
+    w.v += v;
+    impl_->screenWheelPending = true;
 }
 
 void App::sendMedia(const std::string& peerId, const std::string& name, const std::vector<uint8_t>& frame) const {
@@ -873,6 +1054,11 @@ std::vector<std::string> App::takeIncomingClipboard() const { return std::exchan
 
 void App::pair(const std::string& peerId) const {
     impl_->track(airlink_start_pairing(impl_->node, peerId.c_str()), OpKind::StartPairing);
+}
+
+void App::pairAddress(const std::string& address) const {
+    if (impl_->node && !address.empty())
+        impl_->track(airlink_start_pairing_address(impl_->node, address.c_str()), OpKind::StartPairing);
 }
 
 void App::confirmOutgoing(bool accept) const {

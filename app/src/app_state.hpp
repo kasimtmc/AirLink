@@ -128,7 +128,7 @@ struct AppWindow {
     std::string label;
     std::string component;
     std::string status;  // "starting", "live", or an error
-    bool minimized = false;
+    int frontRequests = 0;
     kompoz::ImageBitmap frame;
     bool operator==(const AppWindow&) const = default;
 };
@@ -207,8 +207,14 @@ public:
     std::string smsError() const;
     bool smsLoading() const;
     std::vector<ContactMatch> contactResults() const;  // for the latest searchContacts
+    std::vector<ContactMatch> phoneContacts() const;
+    bool phoneContactsLoading() const;
+    bool phoneContactsHasMore() const;
+    std::string phoneContactsError() const;
     std::optional<IncomingCall> incomingCall() const;
     std::vector<CallEntry> callLog() const;
+    bool callLogLoading() const;
+    bool callLogHasMore() const;
     std::optional<ActiveCall> activeCall() const;
 
     // ---- A paired phone's screen on this computer ----
@@ -222,11 +228,11 @@ public:
     bool canUseAdvancedMode() const;
     bool advancedReady() const;        // paired, and a shell command ran as the shell user
     std::string advancedStatus() const;
+    std::string advancedPort() const;   // optional Wireless debugging TCP port when mDNS is unavailable
     // On a computer: the phone's apps, and the ones open here.
     std::vector<PhoneApp> phoneApps() const;
     bool phoneAppsLoading() const;
     std::vector<AppWindow> appWindows() const;
-    int activeWindow() const;  // the session shown (0: none)
     std::string callsError() const;
     bool canShareCalls() const;
     bool callAccess() const;
@@ -240,6 +246,7 @@ public:
 
     // ---- Actions ----
     void pair(const std::string& peerId) const;
+    void pairAddress(const std::string& address) const;
     void confirmOutgoing(bool accept) const;
     void respond(uint64_t requestId, bool accept) const;
     void pickAndSend(const std::string& peerId) const;
@@ -273,16 +280,17 @@ public:
     void stopScreen() const;
     // A touch on the shared screen: {"type":"tap"|"long_press"|"swipe"|"back"|"home"|"recents", ...}
     void screenInput(const std::string& bodyJson) const;
+    void screenWheel(double x, double y, double h, double v) const;  // wheel deltas over the fitted screen
     void openScreenControlSettings() const;
     void startAdvancedSetup() const;
     void advancedPair(const std::string& code) const;  // the code typed into the setup notification
     void advancedTest() const;                         // runs `id` over wireless debugging
+    void setAdvancedPort(const std::string& port) const;
     void startHelper(const std::string& command) const;  // the phone: starts the helper (AppStreams)
     void requestPhoneApps() const;
     void openPhoneApp(const PhoneApp& app) const;
     void closeAppWindow(int session) const;
     void showAppWindow(int session) const;
-    void minimizeAppWindow(int session) const;
     // Input for an open app: {"cmd":"touch","action":"down","x":..,"y":..} and the like (helper/Server.java).
     void appInput(int session, const std::string& bodyJson) const;
     // A wheel turn over an app's window (x, y: fractions; h, v: notches, Android's signs). Turns add
@@ -292,6 +300,9 @@ public:
     void sendMedia(const std::string& peerId, const std::string& name, const std::vector<uint8_t>& frame) const;
     void stopMedia(const std::string& peerId, const std::string& name) const;
     void requestCallLog() const;
+    void loadMoreCallLog() const;
+    void requestContacts(const std::string& query) const;
+    void loadMoreContacts() const;
     void requestCallAccess() const;
     // To one paired device, from any thread (answers this phone gives a computer).
     void sendTo(const std::string& peerId, const std::string& kind, const std::string& bodyJson) const;

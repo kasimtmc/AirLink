@@ -23,7 +23,9 @@ Devices find each other with mDNS. You pair two devices once by comparing a 6-di
 | 3 | Phone screen and phone apps on the computer | ✅ (Android → PC) |
 | 4 | Controlling the PC from the phone, gesture transfer, call audio over Bluetooth | ⏳ |
 
-Linux and Android are tested on real devices. The Windows build cross-compiles and runs, but its networking still needs testing on a real Windows machine; under Wine, `quinn-udp` cannot open its socket.
+Linux, Windows and Android are tested on real devices, including automatic discovery and file transfer with Windows. The Android app is written in Kotlin.
+
+Phone apps and screen sharing stream H.264 (Android MediaCodec, OpenH264 on the computer) and fall back to JPEG. See [development status](docs/development-status.md) for open items.
 
 ## Layout
 
@@ -33,7 +35,7 @@ core/airlink-capi   C API over the core (include/airlink.h), used by the app
 core/airlink-adb    Android wireless-debugging client for advanced mode (pairing, shell)
 core/airlink-cli    Command-line tool for development and testing
 app/                The app: one C++20 code base for Linux, Windows and Android, with a Kompoz UI
-app/android         Android Gradle project, including the privileged helper for advanced mode
+app/android         Android Gradle project (Kotlin, package com.plyg.airlink), including the privileged helper
 app/packaging       Desktop integration (menu entry, file manager menus)
 docs/protocol.md    Wire protocol
 ```
@@ -74,7 +76,7 @@ rustup target add x86_64-pc-windows-gnu
 cmake -S app -B app/build-windows -G Ninja -DCMAKE_TOOLCHAIN_FILE=../kompoz/cmake/mingw-w64-x86_64.cmake -DCMAKE_BUILD_TYPE=Release && cmake --build app/build-windows
 ```
 
-Ship `airlink.exe` together with its `fonts/` and `licenses/` folders. On first start, it adds "AirLink ile gönder" (Send with AirLink) to Explorer's right-click menu and to the "Send to" menu, for the current user only. `airlink.exe --unregister` removes both.
+Ship `airlink.exe` together with its `fonts/` and `licenses/` folders. For virtual machines and Remote Desktop sessions without Vulkan, run `python3 app/packaging/windows/package.py` to create `AirLink-Windows-ANGLE.zip` with ANGLE's Direct3D 11 libraries and license; see [Windows test steps](docs/windows-test.md). If multicast discovery cannot cross the virtual network, use **IP adresiyle eşleştir** in the Devices tab and enter the other device's IP and AirLink port. On first start, AirLink adds "AirLink ile gönder" (Send with AirLink) to Explorer's right-click menu and to the "Send to" menu, for the current user only. `airlink.exe --unregister` removes both.
 
 ### Android
 
@@ -88,6 +90,8 @@ Requirements:
 ```bash
 cd app/android && ./gradlew installDebug
 ```
+
+The Android app ID is `com.plyg.airlink`. An older `dev.airlink.airlink` install has a separate app identity; pair devices again if its local data is unavailable.
 
 Permissions are asked for on the phone, each from its own card in the app:
 
@@ -103,6 +107,11 @@ Opening phone apps on the computer needs more than an app is allowed to do: crea
 1. Enable *Developer options → Wireless debugging* on the phone.
 2. In AirLink, start advanced mode and choose *Pair device with pairing code*.
 3. Enter the code in AirLink's notification.
+
+If AirLink cannot find the phone's own ADB mDNS service, enter the connection port shown on the
+phone's *Wireless debugging* screen in AirLink's **Gelişmiş mod → Kablosuz hata ayıklama portu** field,
+then tap **Dene**. During a new pairing, the notification also accepts `123456:PORT`, using the
+pairing port shown beside the six-digit code. The connection and pairing ports are different.
 
 AirLink then starts a small helper as the shell user. The helper opens each app on a display of its own, streams its frames and injects your input. Only AirLink can talk to the helper, which checks a token on a local socket. The helper stops when AirLink does.
 

@@ -72,6 +72,10 @@ bool airlink_forget(AirlinkNode* node, const char* peer_id);
  * then call airlink_confirm_pairing) or a failed op_result. */
 uint64_t airlink_start_pairing(AirlinkNode* node, const char* peer_id);
 
+/* Starts pairing by numeric IP, optionally :port (default 47820), when mDNS is unavailable.
+ * Result: pairing_code or a failed op_result. */
+uint64_t airlink_start_pairing_address(AirlinkNode* node, const char* address);
+
 /* Sends the local decision for a pairing_code. Result: op_result, value = true when both
  * sides accepted. */
 uint64_t airlink_confirm_pairing(AirlinkNode* node, uint64_t pairing, bool accept);
@@ -88,7 +92,7 @@ uint64_t airlink_send_clipboard(AirlinkNode* node, const char* peer_id, const ch
  * an app_message event {"peer", "kind", "body"}. */
 uint64_t airlink_send_message(AirlinkNode* node, const char* peer_id, const char* kind, const char* body_json);
 
-/* Media: binary frames (a screen's JPEG images) on a stream `name` to a paired device. Sending
+/* Media: binary frames (JPEG or ALH1-prefixed independent H.264 access units) on a stream `name`. Sending
  * returns at once; a frame not yet written when the next is sent is dropped (the latest wins).
  * The receiver hears media_started / media_stopped {"peer_id","name"} events and takes the newest
  * frame with airlink_media_take (false: none new since the last take; free it with
@@ -98,11 +102,26 @@ void airlink_media_stop(AirlinkNode* node, const char* peer_id, const char* name
 bool airlink_media_take(AirlinkNode* node, const char* peer_id, const char* name, uint8_t** data, size_t* len);
 void airlink_free_bytes(uint8_t* data, size_t len);
 
+/* Decodes an ALH1 H.264 frame into RGBA. Decoder state is local to one stream; free it after
+ * the stream ends. On success, pixels is width * height * 4 bytes and must be freed with
+ * airlink_free_bytes. Returns false for invalid packets or frames without a picture. */
+typedef struct AirlinkH264Decoder AirlinkH264Decoder;
+AirlinkH264Decoder* airlink_h264_decoder_new(void);
+bool airlink_h264_decode(AirlinkH264Decoder* decoder, const uint8_t* packet, size_t len,
+                         uint8_t** pixels, size_t* pixels_len, int* width, int* height);
+void airlink_h264_decoder_free(AirlinkH264Decoder* decoder);
+
 /* Advanced mode (Android): the phone pairs with its own wireless debugging once (the six-digit
  * code of "Pair device with pairing code"), then runs shell commands as adbd's shell user. `dir`
  * keeps the key adbd trusts. Results: op_result (for shell, value = its standard output). */
 uint64_t airlink_adb_pair(AirlinkNode* node, const char* dir, const char* code);
+/* As airlink_adb_pair, using the port shown on the six-digit pairing screen.
+ * A port of 0 uses mDNS discovery. */
+uint64_t airlink_adb_pair_port(AirlinkNode* node, const char* dir, const char* code, uint16_t port);
 uint64_t airlink_adb_shell(AirlinkNode* node, const char* dir, const char* command);
+/* As airlink_adb_shell, using the TCP port shown on Android's Wireless debugging screen.
+ * A port of 0 uses the normal mDNS discovery path. */
+uint64_t airlink_adb_shell_port(AirlinkNode* node, const char* dir, const char* command, uint16_t port);
 
 void airlink_free_string(char* s);
 

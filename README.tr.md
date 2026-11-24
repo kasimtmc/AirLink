@@ -23,7 +23,9 @@ Cihazlar birbirini mDNS ile bulur. İki cihazı, iki ekranda da görünen 6 hane
 | 3 | Telefon ekranı ve telefon uygulamaları bilgisayarda | ✅ (Android → PC) |
 | 4 | Bilgisayarı telefondan kontrol, el hareketiyle aktarım, Bluetooth ile arama sesi | ⏳ |
 
-Linux ve Android gerçek cihazlarda denendi. Windows sürümü çapraz derleniyor ve çalışıyor, ancak ağ tarafının gerçek bir Windows makinesinde denenmesi gerekiyor; Wine altında `quinn-udp` soketini açamıyor.
+Linux, Windows ve Android gerçek cihazlarda denendi; Windows'la otomatik keşif ve dosya aktarımı da buna dahil. Android uygulaması Kotlin ile yazıldı.
+
+Telefon uygulamaları ve ekran paylaşımı H.264 ile akar (Android'de MediaCodec, bilgisayarda OpenH264); gerekirse JPEG'e döner. Açık işler için [geliştirme durumu](docs/development-status.md) belgesine bakın.
 
 ## Yapı
 
@@ -33,7 +35,7 @@ core/airlink-capi   Çekirdeğin C arayüzü (include/airlink.h); uygulama bunu 
 core/airlink-adb    Gelişmiş mod için Android kablosuz hata ayıklama istemcisi (eşleştirme, kabuk)
 core/airlink-cli    Geliştirme ve test için komut satırı aracı
 app/                Uygulama: Linux, Windows ve Android için tek C++20 kod tabanı, Kompoz arayüzü
-app/android         Android Gradle projesi; gelişmiş modun yetkili yardımcısı da burada
+app/android         Android Gradle projesi (Kotlin, paket com.plyg.airlink); gelişmiş modun yetkili yardımcısı da burada
 app/packaging       Masaüstü entegrasyonu (menü girdisi, dosya yöneticisi menüleri)
 docs/protocol.md    Ağ protokolü
 ```
@@ -74,7 +76,7 @@ rustup target add x86_64-pc-windows-gnu
 cmake -S app -B app/build-windows -G Ninja -DCMAKE_TOOLCHAIN_FILE=../kompoz/cmake/mingw-w64-x86_64.cmake -DCMAKE_BUILD_TYPE=Release && cmake --build app/build-windows
 ```
 
-`airlink.exe` dosyasını `fonts/` ve `licenses/` klasörleriyle birlikte dağıtın. İlk açılışta, yalnızca o kullanıcı için, Explorer'ın sağ tık menüsüne ve "Gönder" menüsüne "AirLink ile gönder" ekler. `airlink.exe --unregister` ikisini de kaldırır.
+`airlink.exe` dosyasını `fonts/` ve `licenses/` klasörleriyle birlikte dağıtın. Vulkan olmayan sanal makineler ve Uzak Masaüstü oturumları için `python3 app/packaging/windows/package.py`, ANGLE'ın Direct3D 11 kitaplıklarını ve lisansını içeren `AirLink-Windows-ANGLE.zip` paketini oluşturur; bkz. [Windows deneme adımları](docs/windows-test.md). Çoklu yayın keşfi sanal ağı geçemiyorsa Cihazlar sekmesindeki **IP adresiyle eşleştir** alanına diğer cihazın IP adresini ve AirLink portunu girin. İlk açılışta, yalnızca o kullanıcı için, Explorer'ın sağ tık menüsüne ve "Gönder" menüsüne "AirLink ile gönder" ekler. `airlink.exe --unregister` ikisini de kaldırır.
 
 ### Android
 
@@ -88,6 +90,8 @@ Gerekenler:
 ```bash
 cd app/android && ./gradlew installDebug
 ```
+
+Android uygulama kimliği `com.plyg.airlink`. Eski `dev.airlink.airlink` kurulumu ayrı bir uygulamadır; yerel verisi yoksa cihazları yeniden eşleştirin.
 
 İzinler telefonda, uygulamadaki ayrı kartlardan istenir:
 
@@ -103,6 +107,8 @@ Telefon uygulamalarını bilgisayarda açmak, bir uygulamanın yapmasına izin v
 1. Telefonda *Geliştirici seçenekleri → Kablosuz hata ayıklama*'yı açın.
 2. AirLink'te gelişmiş modu başlatın ve *Eşleme kodu ile cihaz eşle*'yi seçin.
 3. Kodu AirLink'in bildirimine girin.
+
+AirLink telefonun kendi ADB mDNS servisini bulamazsa, telefondaki *Kablosuz hata ayıklama* ekranında görünen bağlantı portunu **Gelişmiş mod → Kablosuz hata ayıklama portu** alanına girip **Dene**'ye dokunun. Yeni eşleştirmede bildirim, altı haneli kodun yanında görünen eşleme portuyla `123456:PORT` biçimini de kabul eder. Bağlantı ve eşleme portları farklıdır.
 
 AirLink ardından kabuk kullanıcısı olarak küçük bir yardımcı başlatır. Yardımcı her uygulamayı kendi ekranında açar, karelerini gönderir ve girdilerinizi uygulamaya iletir. Yardımcıyla yalnızca AirLink konuşabilir; yardımcı yerel sokette bir belirteç doğrular. AirLink kapanınca yardımcı da durur.
 

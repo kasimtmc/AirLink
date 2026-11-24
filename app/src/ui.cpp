@@ -3,6 +3,8 @@
 #include <kompoz/kompoz.hpp>
 
 #include <algorithm>
+#include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <ctime>
 
@@ -207,6 +209,9 @@ static std::string appKey(const KeyEvent& e) {
     if (e.modifiers.shift) meta |= 0x1 | 0x40;      // META_SHIFT_ON | META_SHIFT_LEFT_ON
     if (e.modifiers.ctrl) meta |= 0x1000 | 0x2000;  // META_CTRL_ON | META_CTRL_LEFT_ON
     if (e.modifiers.alt) meta |= 0x2 | 0x10;        // META_ALT_ON | META_ALT_LEFT_ON
+    // Printable keys are delivered separately as UTF-8 by Kompoz.
+    if (e.modifiers.ctrl == e.modifiers.alt &&
+        ((k >= K::A && k <= K::Z) || (k >= K::Zero && k <= K::Nine) || k == K::Space)) return {};
     return "{\"cmd\":\"key\",\"code\":" + std::to_string(code) + ",\"meta\":" + std::to_string(meta) + "}";
 }
 
@@ -261,6 +266,7 @@ fun AirLinkApp() {
     }
     MaterialTheme(colorScheme = scheme) {
         Home()
+        if (isDesktop()) PhoneAppWindows(appState())
     }
 }
 
@@ -304,7 +310,7 @@ fun Home() {
                 PrimaryTabRow(selectedTabIndex = tab) {
                     Tab(selected = tab == 0, onClick = { tab = 0 }, text = { Text("Cihazlar") })
                     Tab(selected = tab == 1, onClick = { tab = 1 }, text = { Text("Mesajlar") })
-                    Tab(selected = tab == 2, onClick = { tab = 2 }, text = { Text("Aramalar") })
+                    Tab(selected = tab == 2, onClick = { tab = 2 }, text = { Text("Telefon") })
                     Tab(selected = tab == 3, onClick = { tab = 3 }, text = { Text("Uygulamalar") })
                 }
             }
@@ -313,7 +319,7 @@ fun Home() {
                     ScreenView(app)
                 } else if (app.ready()) {
                     if (tabs && tab == 1) MessagesScreen(app)
-                    else if (tabs && tab == 2) CallsScreen(app)
+                    else if (tabs && tab == 2) PhoneScreen(app)
                     else if (tabs && tab == 3) AppsScreen(app)
                     else DeviceList(app, clipboard)
                 } else if (app.startError().isNotEmpty()) {
@@ -439,6 +445,7 @@ fun DeviceList(app: App, clipboard: ClipboardManager) {
     var forgetting by remember { mutableStateOf("") }
     var replyTo by remember { mutableStateOf(PhoneNotification()) }
     var replyText by remember { mutableStateOf("") }
+    var manualAddress by remember { mutableStateOf("") }
 
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
@@ -494,6 +501,21 @@ fun DeviceList(app: App, clipboard: ClipboardManager) {
         }
 
         item { SectionTitle("Yakındaki cihazlar") }
+        item {
+            OutlinedCard(modifier = Modifier.fillMaxWidth()) {
+                Column(modifier = Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("IP adresiyle eşleştir", style = MaterialTheme.typography.titleSmall)
+                    Text("Ağ keşfi çalışmıyorsa diğer cihazın IP adresini yazın. Varsayılan bağlantı noktası 47820.",
+                         style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        OutlinedTextField(value = manualAddress, onValueChange = { manualAddress = it }, singleLine = true,
+                                          label = "IP adresi veya IP:port", modifier = Modifier.weight(1f))
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Button(onClick = { app.pairAddress(manualAddress) }, enabled = manualAddress.isNotBlank()) { Text("Eşleştir") }
+                    }
+                }
+            }
+        }
         if (nearby.isEmpty()) {
             item { Hint("Aranıyor… Diğer cihazda AirLink açık ve aynı ağda olmalı.", loading = true) }
         } else {
@@ -628,6 +650,11 @@ fun AdvancedModeCard(app: App) {
                 Text(app.advancedStatus(), style = MaterialTheme.typography.bodySmall,
                      color = if (app.advancedReady()) Color(0xFF2E7D32) else cs.primary)
             }
+            OutlinedTextField(value = app.advancedPort(), onValueChange = { app.setAdvancedPort(it) },
+                              singleLine = true, label = "Kablosuz hata ayıklama portu (isteğe bağlı)",
+                              modifier = Modifier.fillMaxWidth())
+            Text("Bağlantı bulunamazsa Android > Kablosuz hata ayıklama ekranındaki IP:port değerinin yalnızca portunu girin.",
+                 style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant)
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 FilledTonalButton(onClick = { app.startAdvancedSetup() }) { Text(if (app.advancedReady()) "Yeniden kur" else "Kur") }
                 TextButton(onClick = { app.advancedTest() }) { Text("Dene") }
@@ -663,6 +690,15 @@ fun ScreenView(app: App) {
                 Image(frame, contentDescription = "Telefon ekranı", contentScale = ContentScale.Fit,
                       modifier = Modifier.fillMaxSize()
                           .onSizeChanged { box = it }
+                          .onPointerEvent(PointerEventType.Scroll) { e ->
+                              val change = e.changes.first()
+                              var x = 0.0
+                              var y = 0.0
+                              if (toScreen(change.position, box, frame.width(), frame.height(), x, y)) {
+                                  app.screenWheel(x, y, change.scrollDelta.x, change.scrollDelta.y)
+                                  change.consume()
+                              }
+                          }
                           .pointerInput(Unit) {
                               detectTapGestures(
                                   onTap = { p -> app.screenInput(touchBody("tap", p, box, frame.width(), frame.height())) },
@@ -688,7 +724,6 @@ fun AppsScreen(app: App) {
     val phone = app.smsPhone()
     val apps = app.phoneApps()
     val windows = app.appWindows()
-    val active = app.activeWindow()
     LaunchedEffect(phone) {
         if (phone.isNotEmpty() && apps.isEmpty()) app.requestPhoneApps()
     }
@@ -701,17 +736,11 @@ fun AppsScreen(app: App) {
             if (windows.isNotEmpty()) {
                 FlowRow(modifier = Modifier.fillMaxWidth().padding(12.dp, 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     for (w in windows) {
-                        FilterChip(selected = w.session == active, onClick = { if (w.session == active) app.minimizeAppWindow(w.session) else app.showAppWindow(w.session) },
-                                   label = { Text(if (w.minimized) "${w.label} (küçültüldü)" else w.label) })
+                        TextButton(onClick = { app.showAppWindow(w.session) }) { Text(w.label) }
                     }
                 }
             }
-            val shown = windows.firstOrNull { it.session == active }
-            if (shown != null) {
-                AppWindowView(app, shown!!)
-            } else {
-                AppGrid(app, apps)
-            }
+            AppGrid(app, apps)
         }
     }
 }
@@ -753,7 +782,24 @@ fun AppGrid(app: App, apps: List<PhoneApp>) {
 }
 
 @Kompozable
-fun AppWindowView(app: App, w: AppWindow) {
+fun PhoneAppWindows(app: App) {
+    for (w in app.appWindows()) {
+        key(w.session) {
+            val state = rememberWindowState(size = DpSize(400.dp, 860.dp))
+            LaunchedEffect(w.frontRequests) {
+                if (w.frontRequests > 0) state.toFront()
+            }
+            Window(onCloseRequest = { app.closeAppWindow(w.session) }, state = state, title = w.label) {
+                Surface(modifier = Modifier.fillMaxSize()) {
+                    AppWindowView(app, w, state)
+                }
+            }
+        }
+    }
+}
+
+@Kompozable
+fun AppWindowView(app: App, w: AppWindow, state: WindowState) {
     var box by remember { mutableStateOf(Size(0f, 0f)) }
     var last by remember { mutableStateOf(Offset(0f, 0f)) }
     var typed by remember { mutableStateOf("") }
@@ -765,7 +811,7 @@ fun AppWindowView(app: App, w: AppWindow) {
         Row(modifier = Modifier.fillMaxWidth().padding(8.dp), verticalAlignment = Alignment.CenterVertically) {
             Text(w.label, style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
             TextButton(onClick = { app.appInput(w.session, "{\"cmd\":\"key\",\"code\":4}") }) { Text("Geri") }
-            TextButton(onClick = { app.minimizeAppWindow(w.session) }) { Text("Küçült") }
+            TextButton(onClick = { state.setIsMinimized(true) }) { Text("Küçült") }
             Button(onClick = { app.closeAppWindow(w.session) }) { Text("Kapat") }
         }
         Box(modifier = Modifier.weight(1f).fillMaxWidth().background(Color(0xFF111111)), contentAlignment = Alignment.Center) {
@@ -785,8 +831,11 @@ fun AppWindowView(app: App, w: AppWindow) {
                           }
                           // The keyboard goes to the app while its image has the focus (a click gives it).
                           .onKeyEvent { e ->
-                              if (e.type != KeyEventType.KeyDown) false
-                              else if (e.isCtrlPressed && e.key == Key.V) {
+                              if (e.type == KeyEventType.Unknown && e.text.isNotEmpty()) {
+                                  app.appInput(w.session, textBody(e.text))
+                                  true
+                              } else if (e.type != KeyEventType.KeyDown) false
+                              else if (e.isCtrlPressed && !e.isAltPressed && e.key == Key.V) {
                                   val text = clip.getText()
                                   if (text.isNotEmpty()) app.appInput(w.session, textBody(text))
                                   true
@@ -825,12 +874,35 @@ fun AppWindowView(app: App, w: AppWindow) {
 // ---- Calls (a paired phone's, on a computer) ------------------------------------------------
 
 @Kompozable
+fun PhoneScreen(app: App) {
+    var tab by remember { mutableStateOf(0) }
+    Column(modifier = Modifier.fillMaxSize()) {
+        PrimaryTabRow(selectedTabIndex = tab) {
+            Tab(selected = tab == 0, onClick = { tab = 0 }, text = { Text("Aramalar") })
+            Tab(selected = tab == 1, onClick = { tab = 1 }, text = { Text("Rehber") })
+        }
+        if (tab == 0) CallsScreen(app) else ContactsScreen(app)
+    }
+}
+
+@Kompozable
 fun CallsScreen(app: App) {
     val phone = app.smsPhone()
     val log = app.callLog()
+    val loading = app.callLogLoading()
+    val list = rememberLazyListState()
+    val nearEnd by remember {
+        derivedStateOf {
+            val info = list.layoutInfo
+            info.visibleItemsInfo.isNotEmpty() && info.visibleItemsInfo.last().index >= info.totalItemsCount - 4
+        }
+    }
     var number by remember { mutableStateOf("") }
     LaunchedEffect(phone) {
         if (phone.isNotEmpty()) app.requestCallLog()
+    }
+    LaunchedEffect(nearEnd, log.size, loading) {
+        if (nearEnd && !loading && app.callLogHasMore()) app.loadMoreCallLog()
     }
     if (phone.isEmpty()) {
         Box(modifier = Modifier.fillMaxSize().padding(16.dp)) {
@@ -850,13 +922,84 @@ fun CallsScreen(app: App) {
                     TextButton(onClick = { app.requestCallLog() }) { Text("Tekrar dene") }
                 }
             }
-            LazyColumn(modifier = Modifier.fillMaxSize(), contentPadding = PaddingValues(12.dp, 0.dp, 12.dp, 12.dp),
+            LazyColumn(modifier = Modifier.fillMaxSize(), state = list, contentPadding = PaddingValues(12.dp, 0.dp, 12.dp, 12.dp),
                        verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 if (log.isEmpty() && app.callsError().isEmpty()) {
-                    item { Hint("Arama kaydı telefondan alınıyor…", loading = true) }
+                    item { Hint(if (loading) "Arama kaydı telefondan alınıyor…" else "Arama kaydı yok.", loading = loading) }
                 }
                 items(log) { c -> CallRow(c, onCall = { app.dial(c.number) }) }
+                if (loading && log.isNotEmpty()) {
+                    item { Hint("Yükleniyor…", loading = true) }
+                }
             }
+        }
+    }
+}
+
+@Kompozable
+fun ContactsScreen(app: App) {
+    val phone = app.smsPhone()
+    var query by remember { mutableStateOf("") }
+    val list = rememberLazyListState()
+    LaunchedEffect(phone + "|" + query) {
+        if (phone.isNotEmpty()) {
+            list.scrollToItem(0)
+            delay(250)
+            app.requestContacts(query)
+        }
+    }
+    if (phone.isEmpty()) {
+        Box(modifier = Modifier.fillMaxSize().padding(16.dp)) {
+            Hint("Rehber için eşleşmiş bir Android telefon çevrimiçi olmalı.", loading = false)
+        }
+    } else {
+        val contacts = app.phoneContacts()
+        val loading = app.phoneContactsLoading()
+        val error = app.phoneContactsError()
+        val nearEnd by remember {
+            derivedStateOf {
+                val info = list.layoutInfo
+                info.visibleItemsInfo.isNotEmpty() && info.visibleItemsInfo.last().index >= info.totalItemsCount - 4
+            }
+        }
+        LaunchedEffect(nearEnd, contacts.size, loading) {
+            if (nearEnd && !loading && app.phoneContactsHasMore()) app.loadMoreContacts()
+        }
+        Column(modifier = Modifier.fillMaxSize()) {
+            OutlinedTextField(value = query, onValueChange = { query = it }, singleLine = true, label = "Rehberde ara",
+                              modifier = Modifier.fillMaxWidth().padding(12.dp))
+            if (error.isNotEmpty()) {
+                Column(modifier = Modifier.padding(16.dp)) {
+                    Text(error)
+                    TextButton(onClick = { app.requestContacts(query) }) { Text("Tekrar dene") }
+                }
+            }
+            LazyColumn(modifier = Modifier.fillMaxSize(), state = list, contentPadding = PaddingValues(12.dp, 0.dp, 12.dp, 12.dp),
+                       verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                if (contacts.isEmpty() && error.isEmpty()) {
+                    item { Hint(if (loading) "Rehber telefondan alınıyor…" else "Kişi bulunamadı.", loading = loading) }
+                }
+                items(contacts) { c -> PhoneContactRow(c, onCall = { app.dial(c.number) }) }
+                if (loading && contacts.isNotEmpty()) {
+                    item {
+                        Hint("Yükleniyor…", loading = true)
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Kompozable
+fun PhoneContactRow(c: ContactMatch, onCall: () -> Unit) {
+    Card(modifier = Modifier.fillMaxWidth()) {
+        Row(modifier = Modifier.fillMaxWidth().padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(if (c.name.isEmpty()) c.number else c.name, style = MaterialTheme.typography.titleSmall)
+                Text(if (c.label.isEmpty()) c.number else "${c.label} · ${c.number}",
+                     style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+            TextButton(onClick = onCall) { Text("Ara") }
         }
     }
 }
@@ -1273,6 +1416,16 @@ fun OutgoingPairingDialog(app: App) {
 }
 
 kompoz::Application kompoz::createApplication(int argc, char** argv) {
+#if defined(_WIN32)
+    // A GUI-subsystem process has no console in WinBoat's app view. Keep startup diagnostics
+    // when requested by the bundled diagnostic launcher, including Kompoz's GPU errors.
+    if (const char* path = std::getenv("AIRLINK_DIAG_LOG")) {
+        if (std::freopen(path, "w", stderr)) {
+            std::setvbuf(stderr, nullptr, _IONBF, 0);
+            std::fprintf(stderr, "airlink: diagnostic launch\n");
+        }
+    }
+#endif
     // `airlink --send FILE...`: to the running instance if there is one (this process then exits).
     airlink::platform::handleLaunch(argc, argv);
     // Create the app's states here, outside any composition's snapshot.

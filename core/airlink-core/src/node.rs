@@ -705,9 +705,10 @@ async fn serve_streams(inner: Arc<Inner>, conn: Connection, peer: DeviceInfo, ad
     }
     while let Ok((send, recv)) = conn.accept_bi().await {
         let inner = inner.clone();
+        let conn = conn.clone();
         let peer = peer.clone();
         tokio::spawn(async move {
-            if let Err(e) = handle_stream(inner, peer, addr, send, recv).await {
+            if let Err(e) = handle_stream(inner, conn, peer, addr, send, recv).await {
                 debug!("stream failed: {e:#}");
             }
         });
@@ -796,6 +797,7 @@ async fn media_writer(inner: Arc<Inner>, key: (String, String), out: Arc<MediaOu
 
 async fn handle_stream(
     inner: Arc<Inner>,
+    conn: Connection,
     peer: DeviceInfo,
     addr: SocketAddr,
     mut send: SendStream,
@@ -803,7 +805,7 @@ async fn handle_stream(
 ) -> Result<()> {
     let msg = read_msg(&mut recv).await?;
     if msg == Message::PairRequest {
-        let res = pair_responder(&inner, &peer, addr, &mut send, &mut recv).await;
+        let res = pair_responder(&inner, &conn, &peer, addr, &mut send, &mut recv).await;
         if res.is_err() {
             inner.finish_pairing(&peer, addr, false);
         }
@@ -863,6 +865,7 @@ async fn handle_stream(
 
 async fn pair_responder(
     inner: &Arc<Inner>,
+    conn: &Connection,
     peer: &DeviceInfo,
     addr: SocketAddr,
     send: &mut SendStream,
@@ -907,7 +910,15 @@ async fn pair_responder(
         m => bail!("unexpected message: {m:?}"),
     };
     send.finish()?;
-    inner.finish_pairing(peer, addr, local && remote);
+    let paired = local && remote;
+    inner.finish_pairing(peer, addr, paired);
+    if paired {
+        inner
+            .connections
+            .lock()
+            .unwrap()
+            .insert(peer.id.clone(), (conn.clone(), peer.clone()));
+    }
     Ok(())
 }
 

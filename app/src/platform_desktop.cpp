@@ -398,6 +398,8 @@ void handleLaunch(int argc, char** argv) {
     // mutex and serves; the others wait for its pipe and hand it their file.
     CreateMutexW(nullptr, TRUE, (L"Local\\AirLink-" + userName()).c_str());
     bool another = GetLastError() == ERROR_ALREADY_EXISTS;
+    if (std::getenv("AIRLINK_DIAG_LOG"))
+        std::fprintf(stderr, "airlink: existing instance: %s\n", another ? "yes" : "no");
     for (int tries = 0; another && tries < 30; ++tries) {
         if (forward(files)) std::exit(0);
         Sleep(100);

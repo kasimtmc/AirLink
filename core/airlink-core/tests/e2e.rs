@@ -68,6 +68,15 @@ async fn pair_transfer_and_clipboard() {
     })
     .await
     .unwrap();
+    // Neither node advertises or browses mDNS. The responder must retain the inbound
+    // connection after pairing so it can send back across a one-way NAT.
+    timeout(Duration::from_secs(5), async {
+        while !b.reachable_trusted_peers().contains(&a.info().id) {
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+    })
+    .await
+    .unwrap();
 
     // A file and a folder, including a 3 MiB file to exercise chunking.
     let src = tmp.path().join("src");

@@ -120,10 +120,31 @@ Yalnızca eşleşmiş cihazlar arasında gider. Tanımlı türler:
 | `notification.reply` | PC → telefon | `{ key, text }` |
 | `sms.threads_request` | PC → telefon | `{}` → `sms.threads { threads: [{ thread_id, address, name, snippet, date, unread }] }` |
 | `sms.thread_request` | PC → telefon | `{ thread_id }` → `sms.messages { thread_id, messages: [{ id, body, date, outgoing, failed }] }` |
-| `sms.send` | PC → telefon | `{ address, text }` → `sms.sent { address, ok, error? }` |
+| `sms.send` | PC → telefon | `{ address, text, client_id? }` → `sms.sent { client_id, address, ok, error? }` |
 | `sms.received` | telefon → PC | `{ address, name, body, date, thread_id }` |
 | `sms.error` | telefon → PC | `{ error, request }` (`no_permission`: SMS izni verilmemiş) |
 | `contacts.search` | PC → telefon | `{ query }` → `contacts.results { query, contacts: [{ name, number, label }] }` |
+| `contacts.list` | PC → telefon | `{ query, offset }` → `contacts.page { query, offset, next_offset, has_more, contacts: [{ name, number, label }], error? }` (en çok 100 satır/sayfa) |
+| `calls.log_request` | PC → telefon | `{ offset }` → `calls.log { offset, next_offset, has_more, calls: [{ number, name, type, date, duration }] }` (en çok 80 kayıt/sayfa); izin yoksa `calls.error { error: "no_permission" }` |
+| `call.ringing` | telefon → PC | `{ number, name }` |
+| `call.state` | telefon → PC | `{ state }`: `offhook` (yanıtlandı/aranıyor) veya `idle` (bitti) |
+| `call.status_request` | PC → telefon | `{}` → `call.status` |
+| `call.status` | telefon → PC | `{ full_control, state, held, can_hold, muted, route, routes, number?, name?, since?, volume, volume_max }`; `state`: `ringing`, `dialing`, `active`, `held`, `ended`, `other`. `full_control` yalnızca AirLink varsayılan arama uygulamasıyken (`InCallService`) `true` olur |
+| `call.answer` / `call.reject` | PC → telefon | `{}` |
+| `call.hangup` | PC → telefon | `{}` |
+| `call.hold` / `call.mute` | PC → telefon | `{ on }` (bekletme yalnızca tam denetimde) |
+| `call.route` | PC → telefon | `{ route }`: `earpiece`, `speaker`, `bluetooth`, `wired` |
+| `call.volume` | PC → telefon | `{ delta }`: pozitif artırır, diğerleri azaltır |
+| `call.dial` | PC → telefon | `{ number }` → `call.dial_result { number, ok, error? }` (`no_number`, `no_permission`) |
+| `screen.start` | PC → telefon | `{ quality, codec? }` (bkz. bölüm 10) → `screen.started { width, height }` veya `screen.stopped { reason }` |
+| `screen.stop` | PC → telefon | `{}` |
+| `screen.stopped` | telefon → PC | `{ reason }`: `declined`, `failed`, `user`, `computer`… |
+| `screen.input` | PC → telefon | `{ type, x, y, x2?, y2?, ms? }`; `type`: `tap`, `long_press`, `swipe`, `back`, `home`, `recents`, `notifications`. Koordinatlar 0–1 arası oranlardır; erişilebilirlik servisi ve etkin ekran paylaşımı gerekir |
+| `apps.list` | PC → telefon | `{}` → bir veya daha çok `apps.list_result { list, part, parts, apps: [{ label, component, icon }] }` (`icon` 72 px PNG, base64; parçalar ~400 KiB) |
+| `apps.open` | PC → telefon | `{ session, component, width, height, dpi, fps, quality, codec? }` (gelişmiş mod) |
+| `apps.close` | PC → telefon | `{ session }` |
+| `apps.input` | PC → telefon | `{ session, cmd, … }`; `cmd`: `touch { action: down/move/up, x, y }`, `scroll { x, y, h, v }`, `key { code, meta }` (Android tuş kodu), `text { text }`. Klavye haritasının yazamadığı metin telefon panosundan yapıştırılır |
+| `apps.event` | telefon → PC | `{ session, event, message? }`; `event`: `opened`, `closed`, `error` |
 
 ## 10. Medya akışları
 
@@ -138,16 +159,22 @@ Alıcı her akışın yalnızca en son karesini tutar; gönderen, yazılamamış
 Böylece yavaş bir bağlantıda gecikme birikmez. Akışın başlatılması ve durdurulması uygulama mesajlarıyla
 istenir (`screen.start`, `screen.stop`); dokunuşlar da öyle gider (`screen.input`).
 
+`screen.start` ve `apps.open` istekleri `"codec":"h264"` içerebilir. Android bu durumda MediaCodec ile
+her kareyi bağımsız bir H.264 anahtar karesi olarak kodlar. Kare baytları `ALH1` ASCII öneki,
+ardından Annex B biçimindeki SPS/PPS ve IDR birimlerinden oluşur. Bağımsız kareler,
+yukarıdaki son kareyi tutma davranışında referans karesi kaybını önler. Eski Android sürümü
+istekteki alanı yok sayıp JPEG gönderebilir; çözücü JPEG ve `ALH1` karelerini ayırt eder.
+Telefonda kodlayıcı başlatılamazsa JPEG gönderilir. H.264 kodlama ve çözme yolu Android
+emülatöründe ve fiziksel telefonda doğrulandı; uygulama pencereleri ve ekran paylaşımı gerçek
+telefonla canlı çalışıyor.
+
+Akış adları: telefon ekranı `screen`, gelişmiş moddaki her uygulama oturumu `app:<session>`.
+
 ## 11. Gelecek sürümler (ayrılmış)
 
-Şu mesaj aileleri sonraki fazlarda eklenecek:
+Faz 4 için şu mesaj aileleri ayrılmıştır:
 
-- `notification.*`
-- `sms.*`
-- `call.*`
-- `contacts.*`
-- `screen.*` (video akışı ve uzaktan giriş)
-- `input.*`
-- `gesture.*`
+- `input.*`: bilgisayarı telefondan kontrol
+- `gesture.*`: el hareketiyle aktarım
 
 Bilinmeyen bir `type` gelirse yanıt `error { message: "unsupported" }` olur.

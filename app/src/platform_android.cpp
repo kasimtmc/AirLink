@@ -284,7 +284,7 @@ void filesReceived(const std::vector<std::string>& paths) {
 
 using namespace airlink::platform;
 
-extern "C" JNIEXPORT void JNICALL Java_dev_airlink_airlink_MainActivity_nativeInit(
+extern "C" JNIEXPORT void JNICALL Java_com_plyg_airlink_MainActivity_nativeInit(
     JNIEnv* e, jclass, jobject activityObject, jstring filesDir, jstring downloadDir, jstring deviceName) {
     std::lock_guard lock(mutex);
     e->GetJavaVM(&vm);
@@ -292,13 +292,13 @@ extern "C" JNIEXPORT void JNICALL Java_dev_airlink_airlink_MainActivity_nativeIn
     activity = e->NewGlobalRef(activityObject);
     started = Config{.dataDir = fromJava(e, filesDir), .downloadDir = fromJava(e, downloadDir), .fallbackName = fromJava(e, deviceName)};
     if (!serviceClass) {
-        jclass local = e->FindClass("dev/airlink/airlink/AirLinkService");
+        jclass local = e->FindClass("com/plyg/airlink/AirLinkService");
         serviceClass = static_cast<jclass>(e->NewGlobalRef(local));
         e->DeleteLocalRef(local);
         onPrompt = e->GetStaticMethodID(serviceClass, "onPrompt", "(Ljava/lang/String;)V");
     }
     if (!listenerClass) {
-        jclass local = e->FindClass("dev/airlink/airlink/AirLinkNotificationListener");
+        jclass local = e->FindClass("com/plyg/airlink/AirLinkNotificationListener");
         listenerClass = static_cast<jclass>(e->NewGlobalRef(local));
         e->DeleteLocalRef(local);
         listenerGranted = e->GetStaticMethodID(listenerClass, "accessGranted", "()Z");
@@ -306,11 +306,11 @@ extern "C" JNIEXPORT void JNICALL Java_dev_airlink_airlink_MainActivity_nativeIn
         listenerAct = e->GetStaticMethodID(listenerClass, "act", "(Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;)V");
     }
     if (!smsClass) {
-        jclass local = e->FindClass("dev/airlink/airlink/SmsBridge");
+        jclass local = e->FindClass("com/plyg/airlink/SmsBridge");
         smsClass = static_cast<jclass>(e->NewGlobalRef(local));
         e->DeleteLocalRef(local);
         smsHandle = e->GetStaticMethodID(smsClass, "handle", "(Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;)V");
-        local = e->FindClass("dev/airlink/airlink/MainActivity");
+        local = e->FindClass("com/plyg/airlink/MainActivity");
         activityClass = static_cast<jclass>(e->NewGlobalRef(local));
         e->DeleteLocalRef(local);
         smsGranted = e->GetStaticMethodID(activityClass, "smsGranted", "()Z");
@@ -319,12 +319,12 @@ extern "C" JNIEXPORT void JNICALL Java_dev_airlink_airlink_MainActivity_nativeIn
         callRequestPermissions = e->GetStaticMethodID(activityClass, "requestCallPermissions", "()V");
         screenControlOn = e->GetStaticMethodID(activityClass, "screenControlEnabled", "()Z");
         screenControlSettings = e->GetStaticMethodID(activityClass, "openScreenControlSettings", "()V");
-        local = e->FindClass("dev/airlink/airlink/AdbPairing");
+        local = e->FindClass("com/plyg/airlink/AdbPairing");
         adbPairingClass = static_cast<jclass>(e->NewGlobalRef(local));
         e->DeleteLocalRef(local);
         adbStart = e->GetStaticMethodID(adbPairingClass, "start", "()V");
         adbDone = e->GetStaticMethodID(adbPairingClass, "done", "(ZLjava/lang/String;)V");
-        local = e->FindClass("dev/airlink/airlink/AppStreams");
+        local = e->FindClass("com/plyg/airlink/AppStreams");
         appStreamsClass = static_cast<jclass>(e->NewGlobalRef(local));
         e->DeleteLocalRef(local);
         appStreamsHelperStarted = e->GetStaticMethodID(appStreamsClass, "helperStarted", "(ZLjava/lang/String;)V");
@@ -344,7 +344,7 @@ std::vector<std::string> pathsOf(JNIEnv* e, jobjectArray paths) {
 }
 }  // namespace
 
-extern "C" JNIEXPORT void JNICALL Java_dev_airlink_airlink_MainActivity_nativeShared(JNIEnv* e, jclass, jobjectArray paths) {
+extern "C" JNIEXPORT void JNICALL Java_com_plyg_airlink_MainActivity_nativeShared(JNIEnv* e, jclass, jobjectArray paths) {
     std::vector<std::string> list = pathsOf(e, paths);
     if (list.empty()) return;
     std::function<void(std::vector<std::string>)> handler;
@@ -359,16 +359,16 @@ extern "C" JNIEXPORT void JNICALL Java_dev_airlink_airlink_MainActivity_nativeSh
     handler(std::move(list));
 }
 
-extern "C" JNIEXPORT void JNICALL Java_dev_airlink_airlink_AirLinkNotificationListener_nativeBroadcast(JNIEnv* e, jclass, jstring kind,
+extern "C" JNIEXPORT void JNICALL Java_com_plyg_airlink_AirLinkNotificationListener_nativeBroadcast(JNIEnv* e, jclass, jstring kind,
                                                                                                     jstring body) {
     airlink::App::get().broadcast(fromJava(e, kind), fromJava(e, body));
 }
 
-extern "C" JNIEXPORT void JNICALL Java_dev_airlink_airlink_MainActivity_nativeStartHelper(JNIEnv* e, jclass, jstring command) {
+extern "C" JNIEXPORT void JNICALL Java_com_plyg_airlink_MainActivity_nativeStartHelper(JNIEnv* e, jclass, jstring command) {
     airlink::App::get().startHelper(fromJava(e, command));
 }
 
-extern "C" JNIEXPORT void JNICALL Java_dev_airlink_airlink_AppStreams_nativeSendFrame(JNIEnv* e, jclass, jstring peer, jstring name,
+extern "C" JNIEXPORT void JNICALL Java_com_plyg_airlink_AppStreams_nativeSendFrame(JNIEnv* e, jclass, jstring peer, jstring name,
                                                                                      jbyteArray jpeg) {
     jsize n = e->GetArrayLength(jpeg);
     std::vector<uint8_t> bytes(static_cast<size_t>(n));
@@ -376,42 +376,42 @@ extern "C" JNIEXPORT void JNICALL Java_dev_airlink_airlink_AppStreams_nativeSend
     airlink::App::get().sendMedia(fromJava(e, peer), fromJava(e, name), bytes);
 }
 
-extern "C" JNIEXPORT void JNICALL Java_dev_airlink_airlink_AppStreams_nativeStopFrames(JNIEnv* e, jclass, jstring peer, jstring name) {
+extern "C" JNIEXPORT void JNICALL Java_com_plyg_airlink_AppStreams_nativeStopFrames(JNIEnv* e, jclass, jstring peer, jstring name) {
     airlink::App::get().stopMedia(fromJava(e, peer), fromJava(e, name));
 }
 
-extern "C" JNIEXPORT void JNICALL Java_dev_airlink_airlink_MainActivity_nativeAdbPair(JNIEnv* e, jclass, jstring code) {
+extern "C" JNIEXPORT void JNICALL Java_com_plyg_airlink_MainActivity_nativeAdbPair(JNIEnv* e, jclass, jstring code) {
     airlink::App::get().advancedPair(fromJava(e, code));
 }
 
-extern "C" JNIEXPORT void JNICALL Java_dev_airlink_airlink_MainActivity_nativePump(JNIEnv*, jclass) {
+extern "C" JNIEXPORT void JNICALL Java_com_plyg_airlink_MainActivity_nativePump(JNIEnv*, jclass) {
     airlink::App::get().pump();  // on the main (UI) thread, as the UI loop pumps
 }
 
-extern "C" JNIEXPORT void JNICALL Java_dev_airlink_airlink_ScreenShare_nativeSendFrame(JNIEnv* e, jclass, jstring peer, jbyteArray jpeg) {
+extern "C" JNIEXPORT void JNICALL Java_com_plyg_airlink_ScreenShare_nativeSendFrame(JNIEnv* e, jclass, jstring peer, jbyteArray jpeg) {
     jsize n = e->GetArrayLength(jpeg);
     std::vector<uint8_t> bytes(static_cast<size_t>(n));
     e->GetByteArrayRegion(jpeg, 0, n, reinterpret_cast<jbyte*>(bytes.data()));
     airlink::App::get().sendMedia(fromJava(e, peer), "screen", bytes);
 }
 
-extern "C" JNIEXPORT void JNICALL Java_dev_airlink_airlink_ScreenShare_nativeStopFrames(JNIEnv* e, jclass, jstring peer) {
+extern "C" JNIEXPORT void JNICALL Java_com_plyg_airlink_ScreenShare_nativeStopFrames(JNIEnv* e, jclass, jstring peer) {
     airlink::App::get().stopMedia(fromJava(e, peer), "screen");
 }
 
-extern "C" JNIEXPORT void JNICALL Java_dev_airlink_airlink_SmsBridge_nativeSendTo(JNIEnv* e, jclass, jstring peer, jstring kind, jstring body) {
+extern "C" JNIEXPORT void JNICALL Java_com_plyg_airlink_SmsBridge_nativeSendTo(JNIEnv* e, jclass, jstring peer, jstring kind, jstring body) {
     airlink::App::get().sendTo(fromJava(e, peer), fromJava(e, kind), fromJava(e, body));
 }
 
-extern "C" JNIEXPORT void JNICALL Java_dev_airlink_airlink_SmsBridge_nativeBroadcast(JNIEnv* e, jclass, jstring kind, jstring body) {
+extern "C" JNIEXPORT void JNICALL Java_com_plyg_airlink_SmsBridge_nativeBroadcast(JNIEnv* e, jclass, jstring kind, jstring body) {
     airlink::App::get().broadcast(fromJava(e, kind), fromJava(e, body));
 }
 
-extern "C" JNIEXPORT void JNICALL Java_dev_airlink_airlink_MainActivity_nativeRespond(JNIEnv*, jclass, jlong requestId, jboolean accept) {
+extern "C" JNIEXPORT void JNICALL Java_com_plyg_airlink_MainActivity_nativeRespond(JNIEnv*, jclass, jlong requestId, jboolean accept) {
     airlink::App::get().respond(uint64_t(requestId), accept);
 }
 
-extern "C" JNIEXPORT void JNICALL Java_dev_airlink_airlink_MainActivity_nativeFilesPicked(JNIEnv* e, jclass, jobjectArray paths) {
+extern "C" JNIEXPORT void JNICALL Java_com_plyg_airlink_MainActivity_nativeFilesPicked(JNIEnv* e, jclass, jobjectArray paths) {
     std::vector<std::string> list = pathsOf(e, paths);
     std::function<void(std::vector<std::string>)> done;
     {

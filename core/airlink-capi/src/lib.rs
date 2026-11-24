@@ -5,12 +5,15 @@
 
 use std::collections::{HashMap, VecDeque};
 use std::ffi::{CStr, CString, c_char};
+use std::net::{IpAddr, SocketAddr};
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
-use airlink_core::{Node, NodeConfig, OutgoingPairing, read_saved_name};
+use airlink_core::{DEFAULT_PORT, Node, NodeConfig, OutgoingPairing, read_saved_name};
+use openh264::decoder::Decoder;
+use openh264::formats::YUVSource;
 use serde::Deserialize;
 use serde_json::{Value, json};
 
@@ -21,6 +24,10 @@ pub struct AirlinkNode {
     rt: tokio::runtime::Runtime,
     node: Node,
     shared: Arc<Shared>,
+}
+
+pub struct AirlinkH264Decoder {
+    decoder: Decoder,
 }
 
 /// `airlink_set_prompt_listener`'s callback and its context.
@@ -370,6 +377,52 @@ pub unsafe extern "C" fn airlink_start_pairing(
     })
 }
 
+/// Pair directly with a numeric IP address, optionally followed by `:port`.
+/// This works when multicast discovery cannot cross a VM or routed network.
+/// # Safety
+/// `node` as for `node_ref`; `address` a valid C string.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn airlink_start_pairing_address(
+    node: *mut AirlinkNode,
+    address: *const c_char,
+) -> u64 {
+    let (Some(n), Some(address)) = (unsafe { node_ref(node) }, unsafe { read_str(address) }) else {
+        return 0;
+    };
+    guard(0, || {
+        let op = n.shared.id();
+        let (node, shared) = (n.node.clone(), n.shared.clone());
+        n.rt.spawn(async move {
+            let addr = address.parse::<SocketAddr>().ok().or_else(|| {
+                address
+                    .parse::<IpAddr>()
+                    .ok()
+                    .map(|ip| SocketAddr::new(ip, DEFAULT_PORT))
+            });
+            let result = match addr {
+                Some(addr) => node.start_pairing(addr).await,
+                None => {
+                    shared
+                        .op_result::<()>(op, Err(anyhow::anyhow!("IP adresi geçersiz: {address}")));
+                    return;
+                }
+            };
+            match result {
+                Ok(p) => {
+                    let pairing = shared.id();
+                    shared.push(
+                        json!({"event": "pairing_code", "op": op, "pairing": pairing,
+                                       "code": p.code(), "peer": p.peer()}),
+                    );
+                    shared.pairings.lock().unwrap().insert(pairing, p);
+                }
+                Err(e) => shared.op_result::<()>(op, Err(e)),
+            }
+        });
+        op
+    })
+}
+
 /// # Safety
 /// `node` as for `node_ref`.
 #[unsafe(no_mangle)]
@@ -571,6 +624,114 @@ pub unsafe extern "C" fn airlink_free_bytes(data: *mut u8, len: usize) {
     }
 }
 
+#[unsafe(no_mangle)]
+pub extern "C" fn airlink_h264_decoder_new() -> *mut AirlinkH264Decoder {
+    guard(std::ptr::null_mut(), || match Decoder::new() {
+        Ok(decoder) => Box::into_raw(Box::new(AirlinkH264Decoder { decoder })),
+        Err(_) => std::ptr::null_mut(),
+    })
+}
+
+/// # Safety
+/// `decoder` is an owned live decoder, `packet` has `len` readable bytes, and output pointers
+/// are writable. The returned pixel buffer belongs to `airlink_free_bytes`.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn airlink_h264_decode(
+    decoder: *mut AirlinkH264Decoder,
+    packet: *const u8,
+    len: usize,
+    pixels: *mut *mut u8,
+    pixels_len: *mut usize,
+    width: *mut i32,
+    height: *mut i32,
+) -> bool {
+    if decoder.is_null()
+        || packet.is_null()
+        || pixels.is_null()
+        || pixels_len.is_null()
+        || width.is_null()
+        || height.is_null()
+        || len < 5
+        || len > 16 * 1024 * 1024
+    {
+        return false;
+    }
+    guard(false, || {
+        let bytes = unsafe { std::slice::from_raw_parts(packet, len) };
+        if !bytes.starts_with(b"ALH1") {
+            return false;
+        }
+        let Some(image) = (unsafe { &mut *decoder })
+            .decoder
+            .decode(&bytes[4..])
+            .ok()
+            .flatten()
+        else {
+            return false;
+        };
+        let (w, h) = image.dimensions();
+        let Some(size) = w.checked_mul(h).and_then(|n| n.checked_mul(4)) else {
+            return false;
+        };
+        if w == 0 || h == 0 || w > 4096 || h > 4096 || size > 64 * 1024 * 1024 {
+            return false;
+        }
+        let mut rgba = vec![0; size];
+        image.write_rgba8(&mut rgba);
+        let boxed = rgba.into_boxed_slice();
+        unsafe {
+            *pixels_len = boxed.len();
+            *pixels = Box::into_raw(boxed) as *mut u8;
+            *width = w as i32;
+            *height = h as i32;
+        }
+        true
+    })
+}
+
+/// # Safety
+/// `decoder` is null or was returned by `airlink_h264_decoder_new` and not freed yet.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn airlink_h264_decoder_free(decoder: *mut AirlinkH264Decoder) {
+    if !decoder.is_null() {
+        drop(unsafe { Box::from_raw(decoder) });
+    }
+}
+
+#[cfg(test)]
+mod h264_tests {
+    use super::*;
+    use openh264::encoder::Encoder;
+    use openh264::formats::{RgbSliceU8, YUVBuffer};
+
+    #[test]
+    fn independent_h264_packet_decodes_to_rgba() {
+        let rgb = vec![128_u8; 16 * 16 * 3];
+        let yuv = YUVBuffer::from_rgb_source(RgbSliceU8::new(&rgb, (16, 16)));
+        let packet = Encoder::new().unwrap().encode(&yuv).unwrap().to_vec();
+        let packet = [b"ALH1".as_slice(), packet.as_slice()].concat();
+        let decoder = airlink_h264_decoder_new();
+        assert!(!decoder.is_null());
+        let (mut pixels, mut len, mut width, mut height) = (std::ptr::null_mut(), 0, 0, 0);
+        assert!(unsafe {
+            airlink_h264_decode(
+                decoder,
+                packet.as_ptr(),
+                packet.len(),
+                &mut pixels,
+                &mut len,
+                &mut width,
+                &mut height,
+            )
+        });
+        assert_eq!((width, height, len), (16, 16, 16 * 16 * 4));
+        unsafe {
+            airlink_free_bytes(pixels, len);
+            airlink_h264_decoder_free(decoder);
+        }
+    }
+}
+
 /// Advanced mode (Android): pairs with this device's own wireless debugging. `dir` keeps the key.
 /// Result: op_result.
 ///
@@ -581,6 +742,18 @@ pub unsafe extern "C" fn airlink_adb_pair(
     node: *mut AirlinkNode,
     dir: *const c_char,
     code: *const c_char,
+) -> u64 {
+    unsafe { airlink_adb_pair_port(node, dir, code, 0) }
+}
+
+/// # Safety
+/// `node` as for `node_ref`; strings valid C strings. `port == 0` discovers via mDNS.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn airlink_adb_pair_port(
+    node: *mut AirlinkNode,
+    dir: *const c_char,
+    code: *const c_char,
+    port: u16,
 ) -> u64 {
     let (Some(n), Some(dir), Some(code)) = (
         unsafe { node_ref(node) },
@@ -595,7 +768,12 @@ pub unsafe extern "C" fn airlink_adb_pair(
         n.rt.spawn(async move {
             shared.op_result(
                 op,
-                airlink_adb::pair(std::path::Path::new(&dir), &code).await,
+                airlink_adb::pair_at(
+                    std::path::Path::new(&dir),
+                    &code,
+                    (port != 0).then_some(port),
+                )
+                .await,
             );
         });
         op
@@ -613,6 +791,18 @@ pub unsafe extern "C" fn airlink_adb_shell(
     dir: *const c_char,
     command: *const c_char,
 ) -> u64 {
+    unsafe { airlink_adb_shell_port(node, dir, command, 0) }
+}
+
+/// # Safety
+/// `node` as for `node_ref`; strings valid C strings. `port == 0` discovers via mDNS.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn airlink_adb_shell_port(
+    node: *mut AirlinkNode,
+    dir: *const c_char,
+    command: *const c_char,
+    port: u16,
+) -> u64 {
     let (Some(n), Some(dir), Some(command)) = (
         unsafe { node_ref(node) },
         unsafe { read_str(dir) },
@@ -626,7 +816,12 @@ pub unsafe extern "C" fn airlink_adb_shell(
         n.rt.spawn(async move {
             shared.op_result(
                 op,
-                airlink_adb::shell(std::path::Path::new(&dir), &command).await,
+                airlink_adb::shell_at(
+                    std::path::Path::new(&dir),
+                    &command,
+                    (port != 0).then_some(port),
+                )
+                .await,
             );
         });
         op

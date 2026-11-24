@@ -8,22 +8,23 @@ val appDir: File = rootProject.file("..")                       // AirLink/app
 val kompozRoot: File = File(appDir, "../../kompoz").canonicalFile  // the Kompoz checkout next to AirLink
 
 android {
-    namespace = "dev.airlink.airlink"
+    namespace = "com.plyg.airlink"
     compileSdk {
         version = release(36)
     }
     ndkVersion = "29.0.14206865"
 
     defaultConfig {
-        // The same id as the earlier (Flutter) build: it updates in place and keeps the device's
-        // identity and pairings.
-        applicationId = "dev.airlink.airlink"
+        // Android application identity. Changing this from dev.airlink.airlink creates a separate
+        // identity; users with no surviving old app data need to pair again.
+        applicationId = "com.plyg.airlink"
         minSdk = 24
         targetSdk = 36
         versionCode = 2
         versionName = "0.2.0"
         ndk {
-            abiFilters += listOf("arm64-v8a")
+            // Keep the phone APK small; CI/emulator builds can request another ABI explicitly.
+            abiFilters += (providers.gradleProperty("airlinkAbi").orNull ?: "arm64-v8a")
         }
         externalNativeBuild {
             cmake {

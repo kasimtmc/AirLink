@@ -36,7 +36,8 @@ fn key(dir: &Path) -> Result<AdbKey> {
     let name = || KeyName::new("airlink@phone").map_err(|e| anyhow!("{e}"));
     let path = dir.join("adbkey");
     if let Ok(pem) = std::fs::read_to_string(&path) {
-        return AdbKey::from_pkcs8_pem(&pem, &mut OsRng, name()?).map_err(|e| anyhow!("adb key {}: {e}", path.display()));
+        return AdbKey::from_pkcs8_pem(&pem, &mut OsRng, name()?)
+            .map_err(|e| anyhow!("adb key {}: {e}", path.display()));
     }
     std::fs::create_dir_all(dir)?;
     let key = AdbKey::generate(&mut OsRng, name()?).map_err(|e| anyhow!("adb key: {e}"))?;
@@ -103,16 +104,25 @@ pub async fn discover(service: &str, wait: Duration) -> Result<u16> {
 /// Pairs with this device's wireless debugging using the six-digit `code` its "Pair device with
 /// pairing code" screen shows. Afterwards adbd trusts the key kept in `dir`.
 pub async fn pair(dir: &Path, code: &str) -> Result<()> {
+    pair_at(dir, code, None).await
+}
+
+/// As [`pair`], with an optional port from the six-digit pairing screen when mDNS is unavailable.
+pub async fn pair_at(dir: &Path, code: &str, port: Option<u16>) -> Result<()> {
     let code = code.trim();
     if code.len() != 6 || !code.bytes().all(|b| b.is_ascii_digit()) {
         bail!("the pairing code is six digits");
     }
     let key = key(dir)?;
-    let port = discover(PAIRING_SERVICE, Duration::from_secs(8))
-        .await
-        .context(
-            "the pairing screen isn't open (Wireless debugging > Pair device with pairing code)",
-        )?;
+    let port = match port {
+        Some(port) if port > 0 => port,
+        Some(_) => bail!("pairing port must be between 1 and 65535"),
+        None => discover(PAIRING_SERVICE, Duration::from_secs(8))
+            .await
+            .context(
+                "the pairing screen isn't open (Wireless debugging > Pair device with pairing code)",
+            )?,
+    };
     let identity = TlsIdentity::from_key(&key, &mut OsRng).map_err(|e| anyhow!("tls: {e}"))?;
     let tls = TlsClientConfig::adb(&identity).map_err(|e| anyhow!("tls: {e}"))?;
     let socket = <Rt as libadb::transport::runtime::Runtime>::connect_tcp("127.0.0.1", port)
@@ -134,10 +144,20 @@ pub async fn available() -> bool {
 
 /// Runs `command` in a shell on this device as adbd's shell user; its standard output.
 pub async fn shell(dir: &Path, command: &str) -> Result<String> {
+    shell_at(dir, command, None).await
+}
+
+/// As [`shell`], with an optional port from Android's Wireless debugging screen when this
+/// device does not expose its own `_adb-tls-connect` mDNS record to apps.
+pub async fn shell_at(dir: &Path, command: &str, port: Option<u16>) -> Result<String> {
     let key = key(dir)?;
-    let port = discover(CONNECT_SERVICE, Duration::from_secs(5))
-        .await
-        .context("wireless debugging is off")?;
+    let port = match port {
+        Some(port) if port > 0 => port,
+        Some(_) => bail!("wireless debugging port must be between 1 and 65535"),
+        None => discover(CONNECT_SERVICE, Duration::from_secs(5))
+            .await
+            .context("wireless debugging is off")?,
+    };
     let identity = TlsIdentity::from_key(&key, &mut OsRng).map_err(|e| anyhow!("tls: {e}"))?;
     let tls = TlsClientConfig::adb(&identity).map_err(|e| anyhow!("tls: {e}"))?;
     let transport = any::connect::<Rt, Usb>(&format!("tcp://127.0.0.1:{port}"))
