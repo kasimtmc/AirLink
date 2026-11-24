@@ -43,6 +43,7 @@ def main() -> None:
                                ("bin/libGLESv2.dll", "libGLESv2.dll"),
                                ("LICENSE", "licenses/ANGLE.txt")):
             bundle.writestr("AirLink/" + target, angle.read(source))
+        bundle.write(ROOT / "LICENSE", "AirLink/LICENSE.txt")
         bundle.write(ROOT / "app/packaging/windows/diagnose.cmd", "AirLink/diagnose.cmd")
         bundle.write(ROOT / "docs/windows-test.md", "AirLink/TEST.md")
     with ZipFile(out) as bundle:

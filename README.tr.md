@@ -156,4 +156,11 @@ Uçtan uca testler gerçek düğümleri loopback üzerinden çalıştırır; eş
 
 ## Lisans
 
-Henüz belirlenmedi.
+AirLink kaynağı açık bir yazılımdır, ancak açık kaynak değildir. [PolyForm Strict License 1.0.0](LICENSE) ile lisanslanır:
+
+- Kişisel ve diğer ticari olmayan amaçlarla kullanılabilir; okullar, hayır kurumları ve kamu kurumları da buna dahildir.
+- Ticari olarak kullanılamaz, değiştirilemez, kendisi ya da değiştirilmiş bir sürümü dağıtılamaz.
+- Katkılar açıktır: [CONTRIBUTING.md](CONTRIBUTING.md), bu depoya çekme isteği göndermek için çatallamaya ve kodu değiştirmeye izin verir.
+- AirLink adı ve logosu başka ürünlerde ya da yeniden markalanmış sürümlerde kullanılamaz; bkz. [TRADEMARKS.md](TRADEMARKS.md).
+
+Üçüncü taraf bileşenler kendi lisanslarını korur (Kompoz: Apache 2.0, OpenH264 ve ANGLE: BSD, Rust paketleri: çoğunlukla MIT/Apache 2.0). Ticari kullanım için yazarla iletişime geçin.
