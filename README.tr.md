@@ -21,7 +21,8 @@ Cihazlar birbirini mDNS ile bulur. İki cihazı, iki ekranda da görünen 6 hane
 | 1 | Keşif, güvenli eşleştirme, şifreli QUIC bağlantısı, dosya aktarımı, pano | ✅ |
 | 2 | Bildirimler, SMS, kişiler, aramalar | ✅ |
 | 3 | Telefon ekranı ve telefon uygulamaları bilgisayarda | ✅ (Android → PC) |
-| 4 | Bilgisayarı telefondan kontrol, el hareketiyle aktarım, Bluetooth ile arama sesi | ⏳ |
+| 4 | Bilgisayarı telefondan kontrol, el hareketiyle aktarım, Bluetooth ile arama sesi | ⏳ (bilgisayar kontrolü tamam) |
+| 5 | Arayüz iyileştirmeleri | ⏳ |
 
 Linux, Windows ve Android gerçek cihazlarda denendi; Windows'la otomatik keşif ve dosya aktarımı da buna dahil. Android uygulaması Kotlin ile yazıldı.
 

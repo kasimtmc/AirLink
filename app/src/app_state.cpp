@@ -45,7 +45,7 @@ std::optional<uint16_t> parseAdbPort(const std::string& text) {
     return static_cast<uint16_t>(port);
 }
 
-enum class OpKind { StartPairing, ConfirmPairing, SendFiles, SendClipboard, SendReply, AdbPair, AdbTest, AdbHelper };
+enum class OpKind { StartPairing, ConfirmPairing, SendFiles, SendClipboard, SendReply, AdbPair, AdbTest, AdbHelper, DesktopShare };
 
 std::vector<uint8_t> base64(const std::string& in) {
     static const std::string chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
@@ -109,6 +109,11 @@ struct App::Impl {
     MutableState<std::string> screenStatus = mutableStateOf(std::string());
     MutableState<kompoz::ImageBitmap> screenFrame = mutableStateOf(kompoz::ImageBitmap());
     MutableState<bool> screenControl = mutableStateOf(false);
+    MutableState<std::string> desktopPeer = mutableStateOf(std::string());
+    MutableState<std::string> desktopStatus = mutableStateOf(std::string());
+    MutableState<kompoz::ImageBitmap> desktopFrame = mutableStateOf(kompoz::ImageBitmap());
+    MutableState<std::optional<DesktopRequest>> desktopRequest = mutableStateOf(std::optional<DesktopRequest>{});
+    MutableState<std::string> desktopViewer = mutableStateOf(std::string());
     MutableState<bool> advancedReady = mutableStateOf(false);
     MutableState<std::string> advancedStatus = mutableStateOf(std::string());
     MutableState<std::string> advancedPort = mutableStateOf(std::string());
@@ -321,6 +326,14 @@ struct App::Impl {
             std::string name = e["name"].str();
             removeDecoder(name);
             if (name == "screen" && e["peer_id"].str() == screenPeer.peek()) closeScreen();
+            if (name == "desktop" && e["peer_id"].str() == desktopPeer.peek()) closeDesktop();
+        } else if (kind == "desktop_started") {
+            desktopViewer.set(e["peer_id"].str());
+            notices.push_back("Ekran " + peerNameOf(e["peer_id"].str()) + " ile paylaşılıyor");
+        } else if (kind == "desktop_stopped") {
+            if (desktopViewer.peek() == e["peer_id"].str()) desktopViewer.set({});
+            std::string error = e["error"].str();
+            if (!error.empty()) notices.push_back("Ekran paylaşılamadı: " + error);
         } else if (kind == "app_message") {
             handleAppMessage(e["peer"], e["kind"].str(), e["body"]);
         } else if (kind == "clipboard_received") {
@@ -374,6 +387,8 @@ struct App::Impl {
                 case OpKind::AdbHelper:
                     platform::helperStarted(ok, err);
                     break;
+                case OpKind::DesktopShare:
+                    break;  // shown by desktop_started / desktop_stopped
                 case OpKind::SendReply:
                     notices.push_back(ok ? "Yanıt gönderildi" : "Yanıt gönderilemedi: " + err);
                     break;
@@ -418,6 +433,28 @@ struct App::Impl {
             });
         } else if (kind == "notification.dismiss" || kind == "notification.reply") {
             platform::notificationAction(kind, body["key"].str(), body["text"].str());
+        } else if (kind == "desktop.start") {
+            // A paired device asks for this computer's screen: the user decides.
+            if (!airlink_desktop_supported()) {
+                sendDesktop(peerId, "desktop.stopped", "{\"reason\":\"unsupported\"}");
+            } else if (desktopViewer.peek() == peerId) {
+                track(airlink_desktop_start(node, peerId.c_str(), body.dump().c_str()), OpKind::DesktopShare);
+            } else {
+                desktopRequest.set(DesktopRequest{.peerId = peerId, .peerName = peer["name"].str(), .options = body.dump()});
+                platform::showDesktopNotification(peer["name"].str() + " bu bilgisayarı kontrol etmek istiyor", "AirLink'te onaylayın");
+            }
+        } else if (kind == "desktop.stop") {
+            if (auto r = desktopRequest.peek(); r && r->peerId == peerId) desktopRequest.set(std::nullopt);
+            airlink_desktop_stop(node, peerId.c_str(), "viewer");
+        } else if (kind == "desktop.input") {
+            airlink_desktop_input(node, peerId.c_str(), body.dump().c_str());
+        } else if (kind == "desktop.started") {
+            if (peerId == desktopPeer.peek()) desktopStatus.set("live");
+        } else if (kind == "desktop.stopped") {
+            if (peerId != desktopPeer.peek()) return;
+            std::string why = body["reason"].str();
+            if (why != "viewer") notices.push_back(stopReason(why));
+            closeDesktop();
         } else if (isPhoneRequest(kind)) {
             platform::smsRequest(peerId, kind, body.dump());  // this phone answers
         } else if (kind == "sms.threads") {
@@ -574,6 +611,22 @@ struct App::Impl {
         phoneAsk(kind, body);
     }
 
+    void closeDesktop() {
+        removeDecoder("desktop");
+        desktopPeer.set({});
+        desktopStatus.set({});
+        desktopFrame.set(kompoz::ImageBitmap());
+    }
+
+    static std::string stopReason(const std::string& why) {
+        if (why == "declined") return "Bilgisayarda reddedildi";
+        if (why == "user") return "Bilgisayarda durduruldu";
+        if (why == "replaced") return "Başka bir cihaz bilgisayarı kontrol etmeye başladı";
+        if (why == "unsupported") return "Bu bilgisayar ekranını paylaşamıyor";
+        if (why == "failed") return "Ekran paylaşılamadı";
+        return "Bilgisayar ekranı kapandı";
+    }
+
     void closeScreen() {
         removeDecoder("screen");
         screenWheel = {};
@@ -610,6 +663,16 @@ struct App::Impl {
         }
         if (auto open = smsOpen.peek()) smsAsk("sms.thread_request", "{\"thread_id\":" + std::to_string(open->threadId) + "}");
         smsAsk("sms.threads_request", "{}");
+    }
+
+    std::string peerNameOf(const std::string& id) const {
+        for (const Peer& p : peers.peek())
+            if (p.id == id) return p.name;
+        return id.substr(0, 8);
+    }
+
+    void sendDesktop(const std::string& peerId, const char* kind, const char* body) {
+        if (node) airlink_send_message(node, peerId.c_str(), kind, body);
     }
 
     void track(uint64_t op, OpKind kind) {
@@ -710,6 +773,19 @@ void App::pump() const {
             if (!frame.empty()) {
                 s.screenFrame.set(frame);
                 s.screenStatus.set("live");
+            }
+        }
+    }
+    // A computer's screen (this phone is the viewer).
+    if (const std::string& from = s.desktopPeer.peek(); !from.empty()) {
+        uint8_t* data = nullptr;
+        size_t len = 0;
+        if (airlink_media_take(s.node, from.c_str(), "desktop", &data, &len)) {
+            kompoz::ImageBitmap frame = s.decodeMedia("desktop", data, len);
+            airlink_free_bytes(data, len);
+            if (!frame.empty()) {
+                s.desktopFrame.set(frame);
+                s.desktopStatus.set("live");
             }
         }
     }
@@ -879,6 +955,46 @@ kompoz::ImageBitmap App::screenFrame() const { return impl_->screenFrame.get(); 
 bool App::canShareScreen() const { return platform::canShareScreen(); }
 bool App::screenControl() const { return impl_->screenControl.get(); }
 void App::openScreenControlSettings() const { platform::openScreenControlSettings(); }
+
+std::string App::desktopPeer() const { return impl_->desktopPeer.get(); }
+std::string App::desktopStatus() const { return impl_->desktopStatus.get(); }
+kompoz::ImageBitmap App::desktopFrame() const { return impl_->desktopFrame.get(); }
+std::optional<DesktopRequest> App::desktopRequest() const { return impl_->desktopRequest.get(); }
+std::string App::desktopViewer() const { return impl_->desktopViewer.get(); }
+bool App::canShareDesktop() const { return airlink_desktop_supported(); }
+
+void App::startDesktop(const std::string& peerId) const {
+    if (!impl_->node || peerId.empty()) return;
+    impl_->closeDesktop();
+    impl_->desktopPeer.set(peerId);
+    impl_->desktopStatus.set("asking");
+    // Sized for a phone: its screen is about this wide; fewer frames keep it smooth on Wi-Fi.
+    sendTo(peerId, "desktop.start", "{\"max_width\":1600,\"fps\":15}");
+}
+
+void App::stopDesktop() const {
+    std::string peer = impl_->desktopPeer.peek();
+    if (!peer.empty()) sendTo(peer, "desktop.stop", "{}");
+    impl_->closeDesktop();
+}
+
+void App::desktopInput(const std::string& bodyJson) const {
+    std::string peer = impl_->desktopPeer.peek();
+    if (!peer.empty() && !bodyJson.empty()) sendTo(peer, "desktop.input", bodyJson);
+}
+
+void App::answerDesktop(bool accept) const {
+    auto request = impl_->desktopRequest.peek();
+    impl_->desktopRequest.set(std::nullopt);
+    if (!request || !impl_->node) return;
+    if (!accept) return impl_->sendDesktop(request->peerId, "desktop.stopped", "{\"reason\":\"declined\"}");
+    impl_->track(airlink_desktop_start(impl_->node, request->peerId.c_str(), request->options.c_str()), OpKind::DesktopShare);
+}
+
+void App::endDesktopShare() const {
+    if (impl_->node) airlink_desktop_stop(impl_->node, nullptr, "user");
+    impl_->desktopViewer.set({});
+}
 
 bool App::canUseAdvancedMode() const { return platform::canUseAdvancedMode(); }
 bool App::advancedReady() const { return impl_->advancedReady.get(); }

@@ -69,7 +69,26 @@ Kullanıcı canlı H.264 penceresi ve ekran paylaşımını, `kod:port` ile ilk 
 
 Çalışma ağacı `ffdbb52` ile commit'lendi. Lisans PolyForm Strict 1.0.0 olarak seçildi; katkı izni `CONTRIBUTING.md`, ad ve logo `TRADEMARKS.md` içinde.
 
-Açık işler: (1) servis açıkken Android etkinliğinin yeniden oluşturulması, (2) Faz 4.
+Açık işler: (1) servis açıkken Android etkinliğinin yeniden oluşturulması, (2) Faz 4, (3) Faz 5.
+
+## Faz 4 ve Faz 5 planı (24 Kasım 2026)
+
+Sıra kullanıcı kararıyla: A → B → C, ardından son faz olarak arayüz iyileştirmesi.
+
+| İş | Kapsam | Durum |
+|---|---|---|
+| 4A Bilgisayarı telefondan kontrol | Bilgisayar ekranı telefonda (H.264), dokunma fare, iki parmak kaydırma, tuşlar ve yazı; bilgisayarda onay ve "Durdur" çubuğu | Tamam; kullanıcı gerçek cihazda doğruladı |
+| 4B El hareketiyle aktarım | Telefonda bir hareketle dosya/pano gönderme (`gesture.*`) | Başlanmadı |
+| 4C Bluetooth ile arama sesi | Bilgisayar telefonun kulaklığı gibi (HFP) | Başlanmadı |
+| 5 Arayüz iyileştirmeleri | Görsel düzen, gezinme ve kullanılabilirlik | Başlanmadı |
+
+4A ayrıntıları:
+
+- Yeni Rust paketi `core/airlink-desktop`: Linux'ta xdg-desktop-portal RemoteDesktop oturumu (klavye + işaretçi) ve aynı oturumda ScreenCast akışı, PipeWire ile kare okuma; masaüstünün izni `desktop-share.token` ile saklanır, sonraki seferlerde masaüstü sormaz. Windows'ta birincil ekran GDI ile (imleç çizilerek) yakalanır, giriş `SendInput` ile oynatılır. Kareler OpenH264 ile bağımsız `ALH1` anahtar karelerine kodlanır (telefon ekranıyla aynı biçim), en çok 1600 px genişlik, 15 kare/sn.
+- C ABI: `airlink_desktop_supported/start/stop/input`, olaylar `desktop_started`, `desktop_stopped`. Android'de bu paket derlenmez.
+- Protokol: `desktop.start/stop/started/stopped/input`, medya akışı `desktop` (`docs/protocol.md`).
+- Arayüz: telefondaki eşleşmiş bilgisayar kartında "Bilgisayarı kontrol et" düğmesi; tam ekran görünümde dokunma sol tık, çift dokunma çift tık, uzun basma sağ tık, sürükleme sol tuş basılı sürükleme, iki parmak kaydırma; Ctrl/Alt/Shift/Super seçicileri, sık tuşlar ve yazı alanı. Bilgisayarda izin penceresi ve paylaşım sürerken kırmızı "Durdur" çubuğu.
+- Doğrulama: `airlink-desktop` birim testleri (kodlanan her karenin tek başına çözülmesi, boyut, giriş ayrıştırma, keysym eşlemesi), Linux ve Windows çapraz `clippy` temiz. Kullanıcı gerçek masaüstünde ekran yakalamayı ve telefondan fare/klavye kontrolünü doğruladı.
 
 Kompoz’un Android Java kaynakları AirLink deposunun dışında, Kompoz deposunda tutuluyor.
 

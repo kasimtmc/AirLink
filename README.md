@@ -21,7 +21,8 @@ Devices find each other with mDNS. You pair two devices once by comparing a 6-di
 | 1 | Discovery, secure pairing, encrypted QUIC connection, file transfer, clipboard | ✅ |
 | 2 | Notifications, SMS, contacts, calls | ✅ |
 | 3 | Phone screen and phone apps on the computer | ✅ (Android → PC) |
-| 4 | Controlling the PC from the phone, gesture transfer, call audio over Bluetooth | ⏳ |
+| 4 | Controlling the PC from the phone, gesture transfer, call audio over Bluetooth | ⏳ (PC control done) |
+| 5 | UI improvements | ⏳ |
 
 Linux, Windows and Android are tested on real devices, including automatic discovery and file transfer with Windows. The Android app is written in Kotlin.
 

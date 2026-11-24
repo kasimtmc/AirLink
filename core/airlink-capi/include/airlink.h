@@ -12,6 +12,7 @@
  *        peer_discovered, peer_lost, pairing_request, pairing_completed, request_cancelled,
  *        file_offer, transfer_pending, transfer_progress, transfer_completed,
  *        transfer_failed, clipboard_received, app_message, media_started, media_stopped
+ *      desktop_started, desktop_stopped: this computer's screen share (airlink_desktop_start)
  *      request_answered {"request_id","accepted"}: airlink_respond took an answer
  *      Operation results:
  *        {"event":"op_result","op":N,"ok":true,"value":...}
@@ -101,6 +102,23 @@ bool airlink_media_send(AirlinkNode* node, const char* peer_id, const char* name
 void airlink_media_stop(AirlinkNode* node, const char* peer_id, const char* name);
 bool airlink_media_take(AirlinkNode* node, const char* peer_id, const char* name, uint8_t** data, size_t* len);
 void airlink_free_bytes(uint8_t* data, size_t len);
+
+/* Sharing this computer's screen with a paired device (phase 4; Linux and Windows).
+ * The device asks with a "desktop.start" app message; the app decides (a prompt, a trusted
+ * device) and calls airlink_desktop_start. Frames go on the media stream "desktop" as ALH1
+ * H.264 key frames; the device's "desktop.input" messages are played with airlink_desktop_input.
+ * Linux asks the desktop once (xdg-desktop-portal RemoteDesktop); the grant is kept in the data
+ * dir. One device at a time: a new start ends the previous share (reason "replaced").
+ *   airlink_desktop_start: options_json {"max_width":1280,"fps":12} (NULL: defaults).
+ *     Result: op_result (value = true when sharing), then the events
+ *     {"event":"desktop_started","peer_id","width","height"} or
+ *     {"event":"desktop_stopped","peer_id","reason","error"}; the device hears desktop.started
+ *     / desktop.stopped.
+ *   airlink_desktop_stop: peer_id NULL stops any share; reason NULL is "computer". */
+bool airlink_desktop_supported(void);
+uint64_t airlink_desktop_start(AirlinkNode* node, const char* peer_id, const char* options_json);
+void airlink_desktop_stop(AirlinkNode* node, const char* peer_id, const char* reason);
+bool airlink_desktop_input(AirlinkNode* node, const char* peer_id, const char* body_json);
 
 /* Decodes an ALH1 H.264 frame into RGBA. Decoder state is local to one stream; free it after
  * the stream ends. On success, pixels is width * height * 4 bytes and must be freed with

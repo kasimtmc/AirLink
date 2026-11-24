@@ -11,6 +11,8 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
+mod desktop;
+
 use airlink_core::{DEFAULT_PORT, Node, NodeConfig, OutgoingPairing, read_saved_name};
 use openh264::decoder::Decoder;
 use openh264::formats::YUVSource;
@@ -24,6 +26,7 @@ pub struct AirlinkNode {
     rt: tokio::runtime::Runtime,
     node: Node,
     shared: Arc<Shared>,
+    desktop: Arc<Mutex<Option<desktop::Running>>>,
 }
 
 pub struct AirlinkH264Decoder {
@@ -171,7 +174,12 @@ fn start(cfg: StartConfig) -> anyhow::Result<AirlinkNode> {
             }
         }
     });
-    Ok(AirlinkNode { rt, node, shared })
+    Ok(AirlinkNode {
+        rt,
+        node,
+        shared,
+        desktop: Default::default(),
+    })
 }
 
 /// # Safety
@@ -216,7 +224,10 @@ pub unsafe extern "C" fn airlink_stop(node: *mut AirlinkNode) {
         // Shut down on the runtime's own threads, not by entering the runtime here: this may run
         // while the process exits (a C++ static's destructor), when the calling thread's
         // thread-locals, Tokio's among them, are already gone.
-        let AirlinkNode { rt, node, .. } = *n;
+        let AirlinkNode {
+            rt, node, desktop, ..
+        } = *n;
+        drop(desktop.lock().unwrap().take()); // stops a screen share
         let (tx, rx) = std::sync::mpsc::channel();
         rt.spawn(async move {
             node.shutdown().await;
@@ -580,6 +591,85 @@ pub unsafe extern "C" fn airlink_media_stop(
         return;
     };
     guard((), || n.node.stop_media(&id, &name))
+}
+
+impl AirlinkNode {
+    fn desktop(&self) -> desktop::Host<'_> {
+        desktop::Host {
+            node: &self.node,
+            rt: &self.rt,
+            shared: &self.shared,
+            running: &self.desktop,
+        }
+    }
+}
+
+/// Whether this device can share its own screen with a paired device.
+#[unsafe(no_mangle)]
+pub extern "C" fn airlink_desktop_supported() -> bool {
+    guard(false, desktop::supported)
+}
+
+/// Starts sharing this computer's screen with `peer_id` (see airlink.h).
+///
+/// # Safety
+/// `node` as for `node_ref`; strings valid C strings (`options_json`: NULL or a JSON object).
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn airlink_desktop_start(
+    node: *mut AirlinkNode,
+    peer_id: *const c_char,
+    options_json: *const c_char,
+) -> u64 {
+    let (Some(n), Some(peer)) = (unsafe { node_ref(node) }, unsafe { read_str(peer_id) }) else {
+        return 0;
+    };
+    let options = unsafe { read_str(options_json) }
+        .and_then(|o| serde_json::from_str::<Value>(&o).ok())
+        .unwrap_or(Value::Null);
+    guard(0, || {
+        let op = n.shared.id();
+        n.desktop().start(op, peer, options);
+        op
+    })
+}
+
+/// Stops sharing this computer's screen with `peer_id` (NULL: with anyone).
+///
+/// # Safety
+/// `node` as for `node_ref`; `peer_id` NULL or a valid C string, `reason` likewise.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn airlink_desktop_stop(
+    node: *mut AirlinkNode,
+    peer_id: *const c_char,
+    reason: *const c_char,
+) {
+    let Some(n) = (unsafe { node_ref(node) }) else {
+        return;
+    };
+    let peer = unsafe { read_str(peer_id) };
+    let reason = unsafe { read_str(reason) }.unwrap_or_else(|| "computer".into());
+    guard((), || n.desktop().stop(peer.as_deref(), &reason))
+}
+
+/// Plays a `desktop.input` body from `peer_id`; false if it doesn't have the share or the body
+/// is not valid input.
+///
+/// # Safety
+/// `node` as for `node_ref`; strings valid C strings.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn airlink_desktop_input(
+    node: *mut AirlinkNode,
+    peer_id: *const c_char,
+    body_json: *const c_char,
+) -> bool {
+    let (Some(n), Some(peer), Some(body)) = (
+        unsafe { node_ref(node) },
+        unsafe { read_str(peer_id) },
+        unsafe { read_str(body_json) },
+    ) else {
+        return false;
+    };
+    guard(false, || desktop::input(&n.desktop, &peer, &body))
 }
 
 /// # Safety

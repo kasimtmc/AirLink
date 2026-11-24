@@ -180,6 +180,14 @@ static void appScroll(const App& app, int session, Offset p, Size box, int iw, i
     app.appWheel(session, std::clamp(x, 0.0, 1.0), std::clamp(y, 0.0, 1.0), -double(delta.x), -double(delta.y));
 }
 
+// A wheel turn over the phone's shared screen; false outside the image.
+static bool screenScroll(const App& app, Offset p, Size box, int iw, int ih, Offset delta) {
+    double x = 0, y = 0;
+    if (!toScreen(p, box, iw, ih, x, y)) return false;
+    app.screenWheel(x, y, delta.x, delta.y);
+    return true;
+}
+
 // A key pressed over an app's window, as Android's KeyEvent code and meta state ("" when it has none).
 static std::string appKey(const KeyEvent& e) {
     using K = Key;
@@ -213,6 +221,49 @@ static std::string appKey(const KeyEvent& e) {
     if (e.modifiers.ctrl == e.modifiers.alt &&
         ((k >= K::A && k <= K::Z) || (k >= K::Zero && k <= K::Nine) || k == K::Space)) return {};
     return "{\"cmd\":\"key\",\"code\":" + std::to_string(code) + ",\"meta\":" + std::to_string(meta) + "}";
+}
+
+// The viewer's input for a computer's screen (desktop.input): a point as fractions of it.
+static std::string desktopPoint(const std::string& type, Offset p, Size box, int iw, int ih, const std::string& extra) {
+    double x = 0, y = 0;
+    toScreen(p, box, iw, ih, x, y);
+    char buf[160];
+    std::snprintf(buf, sizeof buf, "{\"type\":\"%s\",\"x\":%.4f,\"y\":%.4f%s}", type.c_str(), std::clamp(x, 0.0, 1.0),
+                  std::clamp(y, 0.0, 1.0), extra.c_str());
+    return buf;
+}
+
+static std::string desktopKey(const std::string& key, const std::string& modifier) {
+    std::string body = "{\"type\":\"key\",\"key\":" + json::quote(key);
+    if (!modifier.empty()) body += ",\"modifiers\":[" + json::quote(modifier) + "]";
+    return body + "}";
+}
+
+static std::string desktopText(const std::string& text) { return "{\"type\":\"text\",\"text\":" + json::quote(text) + "}"; }
+
+// Wheel notches from a two-finger drag on the phone: 40 px a notch, content follows the fingers.
+static std::string desktopScroll(Offset p, Size box, int iw, int ih, Offset pan) {
+    char extra[64];
+    std::snprintf(extra, sizeof extra, ",\"dx\":%.2f,\"dy\":%.2f", -pan.x / 40.0, -pan.y / 40.0);
+    return desktopPoint("scroll", p, box, iw, ih, extra);
+}
+
+static std::string desktopRequestText() {
+    std::string text = "Ekranınızı görecek, fare ve klavyeyi kullanabilecek. İstediğiniz zaman buradan durdurabilirsiniz.";
+#if defined(__linux__) && !defined(__ANDROID__)
+    text += "\n\nMasaüstü ilk seferde hangi ekranın paylaşılacağını da soracak.";
+#endif
+    return text;
+}
+
+static const std::vector<std::string>& desktopModifiers() {
+    static const std::vector<std::string> list = {"Control", "Alt", "Shift", "Super"};
+    return list;
+}
+
+static const std::vector<std::string>& desktopKeys() {
+    static const std::vector<std::string> list = {"Escape", "Tab", "Enter", "Backspace", "Left", "Up", "Down", "Right"};
+    return list;
 }
 
 static int64_t nowMs() { return int64_t(std::time(nullptr)) * 1000; }
@@ -306,6 +357,7 @@ fun Home() {
         Column(modifier = Modifier.fillMaxSize().padding(padding)) {
             val call = app.activeCall()
             if (call != null && isDesktop()) ActiveCallBar(app, call!!)
+            if (app.desktopViewer().isNotEmpty()) DesktopShareBar(app)
             if (tabs) {
                 PrimaryTabRow(selectedTabIndex = tab) {
                     Tab(selected = tab == 0, onClick = { tab = 0 }, text = { Text("Cihazlar") })
@@ -315,7 +367,9 @@ fun Home() {
                 }
             }
             Box(modifier = Modifier.fillMaxSize()) {
-                if (app.ready() && app.screenPeer().isNotEmpty()) {
+                if (app.ready() && app.desktopPeer().isNotEmpty()) {
+                    DesktopView(app)
+                } else if (app.ready() && app.screenPeer().isNotEmpty()) {
                     ScreenView(app)
                 } else if (app.ready()) {
                     if (tabs && tab == 1) MessagesScreen(app)
@@ -335,6 +389,7 @@ fun Home() {
     OutgoingPairingDialog(app)
     ShareDialog(app)
     IncomingCallDialog(app)
+    DesktopRequestDialog(app)
 }
 
 // A paired phone's call in progress: who, for how long, and its controls.
@@ -496,6 +551,7 @@ fun DeviceList(app: App, clipboard: ClipboardManager) {
                     onSendClipboard = { app.sendClipboard(peer.id, clipboard.getText()) },
                     onForget = { forgetting = peer.id },
                     onShowScreen = { app.startScreen(peer.id) },
+                    onControl = { app.startDesktop(peer.id) },
                 )
             }
         }
@@ -663,6 +719,111 @@ fun AdvancedModeCard(app: App) {
     }
 }
 
+// ---- A paired computer's screen (on a phone, phase 4) ----------------------------------------
+
+// The computer shares its screen: who is watching, and a way to end it here.
+@Kompozable
+fun DesktopShareBar(app: App) {
+    val cs = MaterialTheme.colorScheme
+    Card(modifier = Modifier.fillMaxWidth().padding(12.dp, 8.dp), colors = CardDefaults.cardColors(containerColor = cs.errorContainer)) {
+        Row(modifier = Modifier.fillMaxWidth().padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
+            Icon(AppIcons.Computer, contentDescription = null, tint = cs.onErrorContainer)
+            Spacer(modifier = Modifier.width(12.dp))
+            Text("${app.peerName(app.desktopViewer())} bu bilgisayarı görüyor ve kontrol ediyor",
+                 style = MaterialTheme.typography.bodyMedium, color = cs.onErrorContainer, modifier = Modifier.weight(1f))
+            Button(onClick = { app.endDesktopShare() },
+                   colors = ButtonDefaults.buttonColors(containerColor = cs.error, contentColor = cs.onError)) { Text("Durdur") }
+        }
+    }
+}
+
+// A paired device asks for this computer's screen and input: the user decides here.
+@Kompozable
+fun DesktopRequestDialog(app: App) {
+    val r = app.desktopRequest()
+    if (r != null) {
+        val request = r!!
+        AlertDialog(
+            onDismissRequest = {},
+            icon = { Icon(AppIcons.Computer, contentDescription = null) },
+            title = { Text("${request.peerName} bu bilgisayarı kontrol etmek istiyor") },
+            text = { Text(desktopRequestText()) },
+            confirmButton = { TextButton(onClick = { app.answerDesktop(true) }) { Text("İzin ver") } },
+            dismissButton = { TextButton(onClick = { app.answerDesktop(false) }) { Text("Reddet") } },
+        )
+    }
+}
+
+// The computer's screen, fitted, with touch as a mouse: tap clicks, long press right-clicks,
+// double tap double-clicks, a drag drags (left button held), two fingers scroll.
+@Kompozable
+fun DesktopView(app: App) {
+    val frame = app.desktopFrame()
+    var box by remember { mutableStateOf(Size(0f, 0f)) }
+    var last by remember { mutableStateOf(Offset(0f, 0f)) }
+    var typed by remember { mutableStateOf("") }
+    var held by remember { mutableStateOf("") }
+    Column(modifier = Modifier.fillMaxSize()) {
+        Row(modifier = Modifier.fillMaxWidth().padding(8.dp), verticalAlignment = Alignment.CenterVertically) {
+            Text(app.peerName(app.desktopPeer()), style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f),
+                 maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Button(onClick = { app.stopDesktop() }) { Text("Kapat") }
+        }
+        Box(modifier = Modifier.weight(1f).fillMaxWidth().background(Color(0xFF111111)), contentAlignment = Alignment.Center) {
+            if (frame.empty()) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.padding(24.dp)) {
+                    CircularProgressIndicator()
+                    Spacer(modifier = Modifier.height(12.dp))
+                    Text(if (app.desktopStatus() == "asking") "Bilgisayarda izin verin…" else "Görüntü bekleniyor…", color = Color.White)
+                }
+            } else {
+                val fw = frame.width()
+                val fh = frame.height()
+                Image(frame, contentDescription = "Bilgisayar ekranı", contentScale = ContentScale.Fit,
+                      modifier = Modifier.fillMaxSize()
+                          .onSizeChanged { box = it }
+                          .pointerInput(Unit) {
+                              detectTapGestures(
+                                  onTap = { p -> app.desktopInput(desktopPoint("click", p, box, fw, fh, "")) },
+                                  onDoubleTap = { p -> app.desktopInput(desktopPoint("click", p, box, fw, fh, ",\"count\":2")) },
+                                  onLongPress = { p -> app.desktopInput(desktopPoint("click", p, box, fw, fh, ",\"button\":\"right\"")) },
+                              )
+                          }
+                          .pointerInput(Unit) {
+                              detectTransformGestures { centroid, pan, zoom, rotation ->
+                                  app.desktopInput(desktopScroll(centroid, box, fw, fh, pan))
+                              }
+                          }
+                          .pointerInput(Unit) {
+                              detectDragGestures(
+                                  onDragStart = { p -> last = p; app.desktopInput(desktopPoint("button", p, box, fw, fh, ",\"down\":true")) },
+                                  onDrag = { change, amount -> last = last + amount; app.desktopInput(desktopPoint("move", last, box, fw, fh, "")) },
+                                  onDragEnd = { app.desktopInput(desktopPoint("button", last, box, fw, fh, ",\"down\":false")) },
+                                  onDragCancel = { app.desktopInput(desktopPoint("button", last, box, fw, fh, ",\"down\":false")) },
+                              )
+                          })
+            }
+        }
+        FlowRow(modifier = Modifier.fillMaxWidth().padding(8.dp, 0.dp), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+            for (m in desktopModifiers()) {
+                FilterChip(selected = held == m, onClick = { held = if (held == m) "" else m }, label = { Text(m) })
+            }
+            for (k in desktopKeys()) {
+                TextButton(onClick = { app.desktopInput(desktopKey(k, held)); held = "" }) { Text(k) }
+            }
+        }
+        Row(modifier = Modifier.fillMaxWidth().padding(8.dp), verticalAlignment = Alignment.CenterVertically) {
+            OutlinedTextField(value = typed, onValueChange = { typed = it }, singleLine = true, label = "Bilgisayara yaz",
+                              modifier = Modifier.weight(1f))
+            TextButton(onClick = {
+                app.desktopInput(if (held.isNotEmpty()) desktopKey(typed, held) else desktopText(typed))
+                typed = ""
+                held = ""
+            }, enabled = typed.isNotEmpty()) { Text("Gönder") }
+        }
+    }
+}
+
 // ---- A paired phone's screen (on a computer) ------------------------------------------------
 
 @Kompozable
@@ -692,12 +853,7 @@ fun ScreenView(app: App) {
                           .onSizeChanged { box = it }
                           .onPointerEvent(PointerEventType.Scroll) { e ->
                               val change = e.changes.first()
-                              var x = 0.0
-                              var y = 0.0
-                              if (toScreen(change.position, box, frame.width(), frame.height(), x, y)) {
-                                  app.screenWheel(x, y, change.scrollDelta.x, change.scrollDelta.y)
-                                  change.consume()
-                              }
+                              if (screenScroll(app, change.position, box, frame.width(), frame.height(), change.scrollDelta)) change.consume()
                           }
                           .pointerInput(Unit) {
                               detectTapGestures(
@@ -1238,6 +1394,7 @@ fun PairedPeerCard(
     onSendClipboard: () -> Unit,
     onForget: () -> Unit,
     onShowScreen: () -> Unit,
+    onControl: () -> Unit,
 ) {
     var dragging by remember { mutableStateOf(false) }
     val cs = MaterialTheme.colorScheme
@@ -1278,6 +1435,9 @@ fun PairedPeerCard(
             IconButton(onClick = onSendClipboard) { Icon(AppIcons.ContentPaste, contentDescription = "Panoyu gönder") }
             if (isDesktop() && peer.platform == "android" && peer.online) {
                 IconButton(onClick = onShowScreen) { Icon(AppIcons.Smartphone, contentDescription = "Ekranı göster") }
+            }
+            if (!isDesktop() && peer.platform != "android" && peer.online) {
+                IconButton(onClick = onControl) { Icon(AppIcons.Computer, contentDescription = "Bilgisayarı kontrol et") }
             }
             IconButton(onClick = onForget) { Icon(Icons.Filled.Delete, contentDescription = "Cihazı unut") }
         }

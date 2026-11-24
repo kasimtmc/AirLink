@@ -145,6 +145,10 @@ Yalnızca eşleşmiş cihazlar arasında gider. Tanımlı türler:
 | `apps.close` | PC → telefon | `{ session }` |
 | `apps.input` | PC → telefon | `{ session, cmd, … }`; `cmd`: `touch { action: down/move/up, x, y }`, `scroll { x, y, h, v }`, `key { code, meta }` (Android tuş kodu), `text { text }`. Klavye haritasının yazamadığı metin telefon panosundan yapıştırılır |
 | `apps.event` | telefon → PC | `{ session, event, message? }`; `event`: `opened`, `closed`, `error` |
+| `desktop.start` | izleyen → bilgisayar | `{ max_width?, fps? }`: bilgisayarın ekranını ister. Bilgisayardaki kullanıcı onaylar; Linux'ta masaüstü de ilk seferde ekranı sorar → `desktop.started { width, height }` veya `desktop.stopped { reason, error? }` |
+| `desktop.stop` | izleyen → bilgisayar | `{}` |
+| `desktop.stopped` | bilgisayar → izleyen | `{ reason, error? }`; `reason`: `declined`, `user` (bilgisayarda durduruldu), `replaced` (başka cihaz başladı), `viewer`, `failed`, `unsupported`, `computer` |
+| `desktop.input` | izleyen → bilgisayar | `{ type, … }`; koordinatlar 0–1 arası oranlardır. `move { x, y }`, `button { button?, down, x, y }`, `click { button?, x, y, count? }`, `scroll { x, y, dx?, dy? }` (çentik; pozitif `dy` aşağı), `key { key, down?, modifiers? }`, `text { text }`. `button`: `left` (varsayılan), `right`, `middle`. `key`: `Enter`, `Backspace`, `Escape`, `Tab`, `Delete`, `Space`, ok tuşları, `Home`, `End`, `PageUp`, `PageDown`, `Insert`, `Shift`, `Control`, `Alt`, `Super`, `F1`–`F12` veya tek karakter. Yalnızca paylaşımı alan cihazdan kabul edilir |
 
 ## 10. Medya akışları
 
@@ -168,13 +172,14 @@ Telefonda kodlayıcı başlatılamazsa JPEG gönderilir. H.264 kodlama ve çözm
 emülatöründe ve fiziksel telefonda doğrulandı; uygulama pencereleri ve ekran paylaşımı gerçek
 telefonla canlı çalışıyor.
 
-Akış adları: telefon ekranı `screen`, gelişmiş moddaki her uygulama oturumu `app:<session>`.
+Akış adları: telefon ekranı `screen`, gelişmiş moddaki her uygulama oturumu `app:<session>`,
+bilgisayarın ekranı `desktop` (Faz 4; bilgisayar `ALH1` H.264 anahtar kareleri gönderir: Linux'ta
+xdg-desktop-portal ScreenCast + PipeWire, Windows'ta GDI; kodlayıcı OpenH264).
 
 ## 11. Gelecek sürümler (ayrılmış)
 
 Faz 4 için şu mesaj aileleri ayrılmıştır:
 
-- `input.*`: bilgisayarı telefondan kontrol
 - `gesture.*`: el hareketiyle aktarım
 
 Bilinmeyen bir `type` gelirse yanıt `error { message: "unsupported" }` olur.

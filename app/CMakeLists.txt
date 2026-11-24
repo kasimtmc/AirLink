@@ -69,7 +69,10 @@ if(WIN32)
 elseif(ANDROID)
     set(AIRLINK_RUST_SYSLIBS dl m log)
 else()
-    set(AIRLINK_RUST_SYSLIBS dl m)
+    # airlink-desktop (sharing this computer's screen): PipeWire for the portal's screen cast.
+    find_package(PkgConfig REQUIRED)
+    pkg_check_modules(PIPEWIRE REQUIRED IMPORTED_TARGET libpipewire-0.3)
+    set(AIRLINK_RUST_SYSLIBS dl m PkgConfig::PIPEWIRE)
 endif()
 target_link_libraries(airlink_core INTERFACE Threads::Threads ${AIRLINK_RUST_SYSLIBS})
 

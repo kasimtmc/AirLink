@@ -133,6 +133,14 @@ struct AppWindow {
     bool operator==(const AppWindow&) const = default;
 };
 
+// A paired device asks to see and control this computer's screen.
+struct DesktopRequest {
+    std::string peerId;
+    std::string peerName;
+    std::string options;  // the viewer's {max_width, fps}
+    bool operator==(const DesktopRequest&) const = default;
+};
+
 // A call ringing on a paired phone.
 struct IncomingCall {
     std::string peerId;
@@ -224,6 +232,16 @@ public:
     bool canShareScreen() const;       // this phone can share its screen
     bool screenControl() const;        // and carry out a computer's touches
 
+    // ---- Phase 4: a paired computer's screen on this phone, and this computer's own share ----
+    // On the phone (viewer): the computer whose screen is open, "asking" / "live", its frame.
+    std::string desktopPeer() const;
+    std::string desktopStatus() const;
+    kompoz::ImageBitmap desktopFrame() const;
+    // On the computer (shared): the device asking, the one watching (empty: none).
+    std::optional<DesktopRequest> desktopRequest() const;
+    std::string desktopViewer() const;
+    bool canShareDesktop() const;  // this computer can share its screen (Linux, Windows)
+
     // ---- Advanced mode (this phone's own wireless debugging) ----
     bool canUseAdvancedMode() const;
     bool advancedReady() const;        // paired, and a shell command ran as the shell user
@@ -282,6 +300,14 @@ public:
     void screenInput(const std::string& bodyJson) const;
     void screenWheel(double x, double y, double h, double v) const;  // wheel deltas over the fitted screen
     void openScreenControlSettings() const;
+    // The viewer: asks a computer for its screen, stops, and sends a pointer or key
+    // ({"type":"click","x":..,"y":..} and the like; docs/protocol.md desktop.input).
+    void startDesktop(const std::string& peerId) const;
+    void stopDesktop() const;
+    void desktopInput(const std::string& bodyJson) const;
+    // The shared computer: answers a request, or ends the share.
+    void answerDesktop(bool accept) const;
+    void endDesktopShare() const;
     void startAdvancedSetup() const;
     void advancedPair(const std::string& code) const;  // the code typed into the setup notification
     void advancedTest() const;                         // runs `id` over wireless debugging
