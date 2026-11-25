@@ -4,6 +4,11 @@
 
 Bu dönemin başlangıç noktası `4fa0abc`. AirLink, Rust çekirdeğini ve Kompoz C++ arayüzünü kullanıyor. KompozR’a geçiş ayrı bir iş.
 
+## 25 Kasım 2026: lisans ve katkı koşulları
+
+- PolyForm Strict 1.0.0 yerine Sustainable Use License 1.0 seçildi. Kod kaynak erişimli olarak tanımlanır: kişisel, ticari olmayan ve kuruluş içi kullanım ile değişiklik yapılabilir; değiştirilmiş sürümler de ticari olmayan amaçlarla ücretsiz paylaşılabilir. Ticari yeniden dağıtım için Kasim'den ayrı yazılı lisans gerekir. Bu kısıtlama nedeniyle OSI anlamında açık kaynak denmez.
+- `README.md`, `README.tr.md`, Cargo paket metadata'sı, katkı koşulları ve marka açıklaması yeni lisansla eşitlendi. Katkıcı telifini korur; projeye verilen geniş lisans, topluluk ve ayrı ticari lisansların sürdürülebilmesi içindir. Çatallar kendi adı ve görsel kimliğiyle dağıtılabilir. Üçüncü taraf bileşenler kendi lisanslarında kalır.
+
 ## 25 Kasım 2026: masaüstü tepsisi ve Android arka planı
 
 - AirLink tepsi menüsüne cihaz başına Dosya gönder, Panoyu gönder ve Android için Ekranı göster eklendi. Cihaz alt menüsü yalnızca eşleşmiş cihaz çevrimiçi olduğunda etkin. Ayrıca Gelen dosyaları aç ve Paylaşımı duraklat/sürdür var. Duraklatma Rust düğümünü gerçekten kapatıyor; açık aktarım ve istekleri duraklatılmış olarak temizliyor. KDE oturumunda menü yapısı DBus üzerinden doğrulandı; duraklatınca UDP 47820 kapandı, sürdürünce aynı süreçte tekrar açıldı ve telefon yeniden çevrimiçi göründü. Açılış hatası sonrası menüden bağlantıyı yeniden deneme yolu var.
@@ -14,8 +19,8 @@ Bu dönemin başlangıç noktası `4fa0abc`. AirLink, Rust çekirdeğini ve Komp
 - Linux tepsi etkinleştirmesi ve menü tıklamasında DBus olay kilidinin ikinci kez alınmasıyla oluşan kilitlenme giderildi. KDE oturumunda simge kaydı, DBus `Activate`, menüden Aç ve Çık gerçek AirLink sürecinde denendi; süreç Çık ile temiz biçimde sonlandı.
 - Android `AirLinkService` ön plan servisi süreç yeniden başlatıldığında çekirdeği Activity açılmadan kuruyor ve `START_STICKY` ile geri geliyor. Activity yok edildiğinde JNI Activity başvurusu temizleniyor; açık dosya seçimi iptal ediliyor. Kullanıcının Durdur eylemi servisi durdurmaya devam ediyor.
 - Kompoz birim testleri: 763 test, 0 başarısız. AirLink Linux ve Windows derlemeleri geçti. Android x86_64 APK, Android 14 test emülatörüne kuruldu: ana ekran üzerinden arka plana alındı; yalnızca emülatörde uygulama süreci sonlandırıldı. Servis yeni PID ile ön planda yeniden başladı, aynı veri dizininde Rust kimliği kaldı ve UDP 47820 dinlemeye döndü. Activity yeniden açıldı, yeni süreç yerinde kaldı. arm64 debug APK yeniden derlendi.
-- Xiaomi 14 Ultra'ya güncel arm64 APK USB üzerinden kuruldu. AirLink açıldı, ön plan servisi başladı. Ana ekrana geçince süreç PID 19780 olarak kaldı; servis hâlâ foreground ve UDP 47820 dinliyor. AndroidRuntime hata günlüğünde çökme yok. Bu, gerçek telefonda temel arka plan çalışmasını doğruluyor; gerçek cihazda süreç öldürülüp otomatik yeniden başlatma henüz yapılmadı.
-- Kullanıcı Android bildirimine dokununca uygulama ekranının geldiğini ve bağlantının sürdüğünü doğruladı. Telefonu iterek gönderme hareketi gerçek cihazda çalıştı. Bu deneme, Android sürecini zorla sonlandırıp servisin `START_STICKY` ile yeniden başlamasını ayrıca doğrulamıyor.
+- Xiaomi 14 Ultra'ya güncel arm64 APK USB üzerinden kuruldu. AirLink açıldı, ön plan servisi başladı. Ana ekrana geçince süreç PID 19780 olarak kaldı; servis hâlâ foreground ve UDP 47820 dinliyor. AndroidRuntime hata günlüğünde çökme yok. Kullanıcı Android bildirimine dokununca uygulama ekranının geldiğini ve bağlantının sürdüğünü doğruladı. Telefonu iterek gönderme hareketi gerçek cihazda çalıştı.
+- Gerçek telefonun uygulama süreci arka planda `run-as ... kill -9` ile ilk kez sonlandırıldığında Xiaomi `AutoStartManagerService` bildirim dinleyicisinin yeniden bağlanmasını reddetti; AirLink süreci ve ön plan servisi kendiliğinden geri gelmedi. Uygulama açılınca servis ve bağlantı geri geldi. Xiaomi cihazlarda Cihazlar ekranına “Arka planda bağlı kal” kartı eklendi; otomatik başlatma ayarına doğrudan, bu yol yoksa uygulama bilgisi ayarına götürüyor. Kullanıcı bu izni açtı. İkinci gerçek telefon denemesinde süreç 9057'den 10787'ye kendiliğinden yenilendi, ön plan servisi ve UDP 47820 geri geldi, Linux tepsisinde Xiaomi çevrimiçi göründü. Güncel arm64 APK kuruldu; Linux ve Windows derlemeleri geçti. Windows paketi yeni exe ve lisansla yenilenip bütünlüğü doğrulandı.
 - WinBoat paylaşımındaki `/home/kasim/AirLink-Windows-ANGLE.zip`, son tepsi düzeltmelerini içeren Windows derlemesiyle yenilendi. ZIP bütünlüğü, içindeki `airlink.exe` ile yerel derlemenin eşitliği ve paylaşılan kopyanın eşitliği doğrulandı. Kullanıcı WinBoat tepsi denemesinin de tamamlandığını bildirdi.
 
 - Telefon uygulamaları Kompoz `Window` ile oturum başına bir masaüstü penceresinde açılıyor. Pencereler sekme değiştirildiğinde açık kalıyor. Uygulamalar sekmesindeki düğme açık pencereyi öne getiriyor. Pencerenin kapatma düğmesi mevcut uzak oturum kapatma akışını kullanıyor.
@@ -81,9 +86,9 @@ Bu karşılaştırmada güncellenen belgeler: `docs/protocol.md` (eksik `call.*`
 
 Kullanıcı canlı H.264 penceresi ve ekran paylaşımını, `kod:port` ile ilk ADB eşleşmesini ve fiziksel Windows denemesini doğruladı. Faz 1–3 tamam.
 
-Çalışma ağacı `ffdbb52` ile commit'lendi. Lisans PolyForm Strict 1.0.0 olarak seçildi; katkı izni `CONTRIBUTING.md`, ad ve logo `TRADEMARKS.md` içinde.
+Çalışma ağacı `ffdbb52` ile commit'lendi. O tarihte PolyForm Strict 1.0.0 seçilmişti; 25 Kasım 2026 tarihli lisans değişikliği yukarıda kayıtlı.
 
-Açık işler: (1) gerçek telefonda süreç öldürüldükten sonra Android servisinin yeniden başlamasını doğrulama, (2) Faz 4B+ ve 4C, (3) Faz 5.
+Açık işler: (1) Faz 4B+ ve 4C, (2) Faz 5.
 
 ## Faz 4 ve Faz 5 planı (24 Kasım 2026)
 

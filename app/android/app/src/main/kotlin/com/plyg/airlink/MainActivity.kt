@@ -177,6 +177,20 @@ class MainActivity : KompozActivity() {
         }
         @JvmStatic fun screenControlEnabled(): Boolean = AirLinkAccessibility.enabled()
         @JvmStatic fun openScreenControlSettings() = AirLinkAccessibility.openSettings()
+        @JvmStatic fun needsBackgroundAutostartSettings(): Boolean =
+            Build.MANUFACTURER.equals("Xiaomi", ignoreCase = true)
+
+        @JvmStatic fun openBackgroundAutostartSettings() {
+            val activity = currentActivity ?: return
+            try {
+                activity.startActivity(Intent().setClassName(
+                    "com.miui.securitycenter", "com.miui.permcenter.autostart.AutoStartManagementActivity",
+                ))
+            } catch (_: Exception) {
+                activity.startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                    Uri.parse("package:${activity.packageName}")))
+            }
+        }
         @JvmStatic fun smsGranted(): Boolean = AirLinkService.appContext?.let(SmsBridge::granted) == true
         @JvmStatic fun callsGranted(): Boolean = AirLinkService.appContext?.let(CallBridge::granted) == true
 

@@ -31,6 +31,7 @@ jclass smsClass = nullptr, activityClass = nullptr;  // SmsBridge, MainActivity
 jmethodID smsHandle = nullptr, smsGranted = nullptr, smsRequestPermissions = nullptr;
 jmethodID callsGranted = nullptr, callRequestPermissions = nullptr;
 jmethodID screenControlOn = nullptr, screenControlSettings = nullptr;
+jmethodID backgroundAutostartNeeded = nullptr, backgroundAutostartSettings = nullptr;
 jmethodID flingAvailableId = nullptr, flingEnabledId = nullptr, setFlingEnabledId = nullptr;
 jclass adbPairingClass = nullptr;
 jmethodID adbStart = nullptr, adbDone = nullptr;
@@ -174,6 +175,21 @@ void notificationAction(const std::string& kind, const std::string& key, const s
 void showDesktopNotification(const std::string&, const std::string&) {}  // a phone shows its own
 
 bool canUseAdvancedMode() { return true; }
+
+bool needsBackgroundAutostartSettings() {
+    JNIEnv* e = env();
+    if (!e || !activityClass || !backgroundAutostartNeeded) return false;
+    bool needed = e->CallStaticBooleanMethod(activityClass, backgroundAutostartNeeded);
+    if (e->ExceptionCheck()) e->ExceptionClear(), needed = false;
+    return needed;
+}
+
+void openBackgroundAutostartSettings() {
+    JNIEnv* e = env();
+    if (!e || !activityClass || !backgroundAutostartSettings) return;
+    e->CallStaticVoidMethod(activityClass, backgroundAutostartSettings);
+    if (e->ExceptionCheck()) e->ExceptionClear();
+}
 
 bool canFling() {
     JNIEnv* e = env();
@@ -350,6 +366,8 @@ extern "C" JNIEXPORT void JNICALL Java_com_plyg_airlink_MainActivity_nativeInit(
         callRequestPermissions = e->GetStaticMethodID(activityClass, "requestCallPermissions", "()V");
         screenControlOn = e->GetStaticMethodID(activityClass, "screenControlEnabled", "()Z");
         screenControlSettings = e->GetStaticMethodID(activityClass, "openScreenControlSettings", "()V");
+        backgroundAutostartNeeded = e->GetStaticMethodID(activityClass, "needsBackgroundAutostartSettings", "()Z");
+        backgroundAutostartSettings = e->GetStaticMethodID(activityClass, "openBackgroundAutostartSettings", "()V");
         local = e->FindClass("com/plyg/airlink/AdbPairing");
         adbPairingClass = static_cast<jclass>(e->NewGlobalRef(local));
         e->DeleteLocalRef(local);

@@ -22,6 +22,8 @@ using namespace airlink;
 
 static App appState() { return App::get(); }
 static void openDownloads(const std::string& path) { airlink::platform::openFolder(path); }
+static bool needsBackgroundAutostartSettings() { return airlink::platform::needsBackgroundAutostartSettings(); }
+static void openBackgroundAutostartSettings() { airlink::platform::openBackgroundAutostartSettings(); }
 
 enum class TrayIconStatus { Starting, Connected, NoDevices, Paused, Error };
 
@@ -584,6 +586,9 @@ fun DeviceList(app: App, clipboard: ClipboardManager) {
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         item { ThisDeviceCard(app.me()) }
+        if (needsBackgroundAutostartSettings()) {
+            item { BackgroundAutostartCard() }
+        }
 
         if (app.canShareNotifications()) {
             item { NotificationAccessCard(app) }
@@ -701,6 +706,18 @@ fun ThisDeviceCard(me: DeviceInfo) {
                 Text("Gelen dosyalar: ${me.downloadDir}", style = MaterialTheme.typography.bodySmall,
                      color = cs.onPrimaryContainer, maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
+        }
+    }
+}
+
+@Kompozable
+fun BackgroundAutostartCard() {
+    OutlinedCard(modifier = Modifier.fillMaxWidth()) {
+        Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text("Arka planda bağlı kal", style = MaterialTheme.typography.titleMedium)
+            Text("Xiaomi, uygulama süreci kapandığında AirLink'in yeniden başlamasını engelleyebilir. Ayarlar'da AirLink için arka planda otomatik başlatmayı açın.",
+                 color = MaterialTheme.colorScheme.onSurfaceVariant)
+            FilledTonalButton(onClick = { openBackgroundAutostartSettings() }) { Text("Otomatik başlatma ayarları") }
         }
     }
 }

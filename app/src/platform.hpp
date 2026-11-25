@@ -77,6 +77,10 @@ bool canShareScreen();
 bool screenControlEnabled();  // the phone carries out a computer's touches (Accessibility on)
 void openScreenControlSettings();
 
+// OEMs may block the restart of a sticky foreground service after its process dies.
+bool needsBackgroundAutostartSettings();
+void openBackgroundAutostartSettings();
+
 // ---- Fling to send (phase 4B, Android): push the phone toward the computer -----------------
 
 bool canFling();      // the phone has a linear acceleration sensor

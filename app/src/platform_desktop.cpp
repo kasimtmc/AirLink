@@ -463,6 +463,8 @@ void requestCallAccess() {}
 bool canShareScreen() { return false; }
 bool screenControlEnabled() { return false; }
 void openScreenControlSettings() {}
+bool needsBackgroundAutostartSettings() { return false; }
+void openBackgroundAutostartSettings() {}
 
 bool canUseAdvancedMode() { return false; }
 bool canFling() { return false; }
