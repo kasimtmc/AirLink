@@ -149,6 +149,8 @@ Yalnızca eşleşmiş cihazlar arasında gider. Tanımlı türler:
 | `desktop.stop` | izleyen → bilgisayar | `{}` |
 | `desktop.stopped` | bilgisayar → izleyen | `{ reason, error? }`; `reason`: `declined`, `user` (bilgisayarda durduruldu), `replaced` (başka cihaz başladı), `viewer`, `failed`, `unsupported`, `computer` |
 | `desktop.input` | izleyen → bilgisayar | `{ type, … }`; koordinatlar 0–1 arası oranlardır. `move { x, y }`, `button { button?, down, x, y }`, `click { button?, x, y, count? }`, `scroll { x, y, dx?, dy? }` (çentik; pozitif `dy` aşağı), `key { key, down?, modifiers? }`, `text { text }`. `button`: `left` (varsayılan), `right`, `middle`. `key`: `Enter`, `Backspace`, `Escape`, `Tab`, `Delete`, `Space`, ok tuşları, `Home`, `End`, `PageUp`, `PageDown`, `Insert`, `Shift`, `Control`, `Alt`, `Super`, `F1`–`F12` veya tek karakter. Yalnızca paylaşımı alan cihazdan kabul edilir |
+| `gesture.pull` | telefon → bilgisayar | `{}`; telefonda yumruk ve açık avuç hareketiyle, bilgisayarda yalnızca bu telefon için açıkça hazırlanmış dosya ya da panoyu ister. Hazırlık 60 saniye geçerli ve tek kullanımlıktır |
+| `gesture.unavailable` | bilgisayar → telefon | `{}`; hedef telefon için hazır aktarım bulunamadı veya süre doldu |
 
 ## 10. Medya akışları
 
@@ -180,6 +182,6 @@ xdg-desktop-portal ScreenCast + PipeWire, Windows'ta GDI; kodlayıcı OpenH264).
 
 Faz 4 için şu mesaj aileleri ayrılmıştır:
 
-- `gesture.*`: el hareketiyle aktarım
+- `gesture.*`: `pull` ve `unavailable` dışında gelişmiş el hareketleri
 
 Bilinmeyen bir `type` gelirse yanıt `error { message: "unsupported" }` olur.

@@ -24,6 +24,8 @@ static App appState() { return App::get(); }
 static void openDownloads(const std::string& path) { airlink::platform::openFolder(path); }
 static bool needsBackgroundAutostartSettings() { return airlink::platform::needsBackgroundAutostartSettings(); }
 static void openBackgroundAutostartSettings() { airlink::platform::openBackgroundAutostartSettings(); }
+static void openHandGesture() { airlink::platform::openHandGesture(); }
+static bool canUseHandGesture() { return airlink::platform::canUseHandGesture(); }
 
 enum class TrayIconStatus { Starting, Connected, NoDevices, Paused, Error };
 
@@ -554,6 +556,11 @@ fun ShareDialog(app: App) {
                             Text("Ya da telefonu ${app.peerName(app.flingTarget())} cihazına doğru fırlatın.",
                                  style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary)
                         }
+                        if (canUseHandGesture() && app.flingTarget().isNotEmpty()) {
+                            OutlinedButton(onClick = { openHandGesture() }, modifier = Modifier.fillMaxWidth()) {
+                                Text("El hareketiyle gönder")
+                            }
+                        }
                         for (peer in paired) {
                             OutlinedButton(onClick = { app.shareTo(peer.id) }, modifier = Modifier.fillMaxWidth(), enabled = peer.online) {
                                 Icon(AppIcons.forPlatform(peer.platform), contentDescription = null, modifier = Modifier.size(18.dp))
@@ -605,6 +612,9 @@ fun DeviceList(app: App, clipboard: ClipboardManager) {
         if (app.canFling()) {
             item { FlingCard(app) }
         }
+        if (canUseHandGesture()) {
+            item { HandGestureCard(app) }
+        }
         if (app.canUseAdvancedMode()) {
             item { AdvancedModeCard(app) }
         }
@@ -637,6 +647,14 @@ fun DeviceList(app: App, clipboard: ClipboardManager) {
                     onShowScreen = { app.startScreen(peer.id) },
                     onControl = { app.startDesktop(peer.id) },
                 )
+            }
+        }
+
+        if (isDesktop()) {
+            for (peer in paired) {
+                if (peer.platform == "android" && peer.online) {
+                    item { GesturePrepareCard(app, peer, clipboard) }
+                }
             }
         }
 
@@ -805,6 +823,40 @@ fun FlingCard(app: App) {
             }
             Spacer(modifier = Modifier.width(12.dp))
             Switch(checked = app.flingEnabled(), onCheckedChange = { app.setFlingEnabled(it) })
+        }
+    }
+}
+
+@Kompozable
+fun HandGestureCard(app: App) {
+    val target = app.flingTarget()
+    OutlinedCard(modifier = Modifier.fillMaxWidth()) {
+        Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text("Havada tut ve gönder", style = MaterialTheme.typography.titleMedium)
+            Text("Ön kameraya yumruğunuzu gösterip sonra avucunuzu açın. Telefondan gönderin veya bilgisayarda hazırlanmış aktarımı alın. Kamera yalnızca bu ekran açıkken çalışır.",
+                 style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text(if (target.isEmpty()) "Hedef: çevrimiçi bilgisayar yok" else "Hedef: ${app.peerName(target)}",
+                 style = MaterialTheme.typography.labelMedium)
+            FilledTonalButton(onClick = { openHandGesture() }, enabled = target.isNotEmpty()) {
+                Text("Kamerayı aç")
+            }
+        }
+    }
+}
+
+@Kompozable
+fun GesturePrepareCard(app: App, peer: Peer, clipboard: ClipboardManager) {
+    OutlinedCard(modifier = Modifier.fillMaxWidth()) {
+        Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text("${peer.name} için havada aktarım", style = MaterialTheme.typography.titleMedium)
+            Text("Telefonda kamerayı açıp 'Bilgisayardan al' yönünü seçin. Hazırlanan içerik 60 saniye içinde avuç açma hareketiyle bir kez alınabilir.",
+                 style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                FilledTonalButton(onClick = { app.prepareGestureFiles(peer.id) }) { Text("Dosya hazırla") }
+                FilledTonalButton(onClick = { app.prepareGestureClipboard(peer.id, clipboard.getText()) }) { Text("Panoyu hazırla") }
+            }
+            val status = app.gestureStatus(peer.id)
+            if (status.isNotEmpty()) Text(status, style = MaterialTheme.typography.labelMedium)
         }
     }
 }

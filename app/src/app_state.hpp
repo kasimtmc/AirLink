@@ -318,7 +318,12 @@ public:
     void endDesktopShare() const;
     void setFlingEnabled(bool on) const;
     // A fling happened: files waiting to be shared go to flingTarget(), else the clipboard's text.
-    void fling(const std::string& clipboardText) const;
+    bool fling(const std::string& clipboardText) const;
+    // A computer explicitly stages one transfer for a paired phone's camera gesture.
+    void prepareGestureFiles(const std::string& peerId) const;
+    void prepareGestureClipboard(const std::string& peerId, const std::string& text) const;
+    std::string gestureStatus(const std::string& peerId) const;
+    bool requestGesturePull() const;
     void startAdvancedSetup() const;
     void advancedPair(const std::string& code) const;  // the code typed into the setup notification
     void advancedTest() const;                         // runs `id` over wireless debugging

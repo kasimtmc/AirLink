@@ -45,7 +45,7 @@ std::optional<uint16_t> parseAdbPort(const std::string& text) {
     return static_cast<uint16_t>(port);
 }
 
-enum class OpKind { StartPairing, ConfirmPairing, SendFiles, SendClipboard, SendReply, ScreenStart, AdbPair, AdbTest, AdbHelper, DesktopShare };
+enum class OpKind { StartPairing, ConfirmPairing, SendFiles, SendClipboard, SendReply, GesturePull, ScreenStart, AdbPair, AdbTest, AdbHelper, DesktopShare };
 
 std::vector<uint8_t> base64(const std::string& in) {
     static const std::string chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
@@ -181,12 +181,17 @@ struct App::Impl {
 
     std::vector<std::string> notices;
     std::vector<std::string> incomingClipboard;
+    std::string gesturePeer, gestureText, gesturePull;
+    std::vector<std::string> gestureFiles;
+    int gestureExpiresTick = 0;
+    MutableState<std::string> gestureReady = mutableStateOf(std::string());
     std::map<uint64_t, OpKind> ops;
     int ticks = 0;
 
     // Filled by the platform's file picker on any thread, applied in pump().
     std::mutex pickedMutex;
     std::vector<std::pair<std::string, std::vector<std::string>>> picked;
+    std::optional<std::pair<std::string, std::vector<std::string>>> gesturePicked;
     std::vector<std::string> shared;  // from platform::setShareHandler, any thread
     std::vector<std::string> onlinePaired;  // for sends from any thread (under pickedMutex)
 
@@ -415,6 +420,9 @@ struct App::Impl {
                 case OpKind::SendReply:
                     notices.push_back(ok ? "Yanıt gönderildi" : "Yanıt gönderilemedi: " + err);
                     break;
+                case OpKind::GesturePull:
+                    if (!ok) notices.push_back("Havada aktarım istenemedi: " + err);
+                    break;
             }
         }
     }
@@ -431,7 +439,12 @@ struct App::Impl {
 
     void handleAppMessage(const json::Value& peer, const std::string& kind, const json::Value& body) {
         std::string peerId = peer["id"].str();
-        if (kind == "notification.posted") {
+        if (kind == "gesture.pull") {
+            // Only a previously armed, paired phone may take the staged item, once.
+            gesturePull = peerId;
+        } else if (kind == "gesture.unavailable") {
+            notices.push_back("Bilgisayarda bu telefon için hazır aktarım yok veya süresi doldu");
+        } else if (kind == "notification.posted") {
             PhoneNotification n{.peerId = peerId,
                                 .key = body["key"].str(),
                                 .app = body["app"].str(),
@@ -747,16 +760,45 @@ void App::pump() const {
     while (char* raw = airlink_poll_event(s.node)) s.handle(json::Value::parse(takeString(raw)));
 
     std::vector<std::pair<std::string, std::vector<std::string>>> picked;
+    std::optional<std::pair<std::string, std::vector<std::string>>> gesturePicked;
     std::vector<std::string> shared;
     {
         std::lock_guard lock(s.pickedMutex);
         picked.swap(s.picked);
+        gesturePicked.swap(s.gesturePicked);
         shared.swap(s.shared);
     }
     if (!shared.empty())
         s.share.update([&](std::vector<std::string>& list) { list.insert(list.end(), shared.begin(), shared.end()); });
     for (auto& [peer, paths] : picked)
         if (!paths.empty()) sendFiles(peer, paths);
+    if (gesturePicked && !gesturePicked->second.empty()) {
+        s.gesturePeer = std::move(gesturePicked->first);
+        s.gestureFiles = std::move(gesturePicked->second);
+        s.gestureText.clear();
+        s.gestureExpiresTick = s.ticks + 1200;
+        s.gestureReady.set(std::to_string(s.gestureFiles.size()) + " dosya hazır (60 saniye)");
+    }
+    if (!s.gesturePull.empty()) {
+        std::string peer = std::exchange(s.gesturePull, {});
+        if (s.gesturePeer != peer || s.ticks >= s.gestureExpiresTick ||
+            (s.gestureFiles.empty() && s.gestureText.empty())) {
+            s.sendDesktop(peer, "gesture.unavailable", "{}");
+        } else {
+            auto files = std::exchange(s.gestureFiles, {});
+            auto clipboard = std::exchange(s.gestureText, {});
+            s.gesturePeer.clear();
+            s.gestureReady.set({});
+            if (!files.empty()) sendFiles(peer, files);
+            else sendClipboard(peer, clipboard);
+        }
+    }
+    if (!s.gesturePeer.empty() && s.ticks >= s.gestureExpiresTick) {
+        s.gesturePeer.clear();
+        s.gestureFiles.clear();
+        s.gestureText.clear();
+        s.gestureReady.set({});
+    }
 
     // Reachability changes without an event (a paired device's connection drops), and the user may
     // have granted notification access in Settings meanwhile: look now and then.
@@ -1056,22 +1098,60 @@ void App::setFlingEnabled(bool on) const {
     impl_->flingOn.set(on);
 }
 
-void App::fling(const std::string& clipboardText) const {
+bool App::fling(const std::string& clipboardText) const {
     std::string target = impl_->flingTarget();
     if (target.empty()) {
         impl_->notices.push_back("Fırlatma için çevrimiçi bir bilgisayar yok");
-        return;
+        return false;
     }
     std::string name = impl_->peerNameOf(target);
     if (auto files = impl_->share.peek(); !files.empty()) {
         impl_->share.set({});
         sendFiles(target, files);
         impl_->notices.push_back(std::to_string(files.size()) + " dosya " + name + " cihazına fırlatıldı");
+        return true;
     } else if (!clipboardText.empty()) {
         sendClipboard(target, clipboardText);
+        return true;
     } else {
         impl_->notices.push_back("Gönderilecek bir şey yok: dosya paylaşın ya da metin kopyalayın");
+        return false;
     }
+}
+
+void App::prepareGestureFiles(const std::string& peerId) const {
+    std::weak_ptr<Impl> weak = impl_;
+    platform::pickFiles([weak, peerId](std::vector<std::string> files) {
+        if (auto s = weak.lock(); s && !files.empty()) {
+            std::lock_guard lock(s->pickedMutex);
+            s->gesturePicked = std::make_pair(peerId, std::move(files));
+        }
+    });
+}
+
+void App::prepareGestureClipboard(const std::string& peerId, const std::string& text) const {
+    if (text.empty()) {
+        impl_->notices.push_back("Pano boş");
+        return;
+    }
+    impl_->gesturePeer = peerId;
+    impl_->gestureFiles.clear();
+    impl_->gestureText = text;
+    impl_->gestureExpiresTick = impl_->ticks + 1200;
+    impl_->gestureReady.set("Pano hazır (60 saniye)");
+}
+
+std::string App::gestureStatus(const std::string& peerId) const {
+    std::string status = impl_->gestureReady.get();
+    return impl_->gesturePeer == peerId ? status : std::string();
+}
+
+bool App::requestGesturePull() const {
+    std::string target = impl_->flingTarget();
+    if (target.empty() || !impl_->node) return false;
+    uint64_t op = airlink_send_message(impl_->node, target.c_str(), "gesture.pull", "{}");
+    impl_->track(op, OpKind::GesturePull);
+    return op != 0;
 }
 
 bool App::canUseAdvancedMode() const { return platform::canUseAdvancedMode(); }

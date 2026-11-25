@@ -98,7 +98,7 @@ Sıra kullanıcı kararıyla: A → B → C, ardından son faz olarak arayüz iy
 |---|---|---|
 | 4A Bilgisayarı telefondan kontrol | Bilgisayar ekranı telefonda (H.264), dokunma fare, iki parmak kaydırma, tuşlar ve yazı; bilgisayarda onay ve "Durdur" çubuğu | Tamam; kullanıcı gerçek cihazda doğruladı |
 | 4B El hareketiyle aktarım | Telefonu bilgisayara doğru itme ("fırlatarak gönder") | Gerçek cihazda kullanıcı tarafından doğrulandı |
-| 4B+ Havada tut-bırak (Huawei tarzı) | Kamerayla yumruk (tut) ve açık avuç (bırak) tanıma; telefon ⇄ bilgisayar | Tasarım aşamasında |
+| 4B+ Havada tut-bırak (Huawei tarzı) | Kamerayla yumruk (tut) ve açık avuç (bırak) tanıma; telefon ⇄ bilgisayar | Pano ve dosya iki yönde gerçek cihazda doğrulandı |
 | 4C Bluetooth ile arama sesi | Bilgisayar telefonun kulaklığı gibi (HFP) | Başlanmadı |
 | 5 Arayüz iyileştirmeleri | Görsel düzen, gezinme ve kullanılabilirlik | Başlanmadı |
 
@@ -111,6 +111,8 @@ Sıra kullanıcı kararıyla: A → B → C, ardından son faz olarak arayüz iy
 - Doğrulama: `airlink-desktop` birim testleri (kodlanan her karenin tek başına çözülmesi, boyut, giriş ayrıştırma, keysym eşlemesi), Linux ve Windows çapraz `clippy` temiz. Kullanıcı gerçek masaüstünde ekran yakalamayı ve telefondan fare/klavye kontrolünü doğruladı.
 
 Kompoz’un Android Java kaynakları AirLink deposunun dışında, Kompoz deposunda tutuluyor.
+
+4B+ uygulaması: Kamera yalnızca kullanıcı “Kamerayı aç” dediğinde çalışır ve çalışma sırasında izin ister. MediaPipe Gesture Recognizer modelinde `Closed_Fist` en az 300 ms ve %75 güvenle görülürse tutulur. Gerçek Xiaomi denemesinde `Open_Palm` puanları %53–70, karelerin çoğu `None` olduğundan, bırakma için sınıflandırmaya ek olarak el eklemlerinden dört parmağın en az üçünün açık olması ölçülür; 1 saniye içinde en az iki açık avuç gözlemi aranır. Yumruk 12 saniye sonra geçersizleşir, gönderimden sonra 3 saniye beklenir. Kareler telefon üzerinde işlenir, kaydedilmez veya ağa gönderilmez. Telefondan bilgisayara hazır dosya/pano gönderilir; Android paylaşım penceresinde kamerayı açan ayrı düğme vardır. Ters yönde bilgisayarda belli bir eşleşmiş telefon için dosya ya da pano 60 saniyeliğine hazırlanır; telefon hareketi tek kullanımlık `gesture.pull` isteğiyle bunu alır. Modelin Apache-2.0 bildirimi APK içindeki `assets/licenses/MediaPipeGestureRecognizer.txt` dosyasındadır. Pano ve dosya, her iki yönde gerçek Xiaomi ve Linux cihazlarında doğrulandı.
 
 Commit ve push kullanıcı istediğinde yapılır. Commit yazarı yalnızca Kasim olur. Commit mesajlarına ortak yazar veya model atfı eklenmez.
 

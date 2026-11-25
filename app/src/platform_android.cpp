@@ -33,6 +33,7 @@ jmethodID callsGranted = nullptr, callRequestPermissions = nullptr;
 jmethodID screenControlOn = nullptr, screenControlSettings = nullptr;
 jmethodID backgroundAutostartNeeded = nullptr, backgroundAutostartSettings = nullptr;
 jmethodID flingAvailableId = nullptr, flingEnabledId = nullptr, setFlingEnabledId = nullptr;
+jmethodID handGestureAvailableId = nullptr, openHandGestureId = nullptr;
 jclass adbPairingClass = nullptr;
 jmethodID adbStart = nullptr, adbDone = nullptr;
 jclass appStreamsClass = nullptr;
@@ -214,6 +215,21 @@ void setFlingEnabled(bool on) {
     if (e->ExceptionCheck()) e->ExceptionClear();
 }
 
+bool canUseHandGesture() {
+    JNIEnv* e = env();
+    if (!e || !activityClass || !handGestureAvailableId) return false;
+    bool available = e->CallStaticBooleanMethod(activityClass, handGestureAvailableId);
+    if (e->ExceptionCheck()) e->ExceptionClear(), available = false;
+    return available;
+}
+
+void openHandGesture() {
+    JNIEnv* e = env();
+    if (!e || !activityClass || !openHandGestureId) return;
+    e->CallStaticVoidMethod(activityClass, openHandGestureId);
+    if (e->ExceptionCheck()) e->ExceptionClear();
+}
+
 void startAdvancedSetup() {
     JNIEnv* e = env();
     if (!e || !adbPairingClass) return;
@@ -362,6 +378,8 @@ extern "C" JNIEXPORT void JNICALL Java_com_plyg_airlink_MainActivity_nativeInit(
         flingAvailableId = e->GetStaticMethodID(activityClass, "flingAvailable", "()Z");
         flingEnabledId = e->GetStaticMethodID(activityClass, "flingEnabled", "()Z");
         setFlingEnabledId = e->GetStaticMethodID(activityClass, "setFlingEnabled", "(Z)V");
+        handGestureAvailableId = e->GetStaticMethodID(activityClass, "handGestureAvailable", "()Z");
+        openHandGestureId = e->GetStaticMethodID(activityClass, "openHandGesture", "()V");
         callsGranted = e->GetStaticMethodID(activityClass, "callsGranted", "()Z");
         callRequestPermissions = e->GetStaticMethodID(activityClass, "requestCallPermissions", "()V");
         screenControlOn = e->GetStaticMethodID(activityClass, "screenControlEnabled", "()Z");
@@ -487,4 +505,12 @@ extern "C" JNIEXPORT void JNICALL Java_com_plyg_airlink_MainActivity_nativeFiles
 
 extern "C" JNIEXPORT void JNICALL Java_com_plyg_airlink_FlingDetector_nativeFlung(JNIEnv* e, jclass, jstring clipboardText) {
     airlink::App::get().fling(fromJava(e, clipboardText));  // on the main thread (the sensor's)
+}
+
+extern "C" JNIEXPORT jboolean JNICALL Java_com_plyg_airlink_HandGestureActivity_nativeHandReleased(JNIEnv* e, jclass, jstring clipboardText) {
+    return airlink::App::get().fling(fromJava(e, clipboardText)) ? JNI_TRUE : JNI_FALSE;
+}
+
+extern "C" JNIEXPORT jboolean JNICALL Java_com_plyg_airlink_HandGestureActivity_nativeRequestGesturePull(JNIEnv*, jclass) {
+    return airlink::App::get().requestGesturePull() ? JNI_TRUE : JNI_FALSE;
 }

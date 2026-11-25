@@ -87,6 +87,10 @@ bool canFling();      // the phone has a linear acceleration sensor
 bool flingEnabled();
 void setFlingEnabled(bool on);
 
+// Camera-based hold and release, only available when a front camera is present.
+bool canUseHandGesture();
+void openHandGesture();
+
 // ---- Advanced mode (Android): the phone's own wireless debugging ----------------------------
 
 bool canUseAdvancedMode();

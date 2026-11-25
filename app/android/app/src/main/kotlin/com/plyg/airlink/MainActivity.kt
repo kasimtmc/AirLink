@@ -204,6 +204,11 @@ class MainActivity : KompozActivity() {
         }
 
         @JvmStatic fun flingAvailable(): Boolean = AirLinkService.appContext?.let(FlingDetector::available) == true
+        @JvmStatic fun handGestureAvailable(): Boolean =
+            AirLinkService.appContext?.packageManager?.hasSystemFeature(android.content.pm.PackageManager.FEATURE_CAMERA_FRONT) == true
+        @JvmStatic fun openHandGesture() {
+            currentActivity?.let { it.startActivity(Intent(it, HandGestureActivity::class.java)) }
+        }
         @JvmStatic fun flingEnabled(): Boolean = AirLinkService.appContext?.let(FlingDetector::enabled) == true
         @JvmStatic fun setFlingEnabled(on: Boolean) {
             val context = currentActivity ?: AirLinkService.appContext ?: return
