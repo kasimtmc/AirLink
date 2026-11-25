@@ -160,11 +160,11 @@ The end-to-end tests run real nodes over loopback and cover pairing, transfers, 
 
 ## License
 
-AirLink is source-available, not open source. It is licensed under the [PolyForm Strict License 1.0.0](LICENSE):
+AirLink's code is source-available under the [Sustainable Use License 1.0](LICENSE). It is not OSI open source because commercial redistribution is restricted:
 
-- You may use it for personal and other noncommercial purposes, including at schools, charities and public institutions.
-- You may not use it commercially, change it, or distribute it or a modified version of it.
-- Contributions are welcome: [CONTRIBUTING.md](CONTRIBUTING.md) allows forking and changing the code to send pull requests to this repository.
-- The AirLink name and logo may not be used for other products or rebranded versions; see [TRADEMARKS.md](TRADEMARKS.md).
+- You may use and modify it for personal, noncommercial or your own internal business purposes.
+- You may share original or modified copies free of charge for noncommercial purposes, with the license and modification notices.
+- Commercial redistribution or offering AirLink to others as a paid product or service needs a separate written license from Kasim.
+- Forks and pull requests are welcome; see [CONTRIBUTING.md](CONTRIBUTING.md). Forks must use their own name and branding; see [TRADEMARKS.md](TRADEMARKS.md).
 
-Third-party components keep their own licenses (Kompoz: Apache 2.0, OpenH264 and ANGLE: BSD, Rust crates: mostly MIT/Apache 2.0). For commercial use, contact the author.
+Third-party components keep their own licenses (Kompoz: Apache 2.0, OpenH264 and ANGLE: BSD, Rust crates: mostly MIT/Apache 2.0). For permission beyond the community license, contact [Kasim](https://github.com/kasimtmc).

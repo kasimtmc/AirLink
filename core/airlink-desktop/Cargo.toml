@@ -2,7 +2,7 @@
 name = "airlink-desktop"
 version.workspace = true
 edition.workspace = true
-license.workspace = true
+license-file.workspace = true
 description = "This computer's screen and input, shared with a paired device (phase 4)"
 
 [dependencies]

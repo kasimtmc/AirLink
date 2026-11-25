@@ -1,63 +1,85 @@
-Required Notice: Copyright (c) 2026 Kasim (https://github.com/kasimtmc/AirLink)
+# AirLink license
 
-Additional permissions for contributions are granted in CONTRIBUTING.md. The AirLink name and logo are covered by TRADEMARKS.md.
+Copyright (c) 2026 Kasim (https://github.com/kasimtmc/AirLink).
 
-# PolyForm Strict License 1.0.0
+AirLink's original code is licensed under the Sustainable Use License, Version 1.0, below. Third-party components retain their own licenses.
 
-<https://polyformproject.org/licenses/strict/1.0.0>
+Commercial redistribution, including selling copies or providing AirLink to others as a paid product or service, requires a separate written license from Kasim. Contact: https://github.com/kasimtmc
 
-## Acceptance
+The AirLink name, logo and app icon are governed by TRADEMARKS.md. Contributions are governed by CONTRIBUTING.md.
 
-In order to get any license under these terms, you must agree to them as both strict obligations and conditions to all your licenses.
+License text published by n8n: https://github.com/n8n-io/n8n/blob/master/LICENSE.md
 
-## Copyright License
+## Sustainable Use License
 
-The licensor grants you a copyright license for the software to do everything you might do with the software that would otherwise infringe the licensor's copyright in it for any permitted purpose, other than distributing the software or making changes or new works based on the software.
+Version 1.0
 
-## Patent License
+### Acceptance
 
-The licensor grants you a patent license for the software that covers patent claims the licensor can license, or becomes able to license, that you would infringe by using the software.
+By using the software, you agree to all of the terms and conditions below.
 
-## Noncommercial Purposes
+### Copyright License
 
-Any noncommercial purpose is a permitted purpose.
+The licensor grants you a non-exclusive, royalty-free, worldwide, non-sublicensable, non-transferable license
+to use, copy, distribute, make available, and prepare derivative works of the software, in each case subject
+to the limitations below.
 
-## Personal Uses
+### Limitations
 
-Personal use for research, experiment, and testing for the benefit of public knowledge, personal study, private entertainment, hobby projects, amateur pursuits, or religious observance, without any anticipated commercial application, is use for a permitted purpose.
+You may use or modify the software only for your own internal business purposes or for non-commercial or
+personal use. You may distribute the software or provide it to others only if you do so free of charge for
+non-commercial purposes. You may not alter, remove, or obscure any licensing, copyright, or other notices of
+the licensor in the software. Any use of the licensor’s trademarks is subject to applicable law.
 
-## Noncommercial Organizations
+### Patents
 
-Use by any charitable organization, educational institution, public research organization, public safety or health organization, environmental protection organization, or government institution is use for a permitted purpose regardless of the source of funding or obligations resulting from the funding.
+The licensor grants you a license, under any patent claims the licensor can license, or becomes able to
+license, to make, have made, use, sell, offer for sale, import and have imported the software, in each case
+subject to the limitations and conditions in this license. This license does not cover any patent claims that
+you cause to be infringed by modifications or additions to the software. If you or your company make any
+written claim that the software infringes or contributes to infringement of any patent, your patent license
+for the software granted under these terms ends immediately. If your company makes such a claim, your patent
+license ends immediately for work on behalf of your company.
 
-## Fair Use
+### Notices
 
-You may have "fair use" rights for the software under the law. These terms do not limit them.
+You must ensure that anyone who gets a copy of any part of the software from you also gets a copy of these
+terms. If you modify the software, you must include in any modified copies of the software a prominent notice
+stating that you have modified the software.
 
-## No Other Rights
+### No Other Rights
 
-These terms do not allow you to sublicense or transfer any of your licenses to anyone else, or prevent the licensor from granting licenses to anyone else.  These terms do not imply any other licenses.
+These terms do not imply any licenses other than those expressly granted in these terms.
 
-## Patent Defense
+### Termination
 
-If you make any written claim that the software infringes or contributes to infringement of any patent, your patent license for the software granted under these terms ends immediately. If your company makes such a claim, your patent license ends immediately for work on behalf of your company.
+If you use the software in violation of these terms, such use is not licensed, and your license will
+automatically terminate. If the licensor provides you with a notice of your violation, and you cease all
+violation of this license no later than 30 days after you receive that notice, your license will be reinstated
+retroactively. However, if you violate these terms after such reinstatement, any additional violation of these
+terms will cause your license to terminate automatically and permanently.
 
-## Violations
+### No Liability
 
-The first time you are notified in writing that you have violated any of these terms, or done anything with the software not covered by your licenses, your licenses can nonetheless continue if you come into full compliance with these terms, and take practical steps to correct past violations, within 32 days of receiving notice.  Otherwise, all your licenses end immediately.
+As far as the law allows, the software comes as is, without any warranty or condition, and the licensor will
+not be liable to you for any damages arising out of these terms or the use or nature of the software, under
+any kind of legal claim.
 
-## No Liability
+### Definitions
 
-***As far as the law allows, the software comes as is, without any warranty or condition, and the licensor will not be liable to you for any damages arising out of these terms or the use or nature of the software, under any kind of legal claim.***
+The “licensor” is the entity offering these terms.
 
-## Definitions
+The “software” is the software the licensor makes available under these terms, including any portion of it.
 
-The **licensor** is the individual or entity offering these terms, and the **software** is the software the licensor makes available under these terms.
+“You” refers to the individual or entity agreeing to these terms.
 
-**You** refers to the individual or entity agreeing to these terms.
+“Your company” is any legal entity, sole proprietorship, or other kind of organization that you work for, plus
+all organizations that have control over, are under the control of, or are under common control with that
+organization. Control means ownership of substantially all the assets of an entity, or the power to direct its
+management and policies by vote, contract, or otherwise. Control can be direct or indirect.
 
-**Your company** is any legal entity, sole proprietorship, or other kind of organization that you work for, plus all organizations that have control over, are under the control of, or are under common control with that organization.  **Control** means ownership of substantially all the assets of an entity, or the power to direct its management and policies by vote, contract, or otherwise.  Control can be direct or indirect.
+“Your license” is the license granted to you for the software under these terms.
 
-**Your licenses** are all the licenses granted to you for the software under these terms.
+“Use” means anything you do with the software requiring your license.
 
-**Use** means anything you do with the software requiring one of your licenses.
+“Trademark” means trademarks, service marks, and similar rights.

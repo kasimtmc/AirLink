@@ -1,11 +1,7 @@
 # AirLink name and logo
 
-The AirLink name, logo and app icon identify the official project by Kasim. The [license](LICENSE) covers the code only; it gives no right to use them.
+The AirLink name, logo and app icon identify Kasim's official project. The [software license](LICENSE) covers the code; it does not grant trademark rights.
 
-Without written permission you may not:
+You may describe a fork accurately as based on AirLink and link to the original project. If you distribute a modified version, use your own name, logo and app icon, and make clear that it is unofficial. This is allowed when your distribution otherwise complies with the software license.
 
-- use the AirLink name, logo or icon for any other product, fork, app or service,
-- publish AirLink, or software based on it, under another name, logo or icon (rebranding),
-- suggest that a product or service is AirLink, is made by its author, or is endorsed by them.
-
-You may use the name to refer to the project accurately, for example in a review, an article or a link to the repository.
+Do not use AirLink branding in a way that suggests your version is official or endorsed by Kasim without written permission. Reviews, articles, bug reports and other accurate references to AirLink may use its name.

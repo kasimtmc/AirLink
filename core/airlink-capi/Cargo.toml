@@ -2,7 +2,7 @@
 name = "airlink-capi"
 version.workspace = true
 edition.workspace = true
-license.workspace = true
+license-file.workspace = true
 description = "C ABI over airlink-core, for the Kompoz (C++) app"
 
 [lib]

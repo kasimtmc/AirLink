@@ -157,11 +157,11 @@ Uçtan uca testler gerçek düğümleri loopback üzerinden çalıştırır; eş
 
 ## Lisans
 
-AirLink kaynağı açık bir yazılımdır, ancak açık kaynak değildir. [PolyForm Strict License 1.0.0](LICENSE) ile lisanslanır:
+AirLink'in kaynak kodu [Sustainable Use License 1.0](LICENSE) ile erişime açıktır. Ticari yeniden dağıtım kısıtlandığı için OSI tanımına göre açık kaynak değildir:
 
-- Kişisel ve diğer ticari olmayan amaçlarla kullanılabilir; okullar, hayır kurumları ve kamu kurumları da buna dahildir.
-- Ticari olarak kullanılamaz, değiştirilemez, kendisi ya da değiştirilmiş bir sürümü dağıtılamaz.
-- Katkılar açıktır: [CONTRIBUTING.md](CONTRIBUTING.md), bu depoya çekme isteği göndermek için çatallamaya ve kodu değiştirmeye izin verir.
-- AirLink adı ve logosu başka ürünlerde ya da yeniden markalanmış sürümlerde kullanılamaz; bkz. [TRADEMARKS.md](TRADEMARKS.md).
+- Kişisel, ticari olmayan veya kendi kuruluşunun iç işlerinde kullanılabilir ve değiştirilebilir.
+- Orijinal ya da değiştirilmiş sürümler, lisans ve değişiklik bildirimleri korunarak ticari olmayan amaçlarla ücretsiz paylaşılabilir.
+- Ticari yeniden dağıtım veya AirLink'i ücretli ürün ya da hizmet olarak başkalarına sunmak için Kasim'den ayrı bir yazılı lisans gerekir.
+- Çatallar ve çekme istekleri memnuniyetle karşılanır; bkz. [CONTRIBUTING.md](CONTRIBUTING.md). Çatallar kendi adını ve görsel kimliğini kullanmalıdır; bkz. [TRADEMARKS.md](TRADEMARKS.md).
 
-Üçüncü taraf bileşenler kendi lisanslarını korur (Kompoz: Apache 2.0, OpenH264 ve ANGLE: BSD, Rust paketleri: çoğunlukla MIT/Apache 2.0). Ticari kullanım için yazarla iletişime geçin.
+Üçüncü taraf bileşenler kendi lisanslarını korur (Kompoz: Apache 2.0, OpenH264 ve ANGLE: BSD, Rust paketleri: çoğunlukla MIT/Apache 2.0). Topluluk lisansının dışındaki izinler için [Kasim](https://github.com/kasimtmc) ile iletişime geçin.

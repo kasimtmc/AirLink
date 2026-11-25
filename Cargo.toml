@@ -5,7 +5,7 @@ members = ["core/airlink-core", "core/airlink-cli", "core/airlink-capi", "core/a
 [workspace.package]
 version = "0.1.0"
 edition = "2024"
-license = "PolyForm-Strict-1.0.0"
+license-file = "LICENSE"
 
 [workspace.dependencies]
 anyhow = "1"

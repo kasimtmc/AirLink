@@ -2,7 +2,7 @@
 name = "airlink-adb"
 version.workspace = true
 edition.workspace = true
-license.workspace = true
+license-file.workspace = true
 description = "AirLink's advanced mode: the phone pairs with and talks to its own wireless debugging (adbd), to run a helper with shell rights"
 
 [dependencies]

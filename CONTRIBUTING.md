@@ -1,42 +1,20 @@
 # Contributing to AirLink
 
-AirLink is source-available under the [PolyForm Strict License 1.0.0](LICENSE). That license lets you use AirLink for noncommercial purposes, but not change or distribute it. This file adds the permissions you need to contribute, and the terms your contributions come under.
+AirLink's code is source-available under the [Sustainable Use License 1.0](LICENSE). You may fork, study, modify and share it under that license. Noncommercial redistribution must be free of charge and retain the license, copyright notices and a notice of your changes. Commercial redistribution requires a separate written license.
 
-## Additional permission for contributors
+We welcome bug reports, documentation, translations, design work and code. Small fixes can go straight to a pull request. For larger changes, open an issue first so the approach can be discussed.
 
-In addition to the PolyForm Strict License, the licensor grants you a copyright license to:
+## Sending a change
 
-1. make a copy (fork) of the AirLink repository on GitHub, or a local copy, and make changes in it,
-2. build and run those changes on your own devices to develop and test them,
-3. publish those changes only as a pull request or patch to the official repository at <https://github.com/kasimtmc/AirLink>, and keep the fork public on GitHub while the pull request is open.
+1. Fork the repository and make a focused change.
+2. Run the relevant tests or build; `cargo test --workspace` covers the Rust core.
+3. Describe the behavior, why it changed and how you checked it in the pull request.
+4. If you distribute a fork, use your own name, logo and app icon; see [TRADEMARKS.md](TRADEMARKS.md).
 
-This permission is only for contributing to the official AirLink project, and only for noncommercial purposes. It does not allow you to:
+## Contribution terms
 
-- distribute builds, binaries or packages of AirLink or of a modified version, including app stores,
-- publish or market a modified version as your own product or under another name or logo (rebranding),
-- use AirLink, or any part of its code, in a commercial product or service, or sell it or services based on it,
-- copy parts of AirLink's code into other projects.
+You keep the copyright to your contribution. By submitting a pull request, patch or other contribution for inclusion in AirLink, you confirm that you have the right to submit it and grant Kasim a perpetual, worldwide, nonexclusive, royalty-free, irrevocable license to use, modify, distribute and sublicense it under the community license and separate commercial licenses. You grant the same scope of patent rights for claims you can license that your contribution necessarily infringes. Your contribution is provided without warranty.
 
-The licensor can end this permission for anyone who misuses it. Everything not listed above stays under the PolyForm Strict License.
+This grant lets the project publish one consistent community license and offer separate written licenses without requesting permission from every contributor for each distribution. It does not transfer your copyright, and you remain free to use your own work elsewhere.
 
-## Terms for your contributions
-
-By submitting a pull request, patch or other contribution, you agree that:
-
-1. the contribution is your own work, or you have the right to submit it,
-2. you grant Kasim a perpetual, worldwide, nonexclusive, royalty-free, irrevocable license to use, change, distribute and sublicense your contribution under any terms, including the AirLink license and other licenses, commercial ones included,
-3. you grant Kasim a patent license on the same terms for any of your patent claims the contribution would infringe,
-4. your contribution comes as is, without any warranty.
-
-You keep the copyright of your contribution. Section 2 lets the project keep one license for all of its code and change it later, without asking every contributor again.
-
-## How to contribute
-
-- Open an issue first for larger changes.
-- Keep changes focused, and follow the existing code style.
-- Run `cargo test` and build the parts you changed (see the README).
-- Commit messages describe the change in English.
-
-## Commercial use
-
-For commercial use, redistribution or any other permission not listed here, contact the licensor through <https://github.com/kasimtmc>.
+For commercial redistribution of AirLink, contact [Kasim](https://github.com/kasimtmc) for a written license.
