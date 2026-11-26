@@ -22,7 +22,7 @@ refresh() {
 }
 
 if [ "${1:-}" = "--uninstall" ]; then
-    rm -f "$desktop_file" "$service_menu" "$nautilus_script" "$icon"
+    rm -f "$desktop_file" "$service_menu" "$nautilus_script" "$icon" "${XDG_CONFIG_HOME:-$HOME/.config}/autostart/dev.airlink.AirLink.desktop"
     command -v kpackagetool6 >/dev/null 2>&1 && kpackagetool6 --type Plasma/Applet --remove dev.airlink.panel >/dev/null 2>&1 || true
     refresh
     echo "AirLink desktop integration removed."

@@ -34,6 +34,13 @@ void stageUris(const std::vector<std::string>& uris, std::function<void(std::vec
 // manager's menu. If AirLink already runs, the files go to it and this process exits; otherwise
 // they are kept for the share handler and this instance serves later launches.
 void handleLaunch(int argc, char** argv);
+// Starting by itself: when the user logs in (an autostart entry on Linux, the Run key on Windows;
+// such a start, `--background`, keeps the window hidden in the tray), or on Android when the phone
+// has started and after AirLink was updated (its service, on by default).
+bool canStartAtLogin();
+bool startAtLogin();
+void setStartAtLogin(bool on);
+bool launchedAtLogin();
 
 // Files handed to the app from outside (a file manager's menu, Android's share sheet, the command
 // line). Files that came before a handler was set are given to it at once. May be called on any thread.
@@ -102,6 +109,10 @@ bool screenControlEnabled();  // the phone carries out a computer's touches (Acc
 void openScreenControlSettings();
 
 // OEMs may block the restart of a sticky foreground service after its process dies.
+// Android: the battery saver may stop AirLink in the background (not exempt from its
+// optimizations), and the system's question that lifts it. None on computers.
+bool batteryRestricted();
+void requestBatteryExemption();
 bool needsBackgroundAutostartSettings();
 void openBackgroundAutostartSettings();
 

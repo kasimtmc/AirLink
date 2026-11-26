@@ -68,6 +68,8 @@ app/packaging/linux/install.sh
 
 Run `install.sh --uninstall` to remove them again.
 
+To start AirLink when you log in, turn on **Oturum açılınca başlat** (Start at login) in Settings. It adds `~/.config/autostart/dev.airlink.AirLink.desktop`, which starts AirLink with `--background`: the window stays closed and AirLink waits in the tray.
+
 #### KDE Plasma panel widget
 
 On Plasma 6, `install.sh` also installs the AirLink panel widget (`app/packaging/linux/plasmoid`, id `dev.airlink.panel`) when `kpackagetool6` is available. It puts AirLink on the panel as an icon of its own: a click opens AirLink's tray panel under the icon (or starts AirLink), and the icon takes the tray icon's colors (blue starting, green connected, orange no devices, grey paused or not running, red error), read from `$XDG_RUNTIME_DIR/airlink.status`.
@@ -106,7 +108,7 @@ rustup target add x86_64-pc-windows-gnu
 cmake -S app -B app/build-windows -G Ninja -DCMAKE_TOOLCHAIN_FILE=../kompoz/cmake/mingw-w64-x86_64.cmake -DCMAKE_BUILD_TYPE=Release && cmake --build app/build-windows
 ```
 
-Ship `airlink.exe` together with its `fonts/` and `licenses/` folders. For virtual machines and Remote Desktop sessions without Vulkan, run `python3 app/packaging/windows/package.py` to create `AirLink-Windows-ANGLE.zip` with ANGLE's Direct3D 11 libraries and license; see [Windows test steps](docs/windows-test.md). If multicast discovery cannot cross the virtual network, use **IP adresiyle eşleştir** in the Devices tab and enter the other device's IP and AirLink port. On first start, AirLink adds "AirLink ile gönder" (Send with AirLink) to Explorer's right-click menu and to the "Send to" menu, for the current user only. `airlink.exe --unregister` removes both.
+Ship `airlink.exe` together with its `fonts/` and `licenses/` folders. For virtual machines and Remote Desktop sessions without Vulkan, run `python3 app/packaging/windows/package.py` to create `AirLink-Windows-ANGLE.zip` with ANGLE's Direct3D 11 libraries and license; see [Windows test steps](docs/windows-test.md). If multicast discovery cannot cross the virtual network, use **IP adresiyle eşleştir** in the Devices tab and enter the other device's IP and AirLink port. On first start, AirLink adds "AirLink ile gönder" (Send with AirLink) to Explorer's right-click menu and to the "Send to" menu, for the current user only. **Oturum açılınca başlat** (Start at login) in Settings adds AirLink to the current user's `Run` key with `--background`, so it starts in the tray; the packaged install starts through its `airlink-pkg` alias. `airlink.exe --unregister` removes the menus and the `Run` entry.
 
 ### Android
 
@@ -129,6 +131,9 @@ Permissions are asked for on the phone, each from its own card in the app:
 - SMS and contacts
 - phone
 - accessibility, for touch on the shared screen
+- running without battery restrictions, so AirLink stays reachable with the screen off
+
+AirLink starts in the background when the phone has started and after it was updated; turn off **Telefon açılınca başlat** (Start when the phone starts) in Settings to stop that.
 
 #### Advanced mode
 

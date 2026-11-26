@@ -33,6 +33,7 @@ jmethodID smsHandle = nullptr, smsGranted = nullptr, smsRequestPermissions = nul
 jmethodID callsGranted = nullptr, callRequestPermissions = nullptr;
 jmethodID screenControlOn = nullptr, screenControlSettings = nullptr;
 jmethodID backgroundAutostartNeeded = nullptr, backgroundAutostartSettings = nullptr;
+jmethodID startAtBootId = nullptr, setStartAtBootId = nullptr, batteryRestrictedId = nullptr, batteryExemptionId = nullptr;
 jmethodID flingAvailableId = nullptr, flingEnabledId = nullptr, setFlingEnabledId = nullptr;
 jmethodID flingMediaGrantedId = nullptr, requestFlingMediaId = nullptr;
 jmethodID openFileId = nullptr, showInFolderId = nullptr, shareWithAppsId = nullptr, uriReadableId = nullptr;
@@ -264,6 +265,40 @@ void setPlayerAudioTarget(const std::string& peerId) {
 
 void setPlayerBluetoothPhone(const std::string&) {}
 std::string playerBluetoothStatus() { return {}; }
+
+bool canStartAtLogin() { return true; }
+
+bool startAtLogin() {
+    JNIEnv* e = env();
+    if (!e || !activityClass || !startAtBootId) return false;
+    bool on = e->CallStaticBooleanMethod(activityClass, startAtBootId);
+    if (e->ExceptionCheck()) e->ExceptionClear(), on = false;
+    return on;
+}
+
+void setStartAtLogin(bool on) {
+    JNIEnv* e = env();
+    if (!e || !activityClass || !setStartAtBootId) return;
+    e->CallStaticVoidMethod(activityClass, setStartAtBootId, jboolean(on));
+    if (e->ExceptionCheck()) e->ExceptionClear();
+}
+
+bool launchedAtLogin() { return false; }
+
+bool batteryRestricted() {
+    JNIEnv* e = env();
+    if (!e || !activityClass || !batteryRestrictedId) return false;
+    bool restricted = e->CallStaticBooleanMethod(activityClass, batteryRestrictedId);
+    if (e->ExceptionCheck()) e->ExceptionClear(), restricted = false;
+    return restricted;
+}
+
+void requestBatteryExemption() {
+    JNIEnv* e = env();
+    if (!e || !activityClass || !batteryExemptionId) return;
+    e->CallStaticVoidMethod(activityClass, batteryExemptionId);
+    if (e->ExceptionCheck()) e->ExceptionClear();
+}
 
 bool needsBackgroundAutostartSettings() {
     JNIEnv* e = env();
@@ -581,6 +616,10 @@ extern "C" JNIEXPORT void JNICALL Java_com_plyg_airlink_MainActivity_nativeInit(
         screenControlSettings = e->GetStaticMethodID(activityClass, "openScreenControlSettings", "()V");
         backgroundAutostartNeeded = e->GetStaticMethodID(activityClass, "needsBackgroundAutostartSettings", "()Z");
         backgroundAutostartSettings = e->GetStaticMethodID(activityClass, "openBackgroundAutostartSettings", "()V");
+        startAtBootId = e->GetStaticMethodID(activityClass, "startAtBoot", "()Z");
+        setStartAtBootId = e->GetStaticMethodID(activityClass, "setStartAtBoot", "(Z)V");
+        batteryRestrictedId = e->GetStaticMethodID(activityClass, "batteryRestricted", "()Z");
+        batteryExemptionId = e->GetStaticMethodID(activityClass, "requestBatteryExemption", "()V");
         local = e->FindClass("com/plyg/airlink/AdbPairing");
         adbPairingClass = static_cast<jclass>(e->NewGlobalRef(local));
         e->DeleteLocalRef(local);

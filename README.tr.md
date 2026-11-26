@@ -68,6 +68,8 @@ app/packaging/linux/install.sh
 
 Kaldırmak için `install.sh --uninstall` çalıştırın.
 
+Oturum açınca AirLink'in başlaması için Ayarlar'da **Oturum açılınca başlat** anahtarını açın. Bu, AirLink'i `--background` ile başlatan `~/.config/autostart/dev.airlink.AirLink.desktop` dosyasını ekler: pencere açılmaz, AirLink sistem tepsisinde bekler.
+
 #### KDE Plasma panel bileşeni
 
 Plasma 6'da `kpackagetool6` varsa `install.sh` AirLink panel bileşenini de kurar (`app/packaging/linux/plasmoid`, kimliği `dev.airlink.panel`). Bileşen AirLink'i panele kendi simgesi olarak ekler: tıklanınca AirLink'in tepsi paneli simgenin altında açılır (AirLink kapalıysa başlar). Simge tepsi simgesinin renklerini alır (başlatılıyor mavi, bağlı yeşil, cihaz yok turuncu, duraklatıldı ya da çalışmıyor gri, hata kırmızı); durumu `$XDG_RUNTIME_DIR/airlink.status` dosyasından okur.
@@ -106,7 +108,7 @@ rustup target add x86_64-pc-windows-gnu
 cmake -S app -B app/build-windows -G Ninja -DCMAKE_TOOLCHAIN_FILE=../kompoz/cmake/mingw-w64-x86_64.cmake -DCMAKE_BUILD_TYPE=Release && cmake --build app/build-windows
 ```
 
-`airlink.exe` dosyasını `fonts/` ve `licenses/` klasörleriyle birlikte dağıtın. Vulkan olmayan sanal makineler ve Uzak Masaüstü oturumları için `python3 app/packaging/windows/package.py`, ANGLE'ın Direct3D 11 kitaplıklarını ve lisansını içeren `AirLink-Windows-ANGLE.zip` paketini oluşturur; bkz. [Windows deneme adımları](docs/windows-test.md). Çoklu yayın keşfi sanal ağı geçemiyorsa Cihazlar sekmesindeki **IP adresiyle eşleştir** alanına diğer cihazın IP adresini ve AirLink portunu girin. İlk açılışta, yalnızca o kullanıcı için, Explorer'ın sağ tık menüsüne ve "Gönder" menüsüne "AirLink ile gönder" ekler. `airlink.exe --unregister` ikisini de kaldırır.
+`airlink.exe` dosyasını `fonts/` ve `licenses/` klasörleriyle birlikte dağıtın. Vulkan olmayan sanal makineler ve Uzak Masaüstü oturumları için `python3 app/packaging/windows/package.py`, ANGLE'ın Direct3D 11 kitaplıklarını ve lisansını içeren `AirLink-Windows-ANGLE.zip` paketini oluşturur; bkz. [Windows deneme adımları](docs/windows-test.md). Çoklu yayın keşfi sanal ağı geçemiyorsa Cihazlar sekmesindeki **IP adresiyle eşleştir** alanına diğer cihazın IP adresini ve AirLink portunu girin. İlk açılışta, yalnızca o kullanıcı için, Explorer'ın sağ tık menüsüne ve "Gönder" menüsüne "AirLink ile gönder" ekler. Ayarlar'daki **Oturum açılınca başlat** anahtarı AirLink'i kullanıcının `Run` anahtarına `--background` ile ekler, böylece sistem tepsisinde başlar; paketli kurulum `airlink-pkg` kısayoluyla başlar. `airlink.exe --unregister` menüleri ve `Run` girdisini kaldırır.
 
 ### Android
 
@@ -128,7 +130,9 @@ Android uygulama kimliği `com.plyg.airlink`. Eski `dev.airlink.airlink` kurulum
 - bildirim erişimi
 - SMS ve kişiler
 - telefon
-- erişilebilirlik (paylaşılan ekranda dokunma için)
+- pil kısıtlaması olmadan çalışma (ekran kapalıyken de ulaşılabilir kalmak için)
+
+AirLink telefon açıldığında ve güncellendiğinde arka planda başlar; bunu durdurmak için Ayarlar'da **Telefon açılınca başlat** anahtarını kapatın.
 
 #### Gelişmiş mod
 

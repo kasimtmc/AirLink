@@ -167,6 +167,18 @@ class MainActivity : KompozActivity() {
         @JvmStatic fun needsBackgroundAutostartSettings(): Boolean =
             Build.MANUFACTURER.equals("Xiaomi", ignoreCase = true)
 
+        @JvmStatic fun startAtBoot(): Boolean = AirLinkService.appContext?.let(BootReceiver::enabled) ?: true
+        @JvmStatic fun setStartAtBoot(on: Boolean) {
+            val context = AirLinkService.appContext ?: currentActivity ?: return
+            BootReceiver.setEnabled(context, on)
+        }
+        @JvmStatic fun batteryRestricted(): Boolean =
+            AirLinkService.appContext?.let(BootReceiver::batteryRestricted) == true
+        @JvmStatic fun requestBatteryExemption() {
+            val activity = currentActivity ?: return
+            BootReceiver.requestBatteryExemption(activity)
+        }
+
         @JvmStatic fun openBackgroundAutostartSettings() {
             val activity = currentActivity ?: return
             try {

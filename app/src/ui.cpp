@@ -25,6 +25,11 @@ using namespace airlink;
 static App appState() { return App::get(); }
 static void openDownloads(const std::string& path) { airlink::platform::openFolder(path); }
 static bool needsBackgroundAutostartSettings() { return airlink::platform::needsBackgroundAutostartSettings(); }
+static bool canStartAtLogin() { return airlink::platform::canStartAtLogin(); }
+static bool startAtLogin() { return airlink::platform::startAtLogin(); }
+static void setStartAtLogin(bool on) { airlink::platform::setStartAtLogin(on); }
+static void requestBatteryExemption() { airlink::platform::requestBatteryExemption(); }
+static bool launchedAtLogin() { return airlink::platform::launchedAtLogin(); }
 static void openBackgroundAutostartSettings() { airlink::platform::openBackgroundAutostartSettings(); }
 
 enum class TrayIconStatus { Starting, Connected, NoDevices, Paused, Error, Received };
@@ -473,6 +478,10 @@ fun AirLinkApp() {
         if (dark) dynamicDarkColorScheme() else dynamicLightColorScheme()
     } else {
         if (dark) darkColorScheme() else lightColorScheme()
+    }
+    // Started at login: straight to the tray, the window shown from there.
+    LaunchedEffect(Unit) {
+        if (launchedAtLogin() && isTraySupported()) setAppWindowVisible(false)
     }
     MaterialTheme(colorScheme = scheme) {
         Home()
@@ -1327,6 +1336,29 @@ fun PasswordPrivacyCard(app: App) {
 }
 
 @Kompozable
+fun StartAtLoginCard() {
+    val cs = MaterialTheme.colorScheme
+    var on by remember { mutableStateOf(startAtLogin()) }
+    OutlinedCard(modifier = Modifier.fillMaxWidth()) {
+        Row(modifier = Modifier.fillMaxWidth().padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+            Icon(AppIcons.PowerSettingsNew, contentDescription = null, tint = cs.primary)
+            Spacer(modifier = Modifier.width(12.dp))
+            Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text(if (isDesktop()) "Oturum açılınca başlat" else "Telefon açılınca başlat", style = MaterialTheme.typography.titleMedium)
+                Text(if (isDesktop()) "AirLink oturum açtığınızda pencere açmadan sistem tepsisinde başlar; cihazlarınız bu bilgisayara hemen bağlanabilir."
+                     else "AirLink telefon açıldığında ve güncellendiğinde uygulamayı açmanızı beklemeden arka planda başlar; bilgisayarlarınız telefona hemen bağlanabilir.",
+                     style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant)
+            }
+            Spacer(modifier = Modifier.width(12.dp))
+            Switch(checked = on, onCheckedChange = {
+                setStartAtLogin(it)
+                on = startAtLogin()
+            })
+        }
+    }
+}
+
+@Kompozable
 fun MissingPermissionsBanner(count: Int, onOpenSettings: () -> Unit) {
     val cs = MaterialTheme.colorScheme
     Card(colors = CardDefaults.cardColors(containerColor = cs.secondaryContainer), modifier = Modifier.fillMaxWidth()) {
@@ -1342,7 +1374,7 @@ fun MissingPermissionsBanner(count: Int, onOpenSettings: () -> Unit) {
 @Kompozable
 fun SettingsScreen(app: App) {
     val paired = app.pairedPeers()
-    val permissions = app.canShareNotifications() || app.canShareSms() || app.canShareCalls() || app.canShareScreen() ||
+    val permissions = app.batteryRestricted() || app.canShareNotifications() || app.canShareSms() || app.canShareCalls() || app.canShareScreen() ||
                       needsBackgroundAutostartSettings()
     val phoneAudio = !isDesktop() && app.canPlayMediaAudio() && paired.any { it.online && it.platform != "android" }
     val features = phoneAudio || app.canFling() || app.canUseAdvancedMode()
@@ -1352,8 +1384,13 @@ fun SettingsScreen(app: App) {
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         item { ThisDeviceCard(app.me()) }
+        if (canStartAtLogin()) {
+            item { SectionTitle("Genel") }
+            item { StartAtLoginCard() }
+        }
         if (permissions) {
             item { SectionTitle("İzinler") }
+            if (app.batteryRestricted()) item { BatteryRestrictionCard() }
             if (needsBackgroundAutostartSettings()) item { BackgroundAutostartCard() }
             if (app.canShareNotifications()) item { NotificationAccessCard(app) }
             if (app.canShareSms()) item { SmsAccessCard(app) }
@@ -1388,6 +1425,18 @@ fun ThisDeviceCard(me: DeviceInfo) {
                 Text("Gelen dosyalar: ${me.downloadDir}", style = MaterialTheme.typography.bodySmall,
                      color = cs.onPrimaryContainer, maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
+        }
+    }
+}
+
+@Kompozable
+fun BatteryRestrictionCard() {
+    OutlinedCard(modifier = Modifier.fillMaxWidth()) {
+        Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text("Pil kısıtlaması", style = MaterialTheme.typography.titleMedium)
+            Text("Android pil tasarrufu için AirLink'i arka planda yavaşlatabilir ya da durdurabilir; ekran kapalıyken dosya, pano ve aramalar gecikebilir. AirLink'in kısıtlamasız çalışmasına izin verin.",
+                 color = MaterialTheme.colorScheme.onSurfaceVariant)
+            FilledTonalButton(onClick = { requestBatteryExemption() }) { Text("Kısıtlamayı kaldır") }
         }
     }
 }

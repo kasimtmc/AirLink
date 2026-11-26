@@ -252,6 +252,7 @@ public:
     // This phone: may it share its notifications, and is it allowed to.
     bool canShareNotifications() const;
     bool notificationAccess() const;
+    bool batteryRestricted() const;  // Android: not exempt from the battery saver (checked now and then)
 
     // ---- SMS: on a computer, a paired phone's; on a phone, whether it shares them ----
     std::string smsPhone() const;  // the online paired phone used for SMS (empty: none)

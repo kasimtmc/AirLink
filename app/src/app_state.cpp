@@ -86,6 +86,7 @@ struct App::Impl {
     MutableState<std::vector<std::string>> share = mutableStateOf(std::vector<std::string>{});
     MutableState<std::vector<PhoneNotification>> phoneNotifications = mutableStateOf(std::vector<PhoneNotification>{});
     MutableState<bool> notificationAccess = mutableStateOf(false);
+    MutableState<bool> batteryRestricted = mutableStateOf(false);
     MutableState<std::vector<SmsThread>> smsThreads = mutableStateOf(std::vector<SmsThread>{});
     MutableState<std::optional<SmsThread>> smsOpen = mutableStateOf(std::optional<SmsThread>{});
     MutableState<std::vector<SmsMessage>> smsMessages = mutableStateOf(std::vector<SmsMessage>{});
@@ -1048,6 +1049,7 @@ void App::pump() const {
     if (s.ticks % 40 == 0) {
         s.refreshPeers();
         s.notificationAccess.set(platform::notificationAccessGranted());
+        s.batteryRestricted.set(platform::batteryRestricted());
         s.smsAccess.set(platform::smsAccessGranted());
         s.callAccess.set(platform::callAccessGranted());
         s.screenControl.set(platform::screenControlEnabled());
@@ -1211,6 +1213,7 @@ std::vector<std::string> App::share() const { return impl_->share.get(); }
 std::vector<PhoneNotification> App::phoneNotifications() const { return impl_->phoneNotifications.get(); }
 bool App::canShareNotifications() const { return platform::canShareNotifications(); }
 bool App::notificationAccess() const { return impl_->notificationAccess.get(); }
+bool App::batteryRestricted() const { return impl_->batteryRestricted.get(); }
 
 void App::dismissPhoneNotification(const PhoneNotification& n) const {
     std::string body = "{\"key\":" + json::quote(n.key) + "}";

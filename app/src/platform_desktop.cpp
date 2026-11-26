@@ -8,6 +8,7 @@
 #include <cctype>
 #include <cstring>
 #include <filesystem>
+#include <fstream>
 #include <mutex>
 #include <string>
 #include <thread>
@@ -19,6 +20,7 @@
 #define NOMINMAX
 #endif
 #include <windows.h>
+#include <appmodel.h>
 #include <objbase.h>
 #include <shlobj.h>
 #include <shobjidl.h>
@@ -231,6 +233,13 @@ std::vector<std::string> sharedEarly;  // before the handler was set
 
 // A panel widget's click (`airlink --panel X Y`), for takePanelRequest.
 std::optional<std::pair<int, int>> panelRequest;
+bool backgroundLaunch = false;  // `--background`: started at login
+
+bool hasArg(int argc, char** argv, std::string_view arg) {
+    for (int i = 1; i < argc; ++i)
+        if (std::string_view(argv[i]) == arg) return true;
+    return false;
+}
 constexpr std::string_view kPanelLine = "\x1fpanel ";  // a line no file path starts with
 
 std::optional<std::pair<int, int>> panelArgs(int argc, char** argv) {
@@ -370,6 +379,7 @@ void serve() {
 }  // namespace
 
 void handleLaunch(int argc, char** argv) {
+    backgroundLaunch = hasArg(argc, argv, "--background");
     std::vector<std::string> files = filesFromArgs(argc, argv);
     auto panel = panelArgs(argc, argv);
     // Scripted (headless) runs stay apart from a real instance unless a test names a socket.
@@ -382,6 +392,7 @@ void handleLaunch(int argc, char** argv) {
         std::exit(0);
     }
     serve();
+    if (startAtLogin()) setStartAtLogin(true);  // (kept pointing at this binary)
     if (panel) deliverPanel(*panel);
     deliverShared(std::move(files));
 }
@@ -504,8 +515,10 @@ void handleLaunch(int argc, char** argv) {
     for (int i = 1; i < argc; ++i)
         if (std::string(argv[i]) == "--unregister") {
             unregisterShell();
+            setStartAtLogin(false);
             std::exit(0);
         }
+    backgroundLaunch = hasArg(argc, argv, "--background");
     std::vector<std::string> files = filesFromArgs(argc, argv);
     if (std::getenv("KOMPOZ_HEADLESS")) return deliverShared(std::move(files));
     // One instance. Explorer starts one process per selected file at once: the first takes the
@@ -521,12 +534,104 @@ void handleLaunch(int argc, char** argv) {
     if (another) std::exit(0);  // it never answered; don't run the same identity twice
     serve();
     registerShell();
+    if (startAtLogin()) setStartAtLogin(true);  // (kept pointing at this .exe)
     deliverShared(std::move(files));
 }
 
 #else
 
 void handleLaunch(int argc, char** argv) { deliverShared(filesFromArgs(argc, argv)); }
+
+#endif
+
+bool launchedAtLogin() { return backgroundLaunch; }
+
+#if defined(__linux__)
+
+namespace {
+// ~/.config/autostart/dev.airlink.AirLink.desktop (XDG autostart; KDE, GNOME and the others).
+std::filesystem::path autostartFile() {
+    const char* config = std::getenv("XDG_CONFIG_HOME");
+    std::filesystem::path dir = config && *config ? std::filesystem::path(config)
+                                                  : std::filesystem::path(std::getenv("HOME") ? std::getenv("HOME") : "") / ".config";
+    return dir / "autostart" / "dev.airlink.AirLink.desktop";
+}
+}  // namespace
+
+bool canStartAtLogin() { return !std::getenv("KOMPOZ_HEADLESS"); }
+
+bool startAtLogin() {
+    std::error_code ec;
+    return std::filesystem::exists(autostartFile(), ec);
+}
+
+void setStartAtLogin(bool on) {
+    std::error_code ec;
+    auto file = autostartFile();
+    if (!on) {
+        std::filesystem::remove(file, ec);
+        return;
+    }
+    auto exe = std::filesystem::read_symlink("/proc/self/exe", ec);
+    if (ec) return log("autostart: cannot find this binary");
+    std::filesystem::create_directories(file.parent_path(), ec);
+    std::ofstream out(file, std::ios::trunc);
+    out << "[Desktop Entry]\n"
+           "Type=Application\n"
+           "Name=AirLink\n"
+           "Comment=Cihazlar arası bağlantı\n"
+           "Exec=\"" << exe.string() << "\" --background\n"
+           "Icon=airlink\n"
+           "Terminal=false\n"
+           "X-GNOME-Autostart-enabled=true\n"
+           "X-KDE-autostart-after=panel\n";
+}
+
+#elif defined(_WIN32)
+
+namespace {
+constexpr const wchar_t* kRunKey = L"Software\\Microsoft\\Windows\\CurrentVersion\\Run";
+
+// The packaged install starts through its execution alias, which gives it the package's identity
+// (a path into WindowsApps would not); the plain .exe by its own path.
+std::wstring loginCommand() {
+    UINT32 length = 0;
+    bool packaged = GetCurrentPackageFullName(&length, nullptr) != APPMODEL_ERROR_NO_PACKAGE;
+    if (packaged) {
+        PWSTR apps = nullptr;
+        std::wstring alias;
+        if (SUCCEEDED(SHGetKnownFolderPath(FOLDERID_LocalAppData, 0, nullptr, &apps)))
+            alias = std::wstring(apps) + L"\\Microsoft\\WindowsApps\\airlink-pkg.exe";
+        CoTaskMemFree(apps);
+        if (!alias.empty()) return L"\"" + alias + L"\" --background";
+    }
+    wchar_t exe[MAX_PATH];
+    if (!GetModuleFileNameW(nullptr, exe, MAX_PATH)) return {};
+    return L"\"" + std::wstring(exe) + L"\" --background";
+}
+}  // namespace
+
+bool canStartAtLogin() { return !std::getenv("KOMPOZ_HEADLESS"); }
+
+bool startAtLogin() {
+    return RegGetValueW(HKEY_CURRENT_USER, kRunKey, L"AirLink", RRF_RT_REG_SZ, nullptr, nullptr, nullptr) == ERROR_SUCCESS;
+}
+
+void setStartAtLogin(bool on) {
+    HKEY h;
+    if (RegCreateKeyExW(HKEY_CURRENT_USER, kRunKey, 0, nullptr, 0, KEY_SET_VALUE, nullptr, &h, nullptr) != ERROR_SUCCESS) return;
+    if (std::wstring command = on ? loginCommand() : std::wstring(); !command.empty())
+        RegSetValueExW(h, L"AirLink", 0, REG_SZ, reinterpret_cast<const BYTE*>(command.c_str()), DWORD((command.size() + 1) * sizeof(wchar_t)));
+    else
+        RegDeleteValueW(h, L"AirLink");
+    RegCloseKey(h);
+}
+
+#else
+
+bool canStartAtLogin() { return false; }
+bool startAtLogin() { return false; }
+void setStartAtLogin(bool) {}
 
 #endif
 
@@ -583,6 +688,8 @@ void requestCallAccess() {}
 bool canShareScreen() { return false; }
 bool screenControlEnabled() { return false; }
 void openScreenControlSettings() {}
+bool batteryRestricted() { return false; }
+void requestBatteryExemption() {}
 bool needsBackgroundAutostartSettings() { return false; }
 void openBackgroundAutostartSettings() {}
 

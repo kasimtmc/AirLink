@@ -18,6 +18,7 @@ inline const ImageVector UploadFile = materialIcon("Filled.UploadFile", "M14,2H6
 inline const ImageVector ContentPaste = materialIcon("Filled.ContentPaste", "M19,2h-4.18C14.4,0.84 13.3,0 12,0c-1.3,0 -2.4,0.84 -2.82,2H5c-1.1,0 -2,0.9 -2,2v16c0,1.1 0.9,2 2,2h14c1.1,0 2,-0.9 2,-2V4c0,-1.1 -0.9,-2 -2,-2zM12,2c0.55,0 1,0.45 1,1s-0.45,1 -1,1 -1,-0.45 -1,-1 0.45,-1 1,-1zM19,20H5V4h2v3h10V4h2v16z");
 inline const ImageVector Download = materialIcon("Filled.FileDownload", "M5,20h14v-2H5V20zM19,9h-4V3H9v6H5l7,7L19,9z");
 inline const ImageVector Upload = materialIcon("Filled.FileUpload", "M5,20h14v-2H5V20zM5,10h4v6h6v-6h4l-7,-7L5,10z");
+inline const ImageVector PowerSettingsNew = materialIcon("Filled.PowerSettingsNew", "M13,3h-2v10h2L13,3zM17.83,5.17l-1.42,1.42C17.99,7.86 19,9.81 19,12c0,3.87 -3.13,7 -7,7s-7,-3.13 -7,-7c0,-2.19 1.01,-4.14 2.58,-5.42L6.17,5.17C4.23,6.82 3,9.26 3,12c0,4.97 4.03,9 9,9s9,-4.03 9,-9c0,-2.74 -1.23,-5.18 -3.17,-6.83z");
 inline const ImageVector Error = materialIcon("Filled.Error", "M12,2C6.48,2 2,6.48 2,12s4.48,10 10,10 10,-4.48 10,-10S17.52,2 12,2zm1,15h-2v-2h2v2zm0,-4h-2V7h2v6z");
 inline const ImageVector Devices = materialIcon("Filled.Devices", "M4,6h18V4H4c-1.1,0 -2,0.9 -2,2v11H0v3h14v-3H4V6zm19,2h-6c-0.55,0 -1,0.45 -1,1v10c0,0.55 0.45,1 1,1h6c0.55,0 1,-0.45 1,-1V9c0,-0.55 -0.45,-1 -1,-1zm-1,9h-4v-7h4v7z");
 inline const ImageVector Sms = materialIcon("Filled.Sms", "M20,2H4c-1.1,0 -1.99,0.9 -1.99,2L2,22l4,-4h14c1.1,0 2,-0.9 2,-2V4c0,-1.1 -0.9,-2 -2,-2zM9,11H7V9h2v2zm4,0h-2V9h2v2zm4,0h-2V9h2v2z");
