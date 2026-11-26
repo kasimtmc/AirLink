@@ -33,7 +33,6 @@ jmethodID callsGranted = nullptr, callRequestPermissions = nullptr;
 jmethodID screenControlOn = nullptr, screenControlSettings = nullptr;
 jmethodID backgroundAutostartNeeded = nullptr, backgroundAutostartSettings = nullptr;
 jmethodID flingAvailableId = nullptr, flingEnabledId = nullptr, setFlingEnabledId = nullptr;
-jmethodID handGestureAvailableId = nullptr, openHandGestureId = nullptr;
 jclass adbPairingClass = nullptr;
 jmethodID adbStart = nullptr, adbDone = nullptr;
 jclass appStreamsClass = nullptr;
@@ -176,6 +175,87 @@ void notificationAction(const std::string& kind, const std::string& key, const s
 void showDesktopNotification(const std::string&, const std::string&) {}  // a phone shows its own
 
 bool canUseAdvancedMode() { return true; }
+bool canBridgeCallAudio() { return false; }
+void startCallAudio(const std::string&) {}
+void stopCallAudio() {}
+CallAudioPhase callAudioPhase() { return CallAudioPhase::Off; }
+std::string callAudioStatus() { return {}; }
+bool canPlayMediaAudio() { return true; }
+void playMediaAudio(const std::vector<uint8_t>& pcm) {
+    JNIEnv* e = env();
+    if (!e || !activityClass) return;
+    jmethodID method = e->GetStaticMethodID(activityClass, "playDesktopAudio", "([B)V");
+    if (method) {
+        jbyteArray bytes = e->NewByteArray(static_cast<jsize>(pcm.size()));
+        if (bytes) {
+            e->SetByteArrayRegion(bytes, 0, static_cast<jsize>(pcm.size()),
+                                  reinterpret_cast<const jbyte*>(pcm.data()));
+            e->CallStaticVoidMethod(activityClass, method, bytes);
+            e->DeleteLocalRef(bytes);
+        }
+    }
+    if (e->ExceptionCheck()) e->ExceptionClear();
+}
+
+void stopMediaAudio() {
+    JNIEnv* e = env();
+    if (!e || !activityClass) return;
+    jmethodID method = e->GetStaticMethodID(activityClass, "stopDesktopAudio", "()V");
+    if (method) e->CallStaticVoidMethod(activityClass, method);
+    if (e->ExceptionCheck()) e->ExceptionClear();
+}
+
+void startDesktopAudioCapture() {}
+void stopDesktopAudioCapture() {}
+std::vector<uint8_t> takeDesktopAudio() { return {}; }
+bool desktopAudioCaptureFailed() { return false; }
+
+void stopPhoneScreenForPeer(const std::string& peerId) {
+    JNIEnv* e = env();
+    if (!e || !activityClass) return;
+    jmethodID method = e->GetStaticMethodID(activityClass, "stopPhoneScreenForPeer", "(Ljava/lang/String;)V");
+    jstring peer = e->NewStringUTF(peerId.c_str());
+    if (method) e->CallStaticVoidMethod(activityClass, method, peer);
+    if (e->ExceptionCheck()) e->ExceptionClear();
+    e->DeleteLocalRef(peer);
+}
+
+void setPauseScreenAudioDuringMusic(bool enabled) {
+    JNIEnv* e = env();
+    if (!e || !activityClass) return;
+    jmethodID method = e->GetStaticMethodID(activityClass, "setPauseScreenAudioDuringMusic", "(Z)V");
+    if (method) e->CallStaticVoidMethod(activityClass, method, jboolean(enabled));
+    if (e->ExceptionCheck()) e->ExceptionClear();
+}
+
+void setScreenShareAudio(bool enabled) {
+    JNIEnv* e = env();
+    if (!e || !activityClass) return;
+    jmethodID method = e->GetStaticMethodID(activityClass, "setScreenShareAudio", "(Z)V");
+    if (method) e->CallStaticVoidMethod(activityClass, method, jboolean(enabled));
+    if (e->ExceptionCheck()) e->ExceptionClear();
+}
+
+void chooseMediaAudioPlayers() {
+    JNIEnv* e = env();
+    if (!e || !activityClass) return;
+    jmethodID method = e->GetStaticMethodID(activityClass, "chooseMediaAudioPlayers", "()V");
+    if (method) e->CallStaticVoidMethod(activityClass, method);
+    if (e->ExceptionCheck()) e->ExceptionClear();
+}
+
+void setPlayerAudioTarget(const std::string& peerId) {
+    JNIEnv* e = env();
+    if (!e || !activityClass) return;
+    jstring peer = peerId.empty() ? nullptr : e->NewStringUTF(peerId.c_str());
+    jmethodID method = e->GetStaticMethodID(activityClass, "setPlayerAudioTarget", "(Ljava/lang/String;)V");
+    if (method) e->CallStaticVoidMethod(activityClass, method, peer);
+    if (e->ExceptionCheck()) e->ExceptionClear();
+    if (peer) e->DeleteLocalRef(peer);
+}
+
+void setPlayerBluetoothPhone(const std::string&) {}
+std::string playerBluetoothStatus() { return {}; }
 
 bool needsBackgroundAutostartSettings() {
     JNIEnv* e = env();
@@ -212,21 +292,6 @@ void setFlingEnabled(bool on) {
     JNIEnv* e = env();
     if (!e || !activityClass || !setFlingEnabledId) return;
     e->CallStaticVoidMethod(activityClass, setFlingEnabledId, jboolean(on));
-    if (e->ExceptionCheck()) e->ExceptionClear();
-}
-
-bool canUseHandGesture() {
-    JNIEnv* e = env();
-    if (!e || !activityClass || !handGestureAvailableId) return false;
-    bool available = e->CallStaticBooleanMethod(activityClass, handGestureAvailableId);
-    if (e->ExceptionCheck()) e->ExceptionClear(), available = false;
-    return available;
-}
-
-void openHandGesture() {
-    JNIEnv* e = env();
-    if (!e || !activityClass || !openHandGestureId) return;
-    e->CallStaticVoidMethod(activityClass, openHandGestureId);
     if (e->ExceptionCheck()) e->ExceptionClear();
 }
 
@@ -378,8 +443,6 @@ extern "C" JNIEXPORT void JNICALL Java_com_plyg_airlink_MainActivity_nativeInit(
         flingAvailableId = e->GetStaticMethodID(activityClass, "flingAvailable", "()Z");
         flingEnabledId = e->GetStaticMethodID(activityClass, "flingEnabled", "()Z");
         setFlingEnabledId = e->GetStaticMethodID(activityClass, "setFlingEnabled", "(Z)V");
-        handGestureAvailableId = e->GetStaticMethodID(activityClass, "handGestureAvailable", "()Z");
-        openHandGestureId = e->GetStaticMethodID(activityClass, "openHandGesture", "()V");
         callsGranted = e->GetStaticMethodID(activityClass, "callsGranted", "()Z");
         callRequestPermissions = e->GetStaticMethodID(activityClass, "requestCallPermissions", "()V");
         screenControlOn = e->GetStaticMethodID(activityClass, "screenControlEnabled", "()Z");
@@ -480,6 +543,25 @@ extern "C" JNIEXPORT void JNICALL Java_com_plyg_airlink_ScreenShare_nativeStopFr
     airlink::App::get().stopMedia(fromJava(e, peer), "screen");
 }
 
+extern "C" JNIEXPORT void JNICALL Java_com_plyg_airlink_ScreenShare_nativeSendAudio(JNIEnv* e, jclass, jstring peer, jbyteArray pcm) {
+    jsize n = e->GetArrayLength(pcm);
+    std::vector<uint8_t> bytes(static_cast<size_t>(n));
+    e->GetByteArrayRegion(pcm, 0, n, reinterpret_cast<jbyte*>(bytes.data()));
+    airlink::App::get().sendMedia(fromJava(e, peer), "screen_audio", bytes);
+}
+
+extern "C" JNIEXPORT void JNICALL Java_com_plyg_airlink_ScreenShare_nativeStopAudio(JNIEnv* e, jclass, jstring peer) {
+    airlink::App::get().stopMedia(fromJava(e, peer), "screen_audio");
+}
+
+extern "C" JNIEXPORT void JNICALL Java_com_plyg_airlink_ScreenShare_nativeScreenAudioFailed(JNIEnv*, jclass) {
+    airlink::App::get().screenShareAudioFailed();
+}
+
+extern "C" JNIEXPORT void JNICALL Java_com_plyg_airlink_PlayerBluetoothAudio_nativeStatus(JNIEnv* e, jclass, jstring status) {
+    airlink::App::get().setPlayerAudioStatus(fromJava(e, status));
+}
+
 extern "C" JNIEXPORT void JNICALL Java_com_plyg_airlink_SmsBridge_nativeSendTo(JNIEnv* e, jclass, jstring peer, jstring kind, jstring body) {
     airlink::App::get().sendTo(fromJava(e, peer), fromJava(e, kind), fromJava(e, body));
 }
@@ -505,12 +587,4 @@ extern "C" JNIEXPORT void JNICALL Java_com_plyg_airlink_MainActivity_nativeFiles
 
 extern "C" JNIEXPORT void JNICALL Java_com_plyg_airlink_FlingDetector_nativeFlung(JNIEnv* e, jclass, jstring clipboardText) {
     airlink::App::get().fling(fromJava(e, clipboardText));  // on the main thread (the sensor's)
-}
-
-extern "C" JNIEXPORT jboolean JNICALL Java_com_plyg_airlink_HandGestureActivity_nativeHandReleased(JNIEnv* e, jclass, jstring clipboardText) {
-    return airlink::App::get().fling(fromJava(e, clipboardText)) ? JNI_TRUE : JNI_FALSE;
-}
-
-extern "C" JNIEXPORT jboolean JNICALL Java_com_plyg_airlink_HandGestureActivity_nativeRequestGesturePull(JNIEnv*, jclass) {
-    return airlink::App::get().requestGesturePull() ? JNI_TRUE : JNI_FALSE;
 }

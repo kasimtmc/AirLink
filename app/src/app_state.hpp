@@ -302,6 +302,22 @@ public:
     // To the phone of the call in progress: "call.hangup", "call.hold" {on}, "call.mute" {on},
     // "call.route" {route}, "call.volume" {delta}.
     void callControl(const std::string& kind, const std::string& bodyJson) const;
+    bool canBridgeCallAudio() const;
+    bool callAudioOn() const;
+    std::string callAudioStatus() const;
+    void startCallAudio() const;
+    void stopCallAudio() const;
+    bool audioAutoConnect() const;
+    void setAudioAutoConnect(bool on) const;
+    void shareCurrentCallAudio() const;
+    void setPlayerAudioStatus(const std::string& status) const;
+    bool mediaAudioEnabled() const;
+    std::string mediaAudioStatus() const;
+    std::string mediaAudioTarget() const;
+    void chooseMediaAudioPlayers() const;
+    void setMediaAudioTarget(const std::string& peerId) const;
+    bool canPlayMediaAudio() const;
+    void setMediaAudioEnabled(bool on) const;
     void startScreen(const std::string& peerId) const;
     void stopScreen() const;
     // A touch on the shared screen: {"type":"tap"|"long_press"|"swipe"|"back"|"home"|"recents", ...}
@@ -316,14 +332,14 @@ public:
     // The shared computer: answers a request, or ends the share.
     void answerDesktop(bool accept) const;
     void endDesktopShare() const;
+    bool screenShareAudio() const;
+    bool pauseScreenAudioDuringMusic() const;
+    void setPauseScreenAudioDuringMusic(bool on) const;
+    void setScreenShareAudio(bool on) const;
+    void screenShareAudioFailed() const;
     void setFlingEnabled(bool on) const;
     // A fling happened: files waiting to be shared go to flingTarget(), else the clipboard's text.
     bool fling(const std::string& clipboardText) const;
-    // A computer explicitly stages one transfer for a paired phone's camera gesture.
-    void prepareGestureFiles(const std::string& peerId) const;
-    void prepareGestureClipboard(const std::string& peerId, const std::string& text) const;
-    std::string gestureStatus(const std::string& peerId) const;
-    bool requestGesturePull() const;
     void startAdvancedSetup() const;
     void advancedPair(const std::string& code) const;  // the code typed into the setup notification
     void advancedTest() const;                         // runs `id` over wireless debugging

@@ -67,7 +67,7 @@ Telefon bölümü: masaüstündeki "Aramalar" ana sekmesi "Telefon" oldu; içind
    WinBoat'ta uygulamaya tıklayınca yalnızca meşgul imleç göründü; pencere açılmadı. Windows PE bağımlılıkları yalnızca sistem DLL'leri. Aynı `airlink.exe` Wine'da açılıp Kompoz Vulkan aygıtını ve yazı tiplerini başlattı; bu sonuç WinBoat sanal GPU yolunu doğrulamıyor. Windows'a özel `AIRLINK_DIAG_LOG` başlangıç günlüğü ve `diagnose.cmd` eklendi; tanılama paketi derlenip bütünlük kontrolünden geçti.
    WinBoat günlüğü: `no window for vulkan: no Vulkan loader`, ardından `std::length_error` (`basic_string::_M_create`). Kompoz C++ `platform/common/egl_window.cpp` içinde `eglLibrary().begin()` ve ayrı bir geçici nesnenin `.end()` değeri birlikte kullanılıyordu; kardeş Kompoz deposunda tek bir yerel `std::string` üzerinden alınacak şekilde düzeltildi. Mevcut Codex görev listesinde Kompoz C++ oturumu bulunamadığı için düzeltme doğrudan kardeş depoda yapıldı; o depodaki başka değişikliklere dokunulmadı. Windows çapraz derlemesi geçti. EdgeFirstAI `angle-package` `v2.1.28252` Windows x64 arşivi SHA-256 ile doğrulandı ve ANGLE DLL'leri/lisansı `AirLink-Windows-ANGLE.zip` paketine eklendi. Wine'da `KOMPOZ_GPU=gles` ile ANGLE Direct3D 11 aygıtı ve yazı tipleri başlatıldı. ANGLE olmadan zorlanmış GLES yolunda da artık `length_error` oluşmuyor, grafik aygıtı yokluğu günlüğe düzgün yazılıyor. Kullanıcı WinBoat'ta yeni paketin penceresinin açıldığını ve sekmelerin çalıştığını doğruladı; günlüğü `Microsoft Basic Render Driver` üzerinde ANGLE Direct3D 11 aygıtı ve yazı tiplerini gösteriyor. Ağ ve Explorer denemeleri sürüyor. Paketleme betiği `app/packaging/windows/package.py`, deneme adımları `docs/windows-test.md` içinde. Paket ayrıca `/home/kasim/AirLink-Windows-ANGLE.zip` yoluna kopyalandı (WinBoat paylaşımı).
    WinBoat'ta Explorer sağ tık menüsü ve seçilen dosyayı AirLink'e aktarma çalışıyor; mDNS ile cihazlar görünmüyor. Wine'da ANGLE yolu açılıyor fakat Wine'ın D3D shader derlemesi siyah pencereye yol açıyor; Rust ağ çekirdeği `OS Error 10045` ile başlayamıyor. C ABI'ye `airlink_start_pairing_address` (IP veya IP:port), arayüze "IP adresiyle eşleştir" eklendi. Eşleşmeyi kabul eden tarafın bağlantıyı güvenilir eşleşme sonrası önbelleğe alması sağlandı; mDNS kapalı iki düğümlü Rust testinde bağlantı erişilebilir olarak doğrulandı. Rust testleri ile Linux, Windows ve Android derlemeleri geçti. ANGLE paketi yenilenip WinBoat paylaşımına kopyalandı. Kullanıcı WinBoat'tan Linux AirLink'e `192.168.0.182:47820` üzerinden bağlandı; eşleştirme kodu iki tarafta göründü, iki tarafta onaylandı ve küçük dosya aktarımı WinBoat → Linux ile Linux → WinBoat yönlerinde çalıştı. Kullanıcı WinBoat'ta çoklu dosya aktarımını ve sürükle bırakmayı da doğruladı. Fiziksel Windows bilgisayarda yerel ağ keşfi dahil deneme kullanıcı tarafından doğrulandı; WinBoat ve Wine'daki sorunlar sanal ortama özgü.
-4. Bilgisayarı telefondan kontrol, el hareketiyle aktarım ve Bluetooth HFP arama sesi sonraki fazda. Android etkinliğinin servis açıkken yeniden oluşturulması da açık.
+4. Bilgisayarı telefondan kontrol, telefonu iterek aktarım ve Bluetooth HFP arama sesi sonraki fazda. Android etkinliğinin servis açıkken yeniden oluşturulması da açık.
 
 ## Yol haritası karşılaştırması (24 Kasım 2026)
 
@@ -78,7 +78,7 @@ Kod, commit geçmişi (`7581971` → `4fa0abc`) ve çalışma ağacı README'dek
 | 1 | Keşif, eşleştirme, QUIC/TLS, dosya, pano | mDNS keşfi, SAS eşleştirme, dosya/klasör, pano; ek olarak IP ile eşleştirme | `cargo test` (e2e loopback), Linux↔Android, WinBoat↔Linux, fiziksel Windows | — |
 | 2 | Bildirimler, SMS, rehber, aramalar | `notification.*`, `sms.*`, `contacts.search/list`, `calls.log`, `call.*` (yanıtla, reddet, kapat, beklet, sessiz, ses yolu, ses düzeyi, arama başlatma) | Xiaomi 14 Ultra'da kullanıcı doğruladı | Bluetooth ile arama sesinin bilgisayara gelmesi (Faz 4) |
 | 3 | Telefon ekranı ve uygulamaları bilgisayarda | `screen.*` (erişilebilirlikle dokunma), `apps.*` (kabuk yardımcısı, sanal ekran, ayrı pencere, klavye/teker), H.264 + JPEG dönüşü | Pencereler, girdi, yatay mod, canlı H.264 uygulama penceresi, ekran paylaşımı ve `kod:port` ile ADB eşleşmesi gerçek cihazda doğrulandı | — |
-| 4 | PC'yi telefondan kontrol, el hareketiyle aktarım, Bluetooth arama sesi | Başlanmadı; `input.*` ve `gesture.*` yalnızca ayrılmış | — | Tamamı |
+| 4 | PC'yi telefondan kontrol, telefonu iterek aktarım, Bluetooth arama sesi | 4A/4B ve 4C Linux tamam | Ekran kontrolü, telefonu iterek aktarım ve Linux HFP görüşme sesi gerçek cihazda doğrulandı | Windows HFP |
 
 Planda olmayan ama yapılan işler: Flutter yerine Kompoz C++ arayüzü, Android uygulamasının Java'dan Kotlin'e taşınması ve `com.plyg.airlink` paket adı, Windows ANGLE paketi ve tanılama betiği, Kompoz `egl_window.cpp` düzeltmesi (kardeş depoda).
 
@@ -88,7 +88,7 @@ Kullanıcı canlı H.264 penceresi ve ekran paylaşımını, `kod:port` ile ilk 
 
 Çalışma ağacı `ffdbb52` ile commit'lendi. O tarihte PolyForm Strict 1.0.0 seçilmişti; 25 Kasım 2026 tarihli lisans değişikliği yukarıda kayıtlı.
 
-Açık işler: (1) Faz 4B+ ve 4C, (2) Faz 5.
+Açık işler: (1) Faz 4C Windows görüşme sesi, (2) Faz 5.
 
 ## Faz 4 ve Faz 5 planı (24 Kasım 2026)
 
@@ -97,9 +97,8 @@ Sıra kullanıcı kararıyla: A → B → C, ardından son faz olarak arayüz iy
 | İş | Kapsam | Durum |
 |---|---|---|
 | 4A Bilgisayarı telefondan kontrol | Bilgisayar ekranı telefonda (H.264), dokunma fare, iki parmak kaydırma, tuşlar ve yazı; bilgisayarda onay ve "Durdur" çubuğu | Tamam; kullanıcı gerçek cihazda doğruladı |
-| 4B El hareketiyle aktarım | Telefonu bilgisayara doğru itme ("fırlatarak gönder") | Gerçek cihazda kullanıcı tarafından doğrulandı |
-| 4B+ Havada tut-bırak (Huawei tarzı) | Kamerayla yumruk (tut) ve açık avuç (bırak) tanıma; telefon ⇄ bilgisayar | Pano ve dosya iki yönde gerçek cihazda doğrulandı |
-| 4C Bluetooth ile arama sesi | Bilgisayar telefonun kulaklığı gibi (HFP) | Başlanmadı |
+| 4B Telefonu iterek aktarım | Telefonu bilgisayara doğru itme ("fırlatarak gönder") | Gerçek cihazda kullanıcı tarafından doğrulandı |
+| 4C Bluetooth ile arama sesi | Bilgisayar telefonun kulaklığı gibi (HFP) | Linux gerçek görüşmede doğrulandı; Windows desteği bekliyor |
 | 5 Arayüz iyileştirmeleri | Görsel düzen, gezinme ve kullanılabilirlik | Başlanmadı |
 
 4A ayrıntıları:
@@ -112,7 +111,38 @@ Sıra kullanıcı kararıyla: A → B → C, ardından son faz olarak arayüz iy
 
 Kompoz’un Android Java kaynakları AirLink deposunun dışında, Kompoz deposunda tutuluyor.
 
-4B+ uygulaması: Kamera yalnızca kullanıcı “Kamerayı aç” dediğinde çalışır ve çalışma sırasında izin ister. MediaPipe Gesture Recognizer modelinde `Closed_Fist` en az 300 ms ve %75 güvenle görülürse tutulur. Gerçek Xiaomi denemesinde `Open_Palm` puanları %53–70, karelerin çoğu `None` olduğundan, bırakma için sınıflandırmaya ek olarak el eklemlerinden dört parmağın en az üçünün açık olması ölçülür; 1 saniye içinde en az iki açık avuç gözlemi aranır. Yumruk 12 saniye sonra geçersizleşir, gönderimden sonra 3 saniye beklenir. Kareler telefon üzerinde işlenir, kaydedilmez veya ağa gönderilmez. Telefondan bilgisayara hazır dosya/pano gönderilir; Android paylaşım penceresinde kamerayı açan ayrı düğme vardır. Ters yönde bilgisayarda belli bir eşleşmiş telefon için dosya ya da pano 60 saniyeliğine hazırlanır; telefon hareketi tek kullanımlık `gesture.pull` isteğiyle bunu alır. Modelin Apache-2.0 bildirimi APK içindeki `assets/licenses/MediaPipeGestureRecognizer.txt` dosyasındadır. Pano ve dosya, her iki yönde gerçek Xiaomi ve Linux cihazlarında doğrulandı.
+
+4C Linux uygulaması: `app/src/call_audio_linux.cpp` eşleşmiş Bluetooth telefonu bulur ve bağlar. Kullanıcı görüşmede “Bilgisayardan konuş” dediğinde Android'e `call.route=bluetooth` gönderilir; PipeWire/WirePlumber'ın açtığı HFP giriş/çıkışları `module-loopback` ile varsayılan bilgisayar hoparlörü ve mikrofonuna bağlanır. Görüşme bittiğinde ya da kullanıcı kapattığında modüller kaldırılır. Xiaomi 14 Ultra ile gerçek aramada kullanıcı gelen sesi, bilgisayar mikrofonunun karşı tarafa ulaşmasını, sesi telefona geri döndürmeyi ve görüşme sonrası temizliği doğruladı. Windows desteği henüz uygulanmadı. Ayrıntılar: `docs/hfp-audio.md`.
+
+4C ses ayırımı: Android'de gerektiğinde arama sesi seçilen Linux bilgisayara Bluetooth HFP ile gider.
+“Oynatıcı sesini aktar” seçili kaynaktaki MediaSession oynatma durumuna göre Linux A2DP
+profilini açıp kapatır. Oynatıcı sesine ekran paylaşımı onayı ve ses yakalama izni uygulanmaz.
+Algılama için mevcut Android bildirim erişimi kullanılır. Windows A2DP alıcısı henüz yok.
+Xiaomi 14 Ultra ve Linux arasında Deezer ile uçtan uca doğrulandı. Oynatmada aptX HD
+A2DP ses girişi açıldı, duraklatınca profil kapandı ve oynatmaya devam edince tekrar
+bağlandı. Android ekran yakalama oturumu ve AirLink PCM çıkışı test boyunca kapalıydı.
+Android APK, Linux ve Windows derlemeleri geçti. Güncel Android ve Linux sürümleri açıldı.
+
+“Ekran paylaşımı sesi” ayrı bir akıştır. Tam ekran ve tek uygulama paylaşımında Android'in
+izin verdiği medya sesi `screen_audio` ile gider. Bilgisayar ekranını paylaşırken Linux
+veya Windows çıkışı `desktop_audio` ile telefona gönderilir. Linux yakalama denemesinde
+9600 bayt PCM paketi üretildi ve durdurunca kuyruk boşaldı.
+
+Ekran sesi yönlendirmesi: Android'de ekran sesi çalışırken yerel medya çıkışı susturulur
+ve oturum bitince önceki sessiz durumu geri gelir. AirLink'in ikinci kapsam penceresi
+kaldırıldı, tam ekran ve tek uygulama seçimi Android'in onay penceresinde yapılıyor.
+“Müzik oynatılırken ekran sesini durdur” tercihi telefonda kaydedilir ve varsayılan
+olarak açıktır. Bu ayar açıkken seçili oynatıcı çalıyorsa ekran sesi durur, oynatma
+bitince devam eder. Bunun için oynatıcı sesini Bluetooth'a aktarma ayarının açık
+olması gerekmez. Oynatma algılaması mevcut bildirim erişimini kullanır.
+Linux, varsayılan çıkışın akışlarını geçici sessiz bir çıkışa taşır. Yapay test sesi
+yakalandı ve paylaşım durdurulunca oynatıcı eski çıkışına döndü. Xiaomi ve Linux'ta
+Deezer çalarken önceki açık kapsam seçimli sürümde tam ekran paylaşımı ekran sesine geçti. Linux çıkışında PCM sinyali
+ölçüldü, telefonun yerel müzik çıkışı sustu ve A2DP kapandı. Oturum bitince yerel
+sessiz durumu geri alındı ve Deezer A2DP üzerinden devam etti. Windows WASAPI
+varsayılan çıkışı geçici susturur. Windows davranışı fiziksel bilgisayarda denenmedi.
+
+Kamerayla el hareketiyle aktarım (Faz 4B+) kaldırıldı. Telefonu iterek aktarım (4B) kullanılabilir.
 
 Commit ve push kullanıcı istediğinde yapılır. Commit yazarı yalnızca Kasim olur. Commit mesajlarına ortak yazar veya model atfı eklenmez.
 

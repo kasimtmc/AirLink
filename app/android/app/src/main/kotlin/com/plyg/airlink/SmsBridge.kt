@@ -38,8 +38,9 @@ object SmsBridge {
                     kind.startsWith("screen.") -> Handler(Looper.getMainLooper()).post {
                         when (kind) {
                             "screen.start" -> ScreenShare.requested(context, peerId, request)
-                            "screen.stop" -> ScreenShare.stop("computer")
-                            "screen.input" -> AirLinkAccessibility.input(request)
+                            "screen.stop" -> ScreenShare.stopVideo(peerId)
+                            "screen.input" -> if (ScreenShare.active() && ScreenShare.peer() == peerId)
+                                AirLinkAccessibility.input(request)
                         }
                     }
                     kind.startsWith("call") -> CallBridge.handle(context, peerId, kind, request)

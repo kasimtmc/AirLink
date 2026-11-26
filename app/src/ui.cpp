@@ -24,8 +24,6 @@ static App appState() { return App::get(); }
 static void openDownloads(const std::string& path) { airlink::platform::openFolder(path); }
 static bool needsBackgroundAutostartSettings() { return airlink::platform::needsBackgroundAutostartSettings(); }
 static void openBackgroundAutostartSettings() { airlink::platform::openBackgroundAutostartSettings(); }
-static void openHandGesture() { airlink::platform::openHandGesture(); }
-static bool canUseHandGesture() { return airlink::platform::canUseHandGesture(); }
 
 enum class TrayIconStatus { Starting, Connected, NoDevices, Paused, Error };
 
@@ -508,6 +506,8 @@ fun ActiveCallBar(app: App, call: ActiveCall) {
                     TextButton(onClick = { app.callControl("call.volume", "{\"delta\":1}") }) { Text("Ses +") }
                 }
             }
+            if (app.callAudioOn()) Text(app.callAudioStatus(), style = MaterialTheme.typography.bodySmall,
+                                        color = cs.onTertiaryContainer)
             if (!call.fullControl) {
                 Text("Sınırlı kontrol: bekletme ve Bluetooth için telefonun AirLink'i arama yardımcısı olarak bağlaması gerekiyor.",
                      style = MaterialTheme.typography.labelSmall, color = cs.onTertiaryContainer)
@@ -555,11 +555,6 @@ fun ShareDialog(app: App) {
                         if (app.canFling() && app.flingEnabled() && app.flingTarget().isNotEmpty()) {
                             Text("Ya da telefonu ${app.peerName(app.flingTarget())} cihazına doğru fırlatın.",
                                  style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary)
-                        }
-                        if (canUseHandGesture() && app.flingTarget().isNotEmpty()) {
-                            OutlinedButton(onClick = { openHandGesture() }, modifier = Modifier.fillMaxWidth()) {
-                                Text("El hareketiyle gönder")
-                            }
                         }
                         for (peer in paired) {
                             OutlinedButton(onClick = { app.shareTo(peer.id) }, modifier = Modifier.fillMaxWidth(), enabled = peer.online) {
@@ -609,11 +604,11 @@ fun DeviceList(app: App, clipboard: ClipboardManager) {
         if (app.canShareScreen()) {
             item { ScreenControlCard(app) }
         }
+        if (!isDesktop() && app.canPlayMediaAudio() && paired.any { it.online && it.platform != "android" }) {
+            item { PhoneAudioCard(app) }
+        }
         if (app.canFling()) {
             item { FlingCard(app) }
-        }
-        if (canUseHandGesture()) {
-            item { HandGestureCard(app) }
         }
         if (app.canUseAdvancedMode()) {
             item { AdvancedModeCard(app) }
@@ -647,14 +642,6 @@ fun DeviceList(app: App, clipboard: ClipboardManager) {
                     onShowScreen = { app.startScreen(peer.id) },
                     onControl = { app.startDesktop(peer.id) },
                 )
-            }
-        }
-
-        if (isDesktop()) {
-            for (peer in paired) {
-                if (peer.platform == "android" && peer.online) {
-                    item { GesturePrepareCard(app, peer, clipboard) }
-                }
             }
         }
 
@@ -808,6 +795,73 @@ fun ScreenControlCard(app: App) {
     }
 }
 
+@Kompozable
+fun PhoneAudioCard(app: App) {
+    val computers = app.pairedPeers().filter { it.online && it.platform != "android" }
+    val target = if (app.mediaAudioTarget().isEmpty()) app.flingTarget() else app.mediaAudioTarget()
+    val linuxTarget = computers.any { it.id == target && it.platform == "linux" }
+    OutlinedCard(modifier = Modifier.fillMaxWidth()) {
+        Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text("Telefon sesini paylaş", style = MaterialTheme.typography.titleMedium)
+            Text("Hedef bilgisayar", style = MaterialTheme.typography.bodySmall)
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                for (computer in computers) {
+                    FilterChip(selected = target == computer.id, onClick = { app.setMediaAudioTarget(computer.id) },
+                               label = { Text(computer.name) })
+                }
+            }
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("Otomatik bağlan", modifier = Modifier.weight(1f))
+                Switch(checked = app.audioAutoConnect(), onCheckedChange = { app.setAudioAutoConnect(it) })
+            }
+            if (app.audioAutoConnect()) {
+                Text("Arama sesi açıksa görüşme başladığında Bluetooth bağlantısı kurulur.",
+                     style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+            if (linuxTarget) {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("Arama sesini paylaş", modifier = Modifier.weight(1f))
+                    Switch(checked = app.callAudioOn(), onCheckedChange = { if (it) app.startCallAudio() else app.stopCallAudio() })
+                }
+                if (app.callAudioOn() && !app.audioAutoConnect()) {
+                    OutlinedButton(onClick = { app.shareCurrentCallAudio() }) { Text("Süren görüşmenin sesini aktar") }
+                }
+            } else {
+                Text("Arama sesi paylaşımı şu anda Linux bilgisayarda kullanılabilir.",
+                     style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("Ekran paylaşımı sesi", modifier = Modifier.weight(1f))
+                Switch(checked = app.screenShareAudio(), onCheckedChange = { app.setScreenShareAudio(it) })
+            }
+            Text("Tek uygulama ve tam ekran paylaşımında telefonun medya çıkışını gönderir.", style = MaterialTheme.typography.bodySmall,
+                 color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("Müzik oynatılırken ekran sesini durdur", modifier = Modifier.weight(1f))
+                Switch(checked = app.pauseScreenAudioDuringMusic(), onCheckedChange = { app.setPauseScreenAudioDuringMusic(it) })
+            }
+            if (app.pauseScreenAudioDuringMusic() && !app.notificationAccess() && !app.mediaAudioEnabled()) {
+                OutlinedButton(onClick = { app.openNotificationAccessSettings() }) { Text("Oynatmayı algılamak için bildirim erişimini aç") }
+            }
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("Oynatıcı sesini aktar", modifier = Modifier.weight(1f))
+                Switch(checked = app.mediaAudioEnabled(), enabled = linuxTarget,
+                       onCheckedChange = { app.setMediaAudioEnabled(it) })
+            }
+            if (app.mediaAudioEnabled()) {
+                Text(app.mediaAudioStatus(), style = MaterialTheme.typography.bodySmall,
+                     color = MaterialTheme.colorScheme.onSurfaceVariant)
+                if (!app.notificationAccess()) {
+                    OutlinedButton(onClick = { app.openNotificationAccessSettings() }) { Text("Bildirim erişimini aç") }
+                }
+            }
+            OutlinedButton(onClick = { app.chooseMediaAudioPlayers() }) { Text("Oynatıcıları seç") }
+            Text("Seçili bir oynatıcı çalarken eşleşmiş Linux bilgisayara Bluetooth medya sesi gider.",
+                 style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+    }
+}
+
 // Fling to send (phase 4B): push the phone toward the computer.
 @Kompozable
 fun FlingCard(app: App) {
@@ -823,40 +877,6 @@ fun FlingCard(app: App) {
             }
             Spacer(modifier = Modifier.width(12.dp))
             Switch(checked = app.flingEnabled(), onCheckedChange = { app.setFlingEnabled(it) })
-        }
-    }
-}
-
-@Kompozable
-fun HandGestureCard(app: App) {
-    val target = app.flingTarget()
-    OutlinedCard(modifier = Modifier.fillMaxWidth()) {
-        Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Text("Havada tut ve gönder", style = MaterialTheme.typography.titleMedium)
-            Text("Ön kameraya yumruğunuzu gösterip sonra avucunuzu açın. Telefondan gönderin veya bilgisayarda hazırlanmış aktarımı alın. Kamera yalnızca bu ekran açıkken çalışır.",
-                 style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            Text(if (target.isEmpty()) "Hedef: çevrimiçi bilgisayar yok" else "Hedef: ${app.peerName(target)}",
-                 style = MaterialTheme.typography.labelMedium)
-            FilledTonalButton(onClick = { openHandGesture() }, enabled = target.isNotEmpty()) {
-                Text("Kamerayı aç")
-            }
-        }
-    }
-}
-
-@Kompozable
-fun GesturePrepareCard(app: App, peer: Peer, clipboard: ClipboardManager) {
-    OutlinedCard(modifier = Modifier.fillMaxWidth()) {
-        Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Text("${peer.name} için havada aktarım", style = MaterialTheme.typography.titleMedium)
-            Text("Telefonda kamerayı açıp 'Bilgisayardan al' yönünü seçin. Hazırlanan içerik 60 saniye içinde avuç açma hareketiyle bir kez alınabilir.",
-                 style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                FilledTonalButton(onClick = { app.prepareGestureFiles(peer.id) }) { Text("Dosya hazırla") }
-                FilledTonalButton(onClick = { app.prepareGestureClipboard(peer.id, clipboard.getText()) }) { Text("Panoyu hazırla") }
-            }
-            val status = app.gestureStatus(peer.id)
-            if (status.isNotEmpty()) Text(status, style = MaterialTheme.typography.labelMedium)
         }
     }
 }
@@ -893,13 +913,21 @@ fun AdvancedModeCard(app: App) {
 fun DesktopShareBar(app: App) {
     val cs = MaterialTheme.colorScheme
     Card(modifier = Modifier.fillMaxWidth().padding(12.dp, 8.dp), colors = CardDefaults.cardColors(containerColor = cs.errorContainer)) {
-        Row(modifier = Modifier.fillMaxWidth().padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
-            Icon(AppIcons.Computer, contentDescription = null, tint = cs.onErrorContainer)
-            Spacer(modifier = Modifier.width(12.dp))
-            Text("${app.peerName(app.desktopViewer())} bu bilgisayarı görüyor ve kontrol ediyor",
-                 style = MaterialTheme.typography.bodyMedium, color = cs.onErrorContainer, modifier = Modifier.weight(1f))
-            Button(onClick = { app.endDesktopShare() },
-                   colors = ButtonDefaults.buttonColors(containerColor = cs.error, contentColor = cs.onError)) { Text("Durdur") }
+        Column(modifier = Modifier.fillMaxWidth().padding(12.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(AppIcons.Computer, contentDescription = null, tint = cs.onErrorContainer)
+                Spacer(modifier = Modifier.width(12.dp))
+                Text("${app.peerName(app.desktopViewer())} bu bilgisayarı görüyor ve kontrol ediyor",
+                     style = MaterialTheme.typography.bodyMedium, color = cs.onErrorContainer, modifier = Modifier.weight(1f))
+                Button(onClick = { app.endDesktopShare() },
+                       colors = ButtonDefaults.buttonColors(containerColor = cs.error, contentColor = cs.onError)) { Text("Durdur") }
+            }
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text("Ekran paylaşımı sesi", modifier = Modifier.weight(1f), color = cs.onErrorContainer)
+                Switch(checked = app.screenShareAudio(), onCheckedChange = { app.setScreenShareAudio(it) })
+            }
+            Text("Bilgisayarın varsayılan ses çıkışını gönderir.", style = MaterialTheme.typography.bodySmall,
+                 color = cs.onErrorContainer)
         }
     }
 }

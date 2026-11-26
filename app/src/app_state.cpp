@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <charconv>
+#include <chrono>
 #include <cmath>
 #include <ctime>
 #include <cstdio>
@@ -45,7 +46,7 @@ std::optional<uint16_t> parseAdbPort(const std::string& text) {
     return static_cast<uint16_t>(port);
 }
 
-enum class OpKind { StartPairing, ConfirmPairing, SendFiles, SendClipboard, SendReply, GesturePull, ScreenStart, AdbPair, AdbTest, AdbHelper, DesktopShare };
+enum class OpKind { StartPairing, ConfirmPairing, SendFiles, SendClipboard, SendReply, ScreenStart, AdbPair, AdbTest, AdbHelper, DesktopShare };
 
 std::vector<uint8_t> base64(const std::string& in) {
     static const std::string chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
@@ -108,7 +109,29 @@ struct App::Impl {
     MutableState<std::string> callsError = mutableStateOf(std::string());
     MutableState<bool> callAccess = mutableStateOf(false);
     MutableState<std::optional<ActiveCall>> activeCall = mutableStateOf(std::optional<ActiveCall>{});
+    bool callAudioSupported = platform::canBridgeCallAudio();
+    bool mediaAudioSupported = platform::canPlayMediaAudio();
+    std::string callAudioPeer;
+    std::string callAudioAutoPeer;
+    bool callAudioAutoAttempted = false;
+    MutableState<bool> phoneAudioAutoConnect = mutableStateOf(false);
+    MutableState<bool> phoneCallAudioEnabled = mutableStateOf(false);
+    std::string phoneCallAudioPeer;
+    MutableState<std::string> callAudioMessage = mutableStateOf(std::string());
+    int nextBluetoothRouteTick = 0;
     MutableState<std::string> screenPeer = mutableStateOf(std::string());
+    MutableState<bool> mediaAudioEnabled = mutableStateOf(false);
+    MutableState<std::string> mediaAudioMessage = mutableStateOf(std::string());
+    MutableState<std::string> mediaAudioTarget = mutableStateOf(std::string());
+    std::string mediaAudioPeer;
+    std::string playerBluetoothPeer;
+    std::string playerBluetoothName;
+    std::string playerBluetoothReportedStatus;
+    std::chrono::steady_clock::time_point playerBluetoothExpires;
+    MutableState<bool> screenShareAudio = mutableStateOf(false);
+    MutableState<bool> pauseScreenAudioDuringMusic = mutableStateOf(true);
+    std::string desktopAudioRecipient;
+    std::string screenStopPeer;
     MutableState<std::string> screenStatus = mutableStateOf(std::string());
     MutableState<kompoz::ImageBitmap> screenFrame = mutableStateOf(kompoz::ImageBitmap());
     MutableState<bool> screenControl = mutableStateOf(false);
@@ -181,17 +204,12 @@ struct App::Impl {
 
     std::vector<std::string> notices;
     std::vector<std::string> incomingClipboard;
-    std::string gesturePeer, gestureText, gesturePull;
-    std::vector<std::string> gestureFiles;
-    int gestureExpiresTick = 0;
-    MutableState<std::string> gestureReady = mutableStateOf(std::string());
     std::map<uint64_t, OpKind> ops;
     int ticks = 0;
 
     // Filled by the platform's file picker on any thread, applied in pump().
     std::mutex pickedMutex;
     std::vector<std::pair<std::string, std::vector<std::string>>> picked;
-    std::optional<std::pair<std::string, std::vector<std::string>>> gesturePicked;
     std::vector<std::string> shared;  // from platform::setShareHandler, any thread
     std::vector<std::string> onlinePaired;  // for sends from any thread (under pickedMutex)
 
@@ -209,6 +227,14 @@ struct App::Impl {
             if (std::getline(saved, port) && parseAdbPort(port)) advancedPort.set(port);
             std::ifstream target(cfg.dataDir + "/fling-target");
             std::getline(target, lastComputer);
+#if defined(__ANDROID__)
+            std::ifstream audioAuto(cfg.dataDir + "/audio-auto-connect");
+            bool enabled = false;
+            if (audioAuto >> enabled) phoneAudioAutoConnect.set(enabled);
+            std::ifstream pauseAudio(cfg.dataDir + "/pause-screen-audio-during-music");
+            if (pauseAudio >> enabled) pauseScreenAudioDuringMusic.set(enabled);
+            platform::setPauseScreenAudioDuringMusic(pauseScreenAudioDuringMusic.peek());
+#endif
         }
         flingOn.set(platform::flingEnabled());
         std::string json = "{";
@@ -259,6 +285,39 @@ struct App::Impl {
             for (const Peer& p : list)
                 if (p.paired && p.online) onlinePaired.push_back(p.id);
         }
+        auto online = [&](const std::string& id) {
+            return std::any_of(list.begin(), list.end(), [&](const Peer& p) { return p.id == id && p.paired && p.online; });
+        };
+        if (!desktopViewer.peek().empty() && !online(desktopViewer.peek())) {
+            airlink_desktop_stop(node, desktopViewer.peek().c_str(), "viewer_lost");
+            desktopViewer.set({});
+            screenShareAudio.set(false);
+            stopDesktopAudio();
+        }
+        if (!callAudioAutoPeer.empty() && !online(callAudioAutoPeer)) {
+            callAudioAutoPeer.clear();
+            callAudioAutoAttempted = false;
+            platform::stopCallAudio();
+            callAudioPeer.clear();
+        }
+#if defined(__ANDROID__)
+        for (const auto& previous : peers.peek())
+            if (previous.paired && previous.online && !online(previous.id))
+                platform::stopPhoneScreenForPeer(previous.id);
+        if (!mediaAudioPeer.empty() && !online(mediaAudioPeer)) {
+            if (std::none_of(list.begin(), list.end(), [&](const Peer& p) {
+                    return p.id == mediaAudioPeer && p.paired;
+                })) {
+                App::get().setMediaAudioEnabled(false);
+            } else {
+                mediaAudioMessage.set("Bilgisayarın bağlanması bekleniyor");
+            }
+        }
+        if (!phoneCallAudioPeer.empty() && !online(phoneCallAudioPeer)) {
+            phoneCallAudioPeer.clear();
+            phoneCallAudioEnabled.set(false);
+        }
+#endif
         peers.set(std::move(list));
     }
 
@@ -346,13 +405,20 @@ struct App::Impl {
         } else if (kind == "media_stopped") {
             std::string name = e["name"].str();
             removeDecoder(name);
+            if (name == "screen_audio" && e["peer_id"].str() == screenPeer.peek()) platform::stopMediaAudio();
+            if (name == "desktop_audio" && e["peer_id"].str() == desktopPeer.peek()) platform::stopMediaAudio();
             if (name == "screen" && e["peer_id"].str() == screenPeer.peek()) closeScreen();
             if (name == "desktop" && e["peer_id"].str() == desktopPeer.peek()) closeDesktop();
         } else if (kind == "desktop_started") {
             desktopViewer.set(e["peer_id"].str());
+            updateDesktopAudio();
             notices.push_back("Ekran " + peerNameOf(e["peer_id"].str()) + " ile paylaşılıyor");
         } else if (kind == "desktop_stopped") {
-            if (desktopViewer.peek() == e["peer_id"].str()) desktopViewer.set({});
+            if (desktopViewer.peek() == e["peer_id"].str()) {
+                desktopViewer.set({});
+                screenShareAudio.set(false);
+                stopDesktopAudio();
+            }
             std::string error = e["error"].str();
             if (!error.empty()) notices.push_back("Ekran paylaşılamadı: " + error);
         } else if (kind == "app_message") {
@@ -420,9 +486,6 @@ struct App::Impl {
                 case OpKind::SendReply:
                     notices.push_back(ok ? "Yanıt gönderildi" : "Yanıt gönderilemedi: " + err);
                     break;
-                case OpKind::GesturePull:
-                    if (!ok) notices.push_back("Havada aktarım istenemedi: " + err);
-                    break;
             }
         }
     }
@@ -439,12 +502,7 @@ struct App::Impl {
 
     void handleAppMessage(const json::Value& peer, const std::string& kind, const json::Value& body) {
         std::string peerId = peer["id"].str();
-        if (kind == "gesture.pull") {
-            // Only a previously armed, paired phone may take the staged item, once.
-            gesturePull = peerId;
-        } else if (kind == "gesture.unavailable") {
-            notices.push_back("Bilgisayarda bu telefon için hazır aktarım yok veya süresi doldu");
-        } else if (kind == "notification.posted") {
+        if (kind == "notification.posted") {
             PhoneNotification n{.peerId = peerId,
                                 .key = body["key"].str(),
                                 .app = body["app"].str(),
@@ -549,11 +607,31 @@ struct App::Impl {
             }
         } else if (kind == "screen.started") {
             if (peerId == screenPeer.peek()) screenStatus.set("live");
+        } else if (kind == "player.audio") {
+#if defined(__linux__) && !defined(__ANDROID__)
+            if (peer["platform"].str() != "android") return;
+            if (body["playing"].boolean()) {
+                if (!playerBluetoothPeer.empty() && playerBluetoothPeer != peerId &&
+                    std::chrono::steady_clock::now() < playerBluetoothExpires) return;
+                playerBluetoothPeer = peerId;
+                playerBluetoothName = peer["name"].str();
+                playerBluetoothExpires = std::chrono::steady_clock::now() + std::chrono::seconds(8);
+            } else if (playerBluetoothPeer == peerId) {
+                playerBluetoothPeer.clear();
+            }
+#endif
+        } else if (kind == "player.audio.status") {
+#if defined(__ANDROID__)
+            if (peerId == mediaAudioPeer) App::get().setPlayerAudioStatus(body["status"].str());
+#endif
         } else if (kind == "screen.stopped") {
-            if (peerId != screenPeer.peek()) return;
+            bool locallyClosed = peerId == screenStopPeer;
+            if (peerId != screenPeer.peek() && !locallyClosed) return;
+            screenStopPeer.clear();
             std::string why = body["reason"].str();
             if (why == "declined") notices.push_back("Ekran paylaşımı telefonda reddedildi");
             else if (why == "user") notices.push_back("Ekran paylaşımı telefonda durduruldu");
+            else if (why == "busy") notices.push_back("Telefon başka bir paylaşım isteğiyle meşgul");
             closeScreen();
         } else if (kind == "call.ringing") {
             IncomingCall call{.peerId = peerId, .number = body["number"].str(), .name = body["name"].str()};
@@ -562,7 +640,7 @@ struct App::Impl {
         } else if (kind == "call.status") {
             std::string state = body["state"].str();
             if (state == "ended" || state == "ringing" || state.empty()) {
-                if (state == "ended") activeCall.set(std::nullopt);
+                if (state == "ended") { activeCall.set(std::nullopt); callAudioAutoAttempted = false; }
                 return;
             }
             ActiveCall c{.peerId = peerId, .number = body["number"].str(), .name = body["name"].str(), .state = state,
@@ -574,10 +652,37 @@ struct App::Impl {
             if (c.since == 0) c.since = int64_t(std::time(nullptr)) * 1000;
             activeCall.set(c);
             incomingCall.set(std::nullopt);
+            if (state == "active" && callAudioAutoPeer == peerId &&
+                !callAudioAutoAttempted && callAudioSupported) {
+                callAudioAutoAttempted = true;
+                App::get().startCallAudio();
+            }
+        } else if (kind == "call.audio_share") {
+#if !defined(__ANDROID__)
+            if (body["on"].boolean()) {
+                const bool once = body["once"].boolean();
+                if (!once && callAudioAutoPeer != peerId) {
+                    callAudioAutoPeer = peerId;
+                    callAudioAutoAttempted = false;
+                }
+                if (auto c = activeCall.peek(); c && c->peerId == peerId && c->state == "active" &&
+                    callAudioSupported && callAudioPeer != peerId && (once || !callAudioAutoAttempted)) {
+                    if (!once) callAudioAutoAttempted = true;
+                    App::get().startCallAudio();
+                }
+            } else {
+                if (callAudioAutoPeer == peerId) {
+                    callAudioAutoPeer.clear();
+                    callAudioAutoAttempted = false;
+                }
+                if (callAudioPeer == peerId) App::get().stopCallAudio();
+            }
+#endif
         } else if (kind == "call.state") {
             incomingCall.set(std::nullopt);  // answered or hung up
-            if (body["state"].str() == "idle") activeCall.set(std::nullopt);
             if (body["state"].str() == "idle") {  // the log has a new entry
+                activeCall.set(std::nullopt);
+                callAudioAutoAttempted = false;
                 callLogStale = true;
                 smsRefreshAt = ticks + 20;
             }
@@ -647,7 +752,27 @@ struct App::Impl {
         phoneAsk(kind, body);
     }
 
+    void stopDesktopAudio() {
+        platform::stopDesktopAudioCapture();
+        if (node && !desktopAudioRecipient.empty())
+            airlink_media_stop(node, desktopAudioRecipient.c_str(), "desktop_audio");
+        desktopAudioRecipient.clear();
+    }
+
+    void updateDesktopAudio() {
+        const std::string target = screenShareAudio.peek() ? desktopViewer.peek() : std::string();
+        if (target == desktopAudioRecipient) return;
+        stopDesktopAudio();
+        if (!target.empty()) {
+            desktopAudioRecipient = target;
+            platform::startDesktopAudioCapture();
+        }
+    }
+
     void closeDesktop() {
+#if defined(__ANDROID__)
+        if (!desktopPeer.peek().empty()) platform::stopMediaAudio();
+#endif
         removeDecoder("desktop");
         desktopPeer.set({});
         desktopStatus.set({});
@@ -664,6 +789,10 @@ struct App::Impl {
     }
 
     void closeScreen() {
+#if !defined(__ANDROID__)
+        if (!screenPeer.peek().empty()) platform::stopMediaAudio();
+#endif
+        platform::stopMediaAudio();
         removeDecoder("screen");
         screenWheel = {};
         screenWheelPending = false;
@@ -760,46 +889,16 @@ void App::pump() const {
     while (char* raw = airlink_poll_event(s.node)) s.handle(json::Value::parse(takeString(raw)));
 
     std::vector<std::pair<std::string, std::vector<std::string>>> picked;
-    std::optional<std::pair<std::string, std::vector<std::string>>> gesturePicked;
     std::vector<std::string> shared;
     {
         std::lock_guard lock(s.pickedMutex);
         picked.swap(s.picked);
-        gesturePicked.swap(s.gesturePicked);
         shared.swap(s.shared);
     }
     if (!shared.empty())
         s.share.update([&](std::vector<std::string>& list) { list.insert(list.end(), shared.begin(), shared.end()); });
     for (auto& [peer, paths] : picked)
         if (!paths.empty()) sendFiles(peer, paths);
-    if (gesturePicked && !gesturePicked->second.empty()) {
-        s.gesturePeer = std::move(gesturePicked->first);
-        s.gestureFiles = std::move(gesturePicked->second);
-        s.gestureText.clear();
-        s.gestureExpiresTick = s.ticks + 1200;
-        s.gestureReady.set(std::to_string(s.gestureFiles.size()) + " dosya hazır (60 saniye)");
-    }
-    if (!s.gesturePull.empty()) {
-        std::string peer = std::exchange(s.gesturePull, {});
-        if (s.gesturePeer != peer || s.ticks >= s.gestureExpiresTick ||
-            (s.gestureFiles.empty() && s.gestureText.empty())) {
-            s.sendDesktop(peer, "gesture.unavailable", "{}");
-        } else {
-            auto files = std::exchange(s.gestureFiles, {});
-            auto clipboard = std::exchange(s.gestureText, {});
-            s.gesturePeer.clear();
-            s.gestureReady.set({});
-            if (!files.empty()) sendFiles(peer, files);
-            else sendClipboard(peer, clipboard);
-        }
-    }
-    if (!s.gesturePeer.empty() && s.ticks >= s.gestureExpiresTick) {
-        s.gesturePeer.clear();
-        s.gestureFiles.clear();
-        s.gestureText.clear();
-        s.gestureReady.set({});
-    }
-
     // Reachability changes without an event (a paired device's connection drops), and the user may
     // have granted notification access in Settings meanwhile: look now and then.
     if (++s.ticks >= s.recentErrorUntilTick && s.recentError.peek()) s.recentError.set(false);
@@ -810,6 +909,36 @@ void App::pump() const {
         s.callAccess.set(platform::callAccessGranted());
         s.screenControl.set(platform::screenControlEnabled());
     }
+    if (!s.callAudioPeer.empty()) {
+        auto call = s.activeCall.peek();
+        if (!call || call->peerId != s.callAudioPeer) {
+            platform::stopCallAudio();
+            s.callAudioPeer.clear();
+        } else if (platform::callAudioPhase() == platform::CallAudioPhase::Error) {
+            s.callAudioPeer.clear();
+        } else if (platform::callAudioPhase() == platform::CallAudioPhase::WaitingForRoute &&
+                   call->route != "bluetooth" && s.ticks >= s.nextBluetoothRouteTick) {
+            sendTo(s.callAudioPeer, "call.route", "{\"route\":\"bluetooth\"}");
+            s.nextBluetoothRouteTick = s.ticks + 40;
+        }
+    }
+#if defined(__linux__) && !defined(__ANDROID__)
+    if (!s.playerBluetoothPeer.empty() &&
+        std::chrono::steady_clock::now() >= s.playerBluetoothExpires) {
+        s.playerBluetoothPeer.clear();
+    }
+    const bool playerCanConnect = !s.playerBluetoothPeer.empty() && s.callAudioPeer.empty();
+    platform::setPlayerBluetoothPhone(playerCanConnect ? s.playerBluetoothName : std::string());
+    if (s.playerBluetoothPeer.empty()) s.playerBluetoothReportedStatus.clear();
+    else {
+        auto status = playerCanConnect ? platform::playerBluetoothStatus() : "Görüşme bitince medya devam edecek";
+        if (status != s.playerBluetoothReportedStatus) {
+            s.playerBluetoothReportedStatus = status;
+            sendTo(s.playerBluetoothPeer, "player.audio.status", "{\"status\":" + json::quote(status) + "}");
+        }
+    }
+#endif
+    if (s.ticks % 10 == 0) s.callAudioMessage.set(platform::callAudioStatus());
     // The wheel turns since the last pump, one message per window.
     for (auto& [session, w] : s.wheels) {
         char buf[160];
@@ -862,6 +991,29 @@ void App::pump() const {
             }
         }
     }
+    auto playSharedAudio = [&](const std::string& from, const char* stream) {
+        if (from.empty()) return;
+        uint8_t* data = nullptr;
+        size_t len = 0;
+        if (airlink_media_take(s.node, from.c_str(), stream, &data, &len)) {
+            if (data && len <= 19200 && len % 2 == 0)
+                platform::playMediaAudio(std::vector<uint8_t>(data, data + len));
+            airlink_free_bytes(data, len);
+        }
+    };
+#if defined(__ANDROID__)
+    if (s.desktopStatus.peek() == "live") playSharedAudio(s.desktopPeer.peek(), "desktop_audio");
+#else
+    if (s.screenStatus.peek() == "live") playSharedAudio(s.screenPeer.peek(), "screen_audio");
+    if (!s.desktopAudioRecipient.empty()) {
+        if (platform::desktopAudioCaptureFailed()) {
+            setScreenShareAudio(false);
+            s.notices.push_back("Bilgisayarın ses çıkışı yakalanamadı");
+        } else if (auto pcm = platform::takeDesktopAudio(); !pcm.empty()) {
+            sendMedia(s.desktopAudioRecipient, "desktop_audio", pcm);
+        }
+    }
+#endif
     // A computer's screen (this phone is the viewer).
     if (const std::string& from = s.desktopPeer.peek(); !from.empty()) {
         uint8_t* data = nullptr;
@@ -1051,6 +1203,33 @@ std::optional<DesktopRequest> App::desktopRequest() const { return impl_->deskto
 std::string App::desktopViewer() const { return impl_->desktopViewer.get(); }
 bool App::canShareDesktop() const { return airlink_desktop_supported(); }
 
+bool App::screenShareAudio() const { return impl_->screenShareAudio.get(); }
+
+bool App::pauseScreenAudioDuringMusic() const {
+    return impl_->pauseScreenAudioDuringMusic.get();
+}
+
+void App::setPauseScreenAudioDuringMusic(bool on) const {
+    impl_->pauseScreenAudioDuringMusic.set(on);
+    if (auto cfg = platform::config(); cfg && !cfg->dataDir.empty())
+        std::ofstream(cfg->dataDir + "/pause-screen-audio-during-music") << on;
+    platform::setPauseScreenAudioDuringMusic(on);
+}
+
+void App::screenShareAudioFailed() const {
+    impl_->screenShareAudio.set(false);
+    impl_->notices.push_back("Ekran paylaşımı için medya sesi alınamadı");
+}
+
+void App::setScreenShareAudio(bool on) const {
+    impl_->screenShareAudio.set(on);
+#if defined(__ANDROID__)
+    platform::setScreenShareAudio(on);
+#else
+    impl_->updateDesktopAudio();
+#endif
+}
+
 void App::startDesktop(const std::string& peerId) const {
     if (!impl_->node || peerId.empty()) return;
     impl_->closeDesktop();
@@ -1081,6 +1260,7 @@ void App::answerDesktop(bool accept) const {
 }
 
 void App::endDesktopShare() const {
+    setScreenShareAudio(false);
     if (impl_->node) airlink_desktop_stop(impl_->node, nullptr, "user");
     impl_->desktopViewer.set({});
 }
@@ -1117,41 +1297,6 @@ bool App::fling(const std::string& clipboardText) const {
         impl_->notices.push_back("Gönderilecek bir şey yok: dosya paylaşın ya da metin kopyalayın");
         return false;
     }
-}
-
-void App::prepareGestureFiles(const std::string& peerId) const {
-    std::weak_ptr<Impl> weak = impl_;
-    platform::pickFiles([weak, peerId](std::vector<std::string> files) {
-        if (auto s = weak.lock(); s && !files.empty()) {
-            std::lock_guard lock(s->pickedMutex);
-            s->gesturePicked = std::make_pair(peerId, std::move(files));
-        }
-    });
-}
-
-void App::prepareGestureClipboard(const std::string& peerId, const std::string& text) const {
-    if (text.empty()) {
-        impl_->notices.push_back("Pano boş");
-        return;
-    }
-    impl_->gesturePeer = peerId;
-    impl_->gestureFiles.clear();
-    impl_->gestureText = text;
-    impl_->gestureExpiresTick = impl_->ticks + 1200;
-    impl_->gestureReady.set("Pano hazır (60 saniye)");
-}
-
-std::string App::gestureStatus(const std::string& peerId) const {
-    std::string status = impl_->gestureReady.get();
-    return impl_->gesturePeer == peerId ? status : std::string();
-}
-
-bool App::requestGesturePull() const {
-    std::string target = impl_->flingTarget();
-    if (target.empty() || !impl_->node) return false;
-    uint64_t op = airlink_send_message(impl_->node, target.c_str(), "gesture.pull", "{}");
-    impl_->track(op, OpKind::GesturePull);
-    return op != 0;
 }
 
 bool App::canUseAdvancedMode() const { return platform::canUseAdvancedMode(); }
@@ -1256,16 +1401,82 @@ void App::advancedTest() const {
 
 void App::startScreen(const std::string& peerId) const {
     if (!impl_->node) return;
+    impl_->screenStopPeer.clear();
     impl_->screenPeer.set(peerId);
     impl_->screenStatus.set("asking");
     impl_->screenFrame.set(kompoz::ImageBitmap());
-    impl_->track(airlink_send_message(impl_->node, peerId.c_str(), "screen.start", "{\"quality\":60,\"codec\":\"h264\"}"),
+    const std::string body = R"({"quality":60,"codec":"h264"})";
+    impl_->track(airlink_send_message(impl_->node, peerId.c_str(), "screen.start", body.c_str()),
                  OpKind::ScreenStart);
+}
+
+bool App::audioAutoConnect() const { return impl_->phoneAudioAutoConnect.get(); }
+
+void App::setAudioAutoConnect(bool on) const {
+#if defined(__ANDROID__)
+    auto& s = *impl_;
+    s.phoneAudioAutoConnect.set(on);
+    if (auto cfg = platform::config(); cfg && !cfg->dataDir.empty())
+        std::ofstream(cfg->dataDir + "/audio-auto-connect") << on;
+    if (s.phoneCallAudioEnabled.peek() && !s.phoneCallAudioPeer.empty())
+        sendTo(s.phoneCallAudioPeer, "call.audio_share", on ? R"({"on":true})" : R"({"on":false})");
+#else
+    (void)on;
+#endif
+}
+
+void App::shareCurrentCallAudio() const {
+#if defined(__ANDROID__)
+    if (impl_->phoneCallAudioEnabled.peek() && !impl_->phoneCallAudioPeer.empty())
+        sendTo(impl_->phoneCallAudioPeer, "call.audio_share", R"({"on":true,"once":true})");
+#endif
+}
+
+void App::setPlayerAudioStatus(const std::string& status) const {
+    if (impl_->mediaAudioEnabled.peek()) impl_->mediaAudioMessage.set(status);
+}
+
+bool App::mediaAudioEnabled() const { return impl_->mediaAudioEnabled.get(); }
+std::string App::mediaAudioStatus() const { return impl_->mediaAudioMessage.get(); }
+std::string App::mediaAudioTarget() const { return impl_->mediaAudioTarget.get(); }
+void App::setMediaAudioTarget(const std::string& peerId) const {
+    if (impl_->mediaAudioEnabled.peek()) setMediaAudioEnabled(false);
+#if defined(__ANDROID__)
+    if (impl_->phoneCallAudioEnabled.peek()) stopCallAudio();
+#endif
+    impl_->mediaAudioTarget.set(peerId);
+}
+void App::chooseMediaAudioPlayers() const { platform::chooseMediaAudioPlayers(); }
+bool App::canPlayMediaAudio() const { return impl_->mediaAudioSupported; }
+
+void App::setMediaAudioEnabled(bool on) const {
+#if defined(__ANDROID__)
+    const std::string peer = on ? (impl_->mediaAudioTarget.peek().empty() ? impl_->flingTarget() : impl_->mediaAudioTarget.peek())
+                                : impl_->mediaAudioPeer;
+    if (on) {
+        const auto& peers = impl_->peers.peek();
+        if (std::none_of(peers.begin(), peers.end(), [&](const Peer& p) {
+                return p.id == peer && p.paired && p.online && p.platform == "linux";
+            })) {
+            impl_->notices.push_back("Bluetooth oynatıcı sesi için çevrimiçi Linux bilgisayarı seçin");
+            return;
+        }
+    }
+    impl_->mediaAudioEnabled.set(on);
+    impl_->mediaAudioPeer = on ? peer : std::string();
+    impl_->mediaAudioMessage.set(on ? "Seçili oynatıcıların oynatması bekleniyor" : "");
+    platform::setPlayerAudioTarget(impl_->mediaAudioPeer);
+#else
+    (void)on;
+#endif
 }
 
 void App::stopScreen() const {
     std::string peer = impl_->screenPeer.peek();
-    if (!peer.empty()) sendTo(peer, "screen.stop", "{}");
+    if (!peer.empty()) {
+        impl_->screenStopPeer = peer;
+        sendTo(peer, "screen.stop", "{}");
+    }
     impl_->closeScreen();
 }
 
@@ -1295,6 +1506,49 @@ void App::stopMedia(const std::string& peerId, const std::string& name) const {
 
 void App::callControl(const std::string& kind, const std::string& bodyJson) const {
     if (auto call = impl_->activeCall.peek()) sendTo(call->peerId, kind, bodyJson);
+}
+
+bool App::canBridgeCallAudio() const { return impl_->callAudioSupported; }
+bool App::callAudioOn() const {
+#if defined(__ANDROID__)
+    return impl_->phoneCallAudioEnabled.get();
+#else
+    return !impl_->callAudioPeer.empty();
+#endif
+}
+std::string App::callAudioStatus() const { return impl_->callAudioMessage.get(); }
+
+void App::startCallAudio() const {
+#if defined(__ANDROID__)
+    const std::string peer = impl_->mediaAudioTarget.peek().empty() ? impl_->flingTarget() : impl_->mediaAudioTarget.peek();
+    if (peer.empty()) return;
+    impl_->phoneCallAudioEnabled.set(true);
+    impl_->phoneCallAudioPeer = peer;
+    if (impl_->phoneAudioAutoConnect.peek())
+        sendTo(peer, "call.audio_share", R"({"on":true})");
+    return;
+#endif
+    auto call = impl_->activeCall.peek();
+    if (!impl_->callAudioSupported || !call) return;
+    impl_->callAudioPeer = call->peerId;
+    impl_->nextBluetoothRouteTick = impl_->ticks;
+    platform::startCallAudio(impl_->peerNameOf(call->peerId));
+    impl_->callAudioMessage.set("Bluetooth telefona bağlanıyor");
+}
+
+void App::stopCallAudio() const {
+#if defined(__ANDROID__)
+    impl_->phoneCallAudioEnabled.set(false);
+    const std::string peer = std::exchange(impl_->phoneCallAudioPeer, {});
+    if (!peer.empty()) sendTo(peer, "call.audio_share", "{\"on\":false}");
+    return;
+#endif
+    platform::stopCallAudio();
+    impl_->callAudioPeer.clear();
+    if (auto call = impl_->activeCall.peek()) {
+        const bool earpiece = std::find(call->routes.begin(), call->routes.end(), "earpiece") != call->routes.end();
+        callControl("call.route", earpiece ? "{\"route\":\"earpiece\"}" : "{\"route\":\"speaker\"}");
+    }
 }
 
 void App::dial(const std::string& number) const {
@@ -1411,6 +1665,21 @@ void App::setSharingPaused(bool paused) const {
     if (s.sharingPaused.peek() == paused && (paused || s.node)) return;
     if (paused) {
         // An in-flight operation no longer has a running node to report its result.
+        if (!s.mediaAudioPeer.empty()) platform::setPlayerAudioTarget({});
+        s.playerBluetoothPeer.clear();
+        s.playerBluetoothReportedStatus.clear();
+        platform::setPlayerBluetoothPhone({});
+        s.mediaAudioPeer.clear();
+        s.mediaAudioEnabled.set(false);
+        s.mediaAudioMessage.set({});
+        platform::stopMediaAudio();
+        setScreenShareAudio(false);
+        platform::stopCallAudio();
+        s.callAudioPeer.clear();
+        s.callAudioAutoPeer.clear();
+        s.callAudioAutoAttempted = false;
+        s.phoneCallAudioPeer.clear();
+        s.phoneCallAudioEnabled.set(false);
         s.ready.set(false);
         s.sharingPaused.set(true);
         s.transfers.update([](std::vector<Transfer>& list) {

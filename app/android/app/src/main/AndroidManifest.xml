@@ -5,7 +5,6 @@
     <uses-feature
         android:name="android.hardware.touchscreen"
         android:required="false" />
-    <uses-feature android:name="android.hardware.camera.front" android:required="false" />
 
     <!-- LAN connections and mDNS discovery -->
     <uses-permission android:name="android.permission.INTERNET" />
@@ -15,7 +14,7 @@
     <uses-permission android:name="android.permission.CHANGE_WIFI_STATE" />
     <uses-permission android:name="android.permission.WAKE_LOCK" />
     <uses-permission android:name="android.permission.VIBRATE" />
-    <uses-permission android:name="android.permission.CAMERA" />
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
     <!-- Reachable while the screen is closed: a foreground service, and notifications for requests -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CONNECTED_DEVICE" />
@@ -75,11 +74,6 @@
                 <data android:mimeType="*/*" />
             </intent-filter>
         </activity>
-
-        <activity
-            android:name=".HandGestureActivity"
-            android:exported="false"
-            android:theme="@android:style/Theme.Material.NoActionBar" />
 
         <service
             android:name=".AirLinkService"

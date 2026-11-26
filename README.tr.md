@@ -9,6 +9,7 @@ Linux, Windows ve Android cihazlarınız arasında, kendi ağınızda, hesap ve 
 - **Bildirimler**: telefonunuzun bildirimleri bilgisayarda görünür ve oradan yanıtlanabilir.
 - **SMS**: konuşmaları bilgisayarda okuyun, yeni mesaj yazın ve alıcıyı kişilerinizden seçin.
 - **Aramalar**: gelen aramalar bilgisayarda görünür. Yanıtlayabilir, kapatabilir, bekletebilir ve sessize alabilirsiniz. Hoparlör, Bluetooth ve ahize arasında geçiş yapabilir, sesi ayarlayabilir, arama kaydını ve tuş takımını kullanabilirsiniz.
+- **Telefon sesi**: Eşleşmiş Linux bilgisayara görüşme sesini Bluetooth HFP, oynatıcı sesini Bluetooth A2DP üzerinden aktarın. Ekran paylaşımı sesi Android, Linux ve Windows arasında ayrı akışta taşınır.
 - **Ekran**: telefonun ekranı bilgisayarda, dokunma ve kaydırma ile.
 - **Telefon uygulamaları bilgisayarda** (gelişmiş mod): telefonun uygulama listesinden herhangi bir uygulamayı seçip bilgisayarda kendi penceresinde açın. Fare ve klavyeyle kullanabilir, küçültebilir ve kapatabilirsiniz. Telefonun kendi ekranı başka bir şey gösterirken de çalışmaya devam eder.
 
@@ -21,7 +22,7 @@ Cihazlar birbirini mDNS ile bulur. İki cihazı, iki ekranda da görünen 6 hane
 | 1 | Keşif, güvenli eşleştirme, şifreli QUIC bağlantısı, dosya aktarımı, pano | ✅ |
 | 2 | Bildirimler, SMS, kişiler, aramalar | ✅ |
 | 3 | Telefon ekranı ve telefon uygulamaları bilgisayarda | ✅ (Android → PC) |
-| 4 | Bilgisayarı telefondan kontrol, el hareketiyle aktarım, Bluetooth ile arama sesi | ⏳ (bilgisayar kontrolü tamam) |
+| 4 | Bilgisayarı telefondan kontrol, telefonu iterek aktarım, Bluetooth ile arama sesi | ⏳ (bilgisayar kontrolü ve telefonu iterek aktarım tamam; Linux arama sesi denendi, Windows arama sesi bekliyor) |
 | 5 | Arayüz iyileştirmeleri | ⏳ |
 
 Linux, Windows ve Android gerçek cihazlarda denendi; Windows'la otomatik keşif ve dosya aktarımı da buna dahil. Android uygulaması Kotlin ile yazıldı.
@@ -48,6 +49,8 @@ Arayüz, C++ için Compose tarzı bir arayüz kütüphanesi olan [Kompoz](https:
 AirLink'in yanında `../kompoz` konumunda bir Kompoz kopyası gerekir. Başka bir yerdeyse `-DKOMPOZ_DIR=...` verin.
 
 ### Linux
+
+PipeWire ve PulseAudio simple API geliştirme paketlerini kurun (Debian tabanlı sistemlerde `libpipewire-0.3-dev`, `libpulse-dev`). Arama sesi için ayrıca BlueZ, WirePlumber, `bluetoothctl` ve `pactl` gerekir. Bkz. [telefon sesi](docs/hfp-audio.md).
 
 ```bash
 cmake -S app -B app/build -G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo && cmake --build app/build

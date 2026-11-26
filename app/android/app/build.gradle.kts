@@ -52,12 +52,3 @@ android {
         targetCompatibility = JavaVersion.VERSION_17
     }
 }
-
-dependencies {
-    implementation("androidx.activity:activity:1.13.0")
-    implementation("androidx.camera:camera-core:1.7.0")
-    implementation("androidx.camera:camera-camera2:1.7.0")
-    implementation("androidx.camera:camera-lifecycle:1.7.0")
-    implementation("androidx.camera:camera-view:1.7.0")
-    implementation("com.google.mediapipe:tasks-vision:1.2.3")
-}

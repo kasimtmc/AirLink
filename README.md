@@ -9,6 +9,7 @@ A seamless link between your Linux, Windows and Android devices, on your own net
 - **Notifications**: your phone's notifications appear on the computer, and you can reply to them from there.
 - **SMS**: read conversations on the computer, write new messages and pick recipients from your contacts.
 - **Calls**: incoming calls show on the computer. You can answer, hang up, hold and mute, switch between speaker, Bluetooth and earpiece, change the volume, and use the call log and dialer.
+- **Phone audio**: share calls over Bluetooth HFP or player audio over Bluetooth A2DP with a paired Linux PC. Screen sharing audio uses its own stream on Android, Linux and Windows.
 - **Screen**: the phone's screen on the computer, with touch and swipe.
 - **Phone apps on the computer** (advanced mode): pick any app from the phone's app list and open it in its own window on the computer. You can use it with mouse and keyboard, minimize it and close it. It keeps running while the phone's own screen does something else.
 
@@ -21,7 +22,7 @@ Devices find each other with mDNS. You pair two devices once by comparing a 6-di
 | 1 | Discovery, secure pairing, encrypted QUIC connection, file transfer, clipboard | ✅ |
 | 2 | Notifications, SMS, contacts, calls | ✅ |
 | 3 | Phone screen and phone apps on the computer | ✅ (Android → PC) |
-| 4 | Controlling the PC from the phone, gesture transfer, call audio over Bluetooth | ⏳ (PC control done) |
+| 4 | Controlling the PC from the phone, motion transfer by pushing the phone, call audio over Bluetooth | ⏳ (PC control and motion transfer done; Linux call audio tested, Windows call audio pending) |
 | 5 | UI improvements | ⏳ |
 
 Linux, Windows and Android are tested on real devices, including automatic discovery and file transfer with Windows. The Android app is written in Kotlin.
@@ -48,6 +49,8 @@ The UI is built with [Kompoz](https://github.com/kasimtmc/kompoz), a Compose-sty
 You need a Kompoz checkout next to AirLink at `../kompoz`. If it is somewhere else, pass `-DKOMPOZ_DIR=...`.
 
 ### Linux
+
+Install the development packages for PipeWire and PulseAudio's simple API (`libpipewire-0.3-dev`, `libpulse-dev` on Debian-based systems), plus BlueZ, WirePlumber, `bluetoothctl` and `pactl` for call audio. See [phone audio](docs/hfp-audio.md).
 
 ```bash
 cmake -S app -B app/build -G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo && cmake --build app/build

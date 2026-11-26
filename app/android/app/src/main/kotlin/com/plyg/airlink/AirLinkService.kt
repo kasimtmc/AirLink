@@ -29,6 +29,7 @@ class AirLinkService : Service() {
 
     override fun onCreate() {
         super.onCreate()
+        if (!ScreenShare.active()) ScreenShare.restoreMusicOutput(this)
         self = this
         appContext = applicationContext
         channels(this)
@@ -66,6 +67,8 @@ class AirLinkService : Service() {
     }
 
     override fun onDestroy() {
+        PlayerBluetoothAudio.stop()
+        if (ScreenShare.active()) ScreenShare.stop("user")
         if (self === this) self = null
         pumper.removeCallbacks(pump)
         CallBridge.stop(this)

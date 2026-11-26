@@ -136,8 +136,12 @@ Yalnızca eşleşmiş cihazlar arasında gider. Tanımlı türler:
 | `call.route` | PC → telefon | `{ route }`: `earpiece`, `speaker`, `bluetooth`, `wired` |
 | `call.volume` | PC → telefon | `{ delta }`: pozitif artırır, diğerleri azaltır |
 | `call.dial` | PC → telefon | `{ number }` → `call.dial_result { number, ok, error? }` (`no_number`, `no_permission`) |
+| `call.audio_share` | telefon → Linux PC | `{ on, once? }`; `on: true` Linux bilgisayarda yalnızca aktif görüşme sırasında HFP köprüsünü otomatik açar. `once: true` yalnızca sürmekte olan görüşmeye uygulanır. `on: false` otomatiği ve etkin köprüyü kapatır |
 | `screen.start` | PC → telefon | `{ quality, codec? }` (bkz. bölüm 10) → `screen.started { width, height }` veya `screen.stopped { reason }` |
 | `screen.stop` | PC → telefon | `{}` |
+| `screen.audio_error` | telefon → PC | `{ reason }`; ses izni reddedildiğinde veya yakalama başarısız olduğunda |
+| `player.audio` | Android → Linux | `{ playing }`; seçili oynatıcı çalışırken üç saniyede bir yenilenir. Duraklatmada veya sekiz saniye yenilenmezse A2DP profili bırakılır. |
+| `player.audio.status` | Linux → Android | `{ status }`; Bluetooth profilinin bağlantı durumu. |
 | `screen.stopped` | telefon → PC | `{ reason }`: `declined`, `failed`, `user`, `computer`… |
 | `screen.input` | PC → telefon | `{ type, x, y, x2?, y2?, ms? }`; `type`: `tap`, `long_press`, `swipe`, `back`, `home`, `recents`, `notifications`. Koordinatlar 0–1 arası oranlardır; erişilebilirlik servisi ve etkin ekran paylaşımı gerekir |
 | `apps.list` | PC → telefon | `{}` → bir veya daha çok `apps.list_result { list, part, parts, apps: [{ label, component, icon }] }` (`icon` 72 px PNG, base64; parçalar ~400 KiB) |
@@ -149,8 +153,6 @@ Yalnızca eşleşmiş cihazlar arasında gider. Tanımlı türler:
 | `desktop.stop` | izleyen → bilgisayar | `{}` |
 | `desktop.stopped` | bilgisayar → izleyen | `{ reason, error? }`; `reason`: `declined`, `user` (bilgisayarda durduruldu), `replaced` (başka cihaz başladı), `viewer`, `failed`, `unsupported`, `computer` |
 | `desktop.input` | izleyen → bilgisayar | `{ type, … }`; koordinatlar 0–1 arası oranlardır. `move { x, y }`, `button { button?, down, x, y }`, `click { button?, x, y, count? }`, `scroll { x, y, dx?, dy? }` (çentik; pozitif `dy` aşağı), `key { key, down?, modifiers? }`, `text { text }`. `button`: `left` (varsayılan), `right`, `middle`. `key`: `Enter`, `Backspace`, `Escape`, `Tab`, `Delete`, `Space`, ok tuşları, `Home`, `End`, `PageUp`, `PageDown`, `Insert`, `Shift`, `Control`, `Alt`, `Super`, `F1`–`F12` veya tek karakter. Yalnızca paylaşımı alan cihazdan kabul edilir |
-| `gesture.pull` | telefon → bilgisayar | `{}`; telefonda yumruk ve açık avuç hareketiyle, bilgisayarda yalnızca bu telefon için açıkça hazırlanmış dosya ya da panoyu ister. Hazırlık 60 saniye geçerli ve tek kullanımlıktır |
-| `gesture.unavailable` | bilgisayar → telefon | `{}`; hedef telefon için hazır aktarım bulunamadı veya süre doldu |
 
 ## 10. Medya akışları
 
@@ -178,10 +180,27 @@ Akış adları: telefon ekranı `screen`, gelişmiş moddaki her uygulama oturum
 bilgisayarın ekranı `desktop` (Faz 4; bilgisayar `ALH1` H.264 anahtar kareleri gönderir: Linux'ta
 xdg-desktop-portal ScreenCast + PipeWire, Windows'ta GDI; kodlayıcı OpenH264).
 
-## 11. Gelecek sürümler (ayrılmış)
+Oynatıcı sesi, Android'in mevcut bildirim erişimiyle okunan MediaSession durumuna göre
+başlatılır. Yalnızca “Oynatıcıları seç” menüsünde kaydedilen uygulamalar oynatmayı
+tetikler. QUIC yalnızca oynatma durumunu taşır. Bluetooth A2DP, telefonun medya ses
+çıkışını Linux bilgisayara gönderir. Oynatıcı sesi sistem ekran paylaşımı veya ses
+yakalama izni gerektirmez. HFP görüşmesi etkinleştiğinde A2DP askıya alınır.
 
-Faz 4 için şu mesaj aileleri ayrılmıştır:
+Ekran paylaşımının sesi, gönderen cihazdaki “Ekran paylaşımı sesi” ayarına bağlı ayrı
+bir PCM akışıdır. Telefon tek uygulama veya tam ekran görüntüsü paylaşırken `screen_audio`,
+Linux veya Windows bilgisayar ekran paylaşırken `desktop_audio` kullanır. Her ikisi de
+48 kHz mono PCM16 taşır. Telefon Android'in yakalamaya izin verdiği medya karışımını,
+bilgisayar varsayılan ses çıkışını gönderir. Alıcı yalnızca görüntüsü açık olan eşin
+ekran sesi akışını çalar. Görüşme sesi Linux'ta ayrı Bluetooth HFP yolunu kullanır.
 
-- `gesture.*`: `pull` ve `unavailable` dışında gelişmiş el hareketleri
+Paylaşım kapsamı yalnızca Android'in sistem seçicisinden onaylanır. Android 14 ve
+sonrasında sistem arayüzünün seçtiği kapsam veya uygulama MediaProjection üzerinden
+bildirilmez. “Müzik oynatılırken ekran sesini durdur” açıksa, kaydedilmiş bir
+oynatıcı oynatma durumuna girdiğinde ekran sesi durur ve oynatma bitince geri döner.
+Bildirim erişimiyle oynatmayı izleme, Bluetooth aktarımı kapalıyken de çalışır.
+Ayar kapalıysa ekran sesi, oturum süresince önceliklidir. Etkin ekran sesi akışı
+kaynak cihazın yerel oynatımını susturur veya geçici bir çıkışa taşır.
+
+## 11. Bilinmeyen mesajlar
 
 Bilinmeyen bir `type` gelirse yanıt `error { message: "unsupported" }` olur.

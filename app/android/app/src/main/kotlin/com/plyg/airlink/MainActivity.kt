@@ -29,12 +29,14 @@ class MainActivity : KompozActivity() {
         ) requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), 1)
         shared(intent)
         if (intent?.action == SHARE_SCREEN) ScreenShare.askConsent(this)
+        if (intent?.action == SHARE_AUDIO) ScreenShare.askAudioPermission(this)
     }
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         shared(intent)
         if (intent.action == SHARE_SCREEN) ScreenShare.askConsent(this)
+        if (intent.action == SHARE_AUDIO) ScreenShare.askAudioPermission(this)
     }
 
     override fun onResume() {
@@ -111,6 +113,11 @@ class MainActivity : KompozActivity() {
         stage(uris, false)
     }
 
+    override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        if (requestCode == ScreenShare.AUDIO_PERMISSION) ScreenShare.audioPermissionResult(this)
+    }
+
     fun stageUris(uris: Array<String>) {
         stage(uris.map(Uri::parse), false)
     }
@@ -157,6 +164,7 @@ class MainActivity : KompozActivity() {
     companion object {
         private const val PICK_FILES = 7001
         private const val SHARE_SCREEN = "com.plyg.airlink.SHARE_SCREEN"
+        private const val SHARE_AUDIO = "com.plyg.airlink.SHARE_AUDIO"
 
         @JvmField @Volatile var visible = false
         @JvmField @Volatile var nativeReady = false
@@ -204,16 +212,42 @@ class MainActivity : KompozActivity() {
         }
 
         @JvmStatic fun flingAvailable(): Boolean = AirLinkService.appContext?.let(FlingDetector::available) == true
-        @JvmStatic fun handGestureAvailable(): Boolean =
-            AirLinkService.appContext?.packageManager?.hasSystemFeature(android.content.pm.PackageManager.FEATURE_CAMERA_FRONT) == true
-        @JvmStatic fun openHandGesture() {
-            currentActivity?.let { it.startActivity(Intent(it, HandGestureActivity::class.java)) }
-        }
         @JvmStatic fun flingEnabled(): Boolean = AirLinkService.appContext?.let(FlingDetector::enabled) == true
         @JvmStatic fun setFlingEnabled(on: Boolean) {
             val context = currentActivity ?: AirLinkService.appContext ?: return
             FlingDetector.setEnabled(context, on)
         }
+        @JvmStatic fun playDesktopAudio(pcm: ByteArray) = DesktopAudioPlayer.offer(pcm)
+        @JvmStatic fun stopDesktopAudio() = DesktopAudioPlayer.stop()
+
+        @JvmStatic fun stopPhoneScreenForPeer(peer: String) {
+            android.os.Handler(android.os.Looper.getMainLooper()).post { ScreenShare.stopVideo(peer) }
+        }
+
+        @JvmStatic fun setPauseScreenAudioDuringMusic(enabled: Boolean) {
+            val context = AirLinkService.appContext ?: currentActivity ?: return
+            android.os.Handler(android.os.Looper.getMainLooper()).post {
+                ScreenShare.setPauseForSelectedPlayers(context, enabled)
+            }
+        }
+
+        @JvmStatic fun setScreenShareAudio(enabled: Boolean) {
+            val context = AirLinkService.appContext ?: currentActivity ?: return
+            android.os.Handler(android.os.Looper.getMainLooper()).post {
+                ScreenShare.setScreenAudio(context, enabled)
+            }
+        }
+        @JvmStatic fun chooseMediaAudioPlayers() {
+            currentActivity?.let { activity -> activity.runOnUiThread { PlayerBluetoothAudio.choosePlayers(activity) } }
+        }
+
+        @JvmStatic fun setPlayerAudioTarget(peer: String?) {
+            val context = AirLinkService.appContext ?: currentActivity ?: return
+            android.os.Handler(android.os.Looper.getMainLooper()).post {
+                PlayerBluetoothAudio.setTarget(context, peer)
+            }
+        }
+
         @JvmStatic fun respond(requestId: Long, accept: Boolean) = nativeRespond(requestId, accept)
         @JvmStatic fun pump() = nativePump()
         @JvmStatic fun adbPair(code: String) = nativeAdbPair(code)

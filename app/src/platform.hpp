@@ -3,6 +3,7 @@
 // What differs between the desktop and Android builds.
 
 #include <functional>
+#include <cstdint>
 #include <optional>
 #include <string>
 #include <vector>
@@ -87,9 +88,6 @@ bool canFling();      // the phone has a linear acceleration sensor
 bool flingEnabled();
 void setFlingEnabled(bool on);
 
-// Camera-based hold and release, only available when a front camera is present.
-bool canUseHandGesture();
-void openHandGesture();
 
 // ---- Advanced mode (Android): the phone's own wireless debugging ----------------------------
 
@@ -100,6 +98,30 @@ void startAdvancedSetup();
 void advancedSetupResult(bool ok, const std::string& message);
 // The command that starts the helper ran (or not).
 void helperStarted(bool ok, const std::string& message);
+
+// Linux HFP Hands-Free audio bridge. Only active for an explicit call and user action.
+enum class CallAudioPhase { Off, Connecting, WaitingForRoute, Active, Error };
+bool canBridgeCallAudio();
+void startCallAudio(const std::string& phoneName);
+void stopCallAudio();
+CallAudioPhase callAudioPhase();
+std::string callAudioStatus();
+// PCM media playback is separate from the HFP call path.
+bool canPlayMediaAudio();
+void playMediaAudio(const std::vector<uint8_t>& pcm);
+void stopMediaAudio();
+// Android is the source of phone media audio; these control its local projection.
+void startDesktopAudioCapture();
+void stopDesktopAudioCapture();
+std::vector<uint8_t> takeDesktopAudio();
+bool desktopAudioCaptureFailed();
+void stopPhoneScreenForPeer(const std::string& peerId);
+void setPauseScreenAudioDuringMusic(bool enabled);
+void setScreenShareAudio(bool enabled);
+void chooseMediaAudioPlayers();
+void setPlayerAudioTarget(const std::string& peerId);
+void setPlayerBluetoothPhone(const std::string& phoneName);
+std::string playerBluetoothStatus();
 
 // A line in the platform's log (Android's logcat, stderr on the desktop).
 void log(const std::string& line);
