@@ -403,6 +403,16 @@ fun AirLinkTray(app: App) {
 // Home's destinations.
 constexpr int TAB_DEVICES = 0, TAB_MESSAGES = 1, TAB_PHONE = 2, TAB_APPS = 3, TAB_SETTINGS = 4;
 
+static std::string tabTitle(int tab) {
+    switch (tab) {
+        case TAB_MESSAGES: return "Mesajlar";
+        case TAB_PHONE: return "Telefon";
+        case TAB_APPS: return "Uygulamalar";
+        case TAB_SETTINGS: return "Ayarlar";
+        default: return "AirLink";
+    }
+}
+
 @Kompozable
 fun Home() {
     val app = appState()
@@ -449,7 +459,7 @@ fun Home() {
         Scaffold(
             topBar = {
                 TopAppBar(
-                    title = { Text(if (tab == TAB_SETTINGS) "Ayarlar" else "AirLink") },
+                    title = { Text(tabTitle(tab)) },
                     actions = {
                         if (tab == TAB_DEVICES && app.transfers().any { !it.active() }) {
                             TextButton(onClick = { app.clearFinishedTransfers() }) { Text("Temizle") }
@@ -615,7 +625,7 @@ fun DeviceList(app: App, clipboard: ClipboardManager, onOpenSettings: () -> Unit
     var allTransfers by remember { mutableStateOf(false) }
 
     LazyColumn(
-        modifier = Modifier.fillMaxSize(),
+        modifier = Modifier.fillMaxSize().wrapContentWidth().widthIn(0.dp, 760.dp),
         contentPadding = PaddingValues(16.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
@@ -749,7 +759,7 @@ fun SettingsScreen(app: App) {
     val phoneAudio = !isDesktop() && app.canPlayMediaAudio() && paired.any { it.online && it.platform != "android" }
     val features = phoneAudio || app.canFling() || app.canUseAdvancedMode()
     LazyColumn(
-        modifier = Modifier.fillMaxSize(),
+        modifier = Modifier.fillMaxSize().wrapContentWidth().widthIn(0.dp, 760.dp),
         contentPadding = PaddingValues(16.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
@@ -1155,7 +1165,7 @@ fun AppsScreen(app: App) {
     }
     if (phone.isEmpty()) {
         Box(modifier = Modifier.fillMaxSize().padding(16.dp)) {
-            Hint("Uygulamalar için eşleşmiş bir Android telefon çevrimiçi olmalı.", loading = false)
+            EmptyState(AppIcons.Apps, "Telefon bağlı değil", "Uygulamalar için eşleşmiş bir Android telefon çevrimiçi olmalı.")
         }
     } else {
         Column(modifier = Modifier.fillMaxSize()) {
@@ -1332,7 +1342,7 @@ fun CallsScreen(app: App) {
     }
     if (phone.isEmpty()) {
         Box(modifier = Modifier.fillMaxSize().padding(16.dp)) {
-            Hint("Aramalar için eşleşmiş bir Android telefon çevrimiçi olmalı.", loading = false)
+            EmptyState(AppIcons.Phone, "Telefon bağlı değil", "Aramalar için eşleşmiş bir Android telefon çevrimiçi olmalı.")
         }
     } else {
         Column(modifier = Modifier.fillMaxSize()) {
@@ -1376,7 +1386,7 @@ fun ContactsScreen(app: App) {
     }
     if (phone.isEmpty()) {
         Box(modifier = Modifier.fillMaxSize().padding(16.dp)) {
-            Hint("Rehber için eşleşmiş bir Android telefon çevrimiçi olmalı.", loading = false)
+            EmptyState(Icons.Filled.Person, "Telefon bağlı değil", "Rehber için eşleşmiş bir Android telefon çevrimiçi olmalı.")
         }
     } else {
         val contacts = app.phoneContacts()
@@ -1465,15 +1475,28 @@ fun MessagesScreen(app: App) {
     }
     if (phone.isEmpty()) {
         Box(modifier = Modifier.fillMaxSize().padding(16.dp)) {
-            Hint("Mesajlar için eşleşmiş bir Android telefon çevrimiçi olmalı.", loading = false)
+            EmptyState(AppIcons.Sms, "Telefon bağlı değil", "Mesajlar için eşleşmiş bir Android telefon çevrimiçi olmalı.")
         }
     } else if (app.smsError().isNotEmpty()) {
         Column(modifier = Modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Text(app.smsError())
             TextButton(onClick = { app.requestSmsThreads() }) { Text("Tekrar dene") }
         }
+    } else if (currentWindowAdaptiveInfo().windowSizeClass.windowWidthSizeClass == WindowWidthSizeClass.Expanded) {
+        // A wide window: the threads and the open one side by side.
+        Row(modifier = Modifier.fillMaxSize()) {
+            Box(modifier = Modifier.width(360.dp).fillMaxHeight()) { ThreadList(app) }
+            Box(modifier = Modifier.width(1.dp).fillMaxHeight().background(MaterialTheme.colorScheme.outlineVariant))
+            Box(modifier = Modifier.weight(1f).fillMaxHeight()) {
+                if (open != null) {
+                    Conversation(app, open!!, showBack = false)
+                } else {
+                    EmptyState(AppIcons.Sms, "Bir konuşma seçin", "Soldaki listeden bir konuşma açın ya da yeni mesaj yazın.")
+                }
+            }
+        }
     } else if (open != null) {
-        Conversation(app, open!!)
+        Conversation(app, open!!, showBack = true)
     } else {
         ThreadList(app)
     }
@@ -1524,7 +1547,7 @@ fun ThreadRow(t: SmsThread, onClick: () -> Unit) {
 }
 
 @Kompozable
-fun Conversation(app: App, thread: SmsThread) {
+fun Conversation(app: App, thread: SmsThread, showBack: Boolean) {
     val messages = app.smsMessages()
     val list = rememberLazyListState()
     var text by remember { mutableStateOf("") }
@@ -1533,8 +1556,12 @@ fun Conversation(app: App, thread: SmsThread) {
     }
     Column(modifier = Modifier.fillMaxSize()) {
         Row(modifier = Modifier.fillMaxWidth().padding(4.dp), verticalAlignment = Alignment.CenterVertically) {
-            IconButton(onClick = { app.closeSmsThread() }) { Icon(Icons.Filled.ArrowBack, contentDescription = "Geri") }
-            Column {
+            if (showBack) {
+                IconButton(onClick = { app.closeSmsThread() }) { Icon(Icons.Filled.ArrowBack, contentDescription = "Geri") }
+            } else {
+                Spacer(modifier = Modifier.width(12.dp))
+            }
+            Column(modifier = Modifier.padding(vertical = 6.dp)) {
                 Text(thread.title(), style = MaterialTheme.typography.titleMedium)
                 if (thread.name.isNotEmpty()) Text(thread.address, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
@@ -1637,6 +1664,20 @@ fun PhoneNotificationCard(n: PhoneNotification, peerName: String, onDismiss: () 
 @Kompozable
 fun SectionTitle(text: String) {
     Text(text, style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(top = 16.dp, bottom = 4.dp))
+}
+
+// A screen with nothing to show yet: an icon, what is missing and what to do, in the middle.
+@Kompozable
+fun EmptyState(icon: ImageVector, title: String, text: String) {
+    val cs = MaterialTheme.colorScheme
+    Column(modifier = Modifier.fillMaxSize().padding(32.dp), horizontalAlignment = Alignment.CenterHorizontally,
+           verticalArrangement = Arrangement.Center) {
+        Icon(icon, contentDescription = null, modifier = Modifier.size(48.dp), tint = cs.primary)
+        Spacer(modifier = Modifier.height(16.dp))
+        Text(title, style = MaterialTheme.typography.titleMedium, textAlign = TextAlign.Center)
+        Spacer(modifier = Modifier.height(4.dp))
+        Text(text, style = MaterialTheme.typography.bodyMedium, color = cs.onSurfaceVariant, textAlign = TextAlign.Center)
+    }
 }
 
 @Kompozable
@@ -1907,7 +1948,8 @@ kompoz::Application kompoz::createApplication(int argc, char** argv) {
     // Create the app's states here, outside any composition's snapshot.
     App::get();
     // On a computer, closing the window keeps AirLink running in the tray (where there is one).
-    return {.title = "AirLink", .content = [] { AirLinkApp(); }, .onCloseRequest = [] {
+    // Wide enough for the side rail and a readable list (Kompoz's default is phone-sized).
+    return {.title = "AirLink", .width = 880, .height = 820, .content = [] { AirLinkApp(); }, .onCloseRequest = [] {
                 if (kompoz::isTraySupported()) kompoz::setAppWindowVisible(false);
                 else kompoz::exitApplication();
             }};

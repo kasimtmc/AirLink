@@ -88,11 +88,13 @@ Kullanıcı canlı H.264 penceresi ve ekran paylaşımını, `kod:port` ile ilk 
 
 Çalışma ağacı `ffdbb52` ile commit'lendi. O tarihte PolyForm Strict 1.0.0 seçilmişti; 25 Kasım 2026 tarihli lisans değişikliği yukarıda kayıtlı.
 
-Açık işler: (1) Faz 4C Windows görüşme ve oynatıcı sesinin fiziksel bilgisayarda denenmesi, (2) Faz 5.3.
+Açık işler: (1) Faz 4C Windows görüşme ve oynatıcı sesinin fiziksel bilgisayarda denenmesi, (2) Faz 5'in gerçek kullanımda gözden geçirilmesi.
 
 Faz 5.1 (26 Kasım 2026): Ana ekran Kompoz `NavigationSuiteScaffold` ile uyarlanabilir gezinmeye geçti. Dar pencerede ve telefonda alt çubuk, geniş pencerede yan ray kullanılıyor. Bilgisayarda Cihazlar, Mesajlar, Telefon, Uygulamalar ve Ayarlar, telefonda Cihazlar ve Ayarlar var. Ekran görüntüleme ve bilgisayar kontrolü sırasında gezinme gizleniyor. "Bu cihaz" kartı, izin kartları ve özellik kartları (telefon sesi, iterek gönderme, gelişmiş mod) Ayarlar'a taşındı. Cihazlar ekranında yalnızca eksik izin sayısını gösteren kısa bir uyarı kalıyor. Linux'ta ekransız ekran görüntüleriyle geniş ve dar düzen kontrol edildi; Android ve Windows derlemeleri geçti. Telefonda görsel kontrol yapıldı.
 
 Faz 5.2 (26 Kasım 2026): Cihazlar ekranının sırası eksik izin uyarısı, eşleşmiş cihazlar, aktarımlar, telefon bildirimleri ve yakındaki cihazlar oldu. Eşleşmiş cihaz kartında eylemler yazılı düğmeler (Dosya gönder, Pano, Ekranı göster / Kontrol et) olarak kartın altında; cihaz çevrimdışıyken kapalı. "Cihazı unut" ⋮ menüsüne taşındı. Aktarımlarda sürenler ve son üç biten gösterilir, gerisi "Tümünü göster" ile açılır. IP ile eşleştirme bir bağlantının arkasına katlandı. Eşleşmiş cihaz yokken açıklamalı bir kart, yakındaki cihazlarda platform adı gösteriliyor. Linux'ta ekransız görüntüyle, Xiaomi 14 Ultra'da gerçek eşleşmeyle (çevrimdışı ve çevrimiçi kart, ⋮ menüsü) kontrol edildi.
+
+Faz 5.3 (26 Kasım 2026): Üst çubuk seçili bölümün adını gösteriyor. Cihazlar ve Ayarlar listeleri geniş pencerede en çok 760 dp genişlikte ortalanıyor. Telefon bağlı değilken Mesajlar, Aramalar, Rehber ve Uygulamalar ekranlarında ortalı, ikonlu boş durum var. Geniş pencerede Mesajlar iki bölmeli: solda konuşmalar, sağda açık konuşma (geri düğmesi yok). Masaüstü penceresi 880×820 dp açılıyor; böylece yan ray varsayılan olarak görünüyor. Linux'ta ekransız görüntüyle kontrol edildi; kullanıcı geniş açılan pencereyi ve gerçek telefonla iki bölmeli Mesajlar'ı doğruladı.
 
 ## Faz 4 ve Faz 5 planı (24 Kasım 2026)
 
@@ -103,7 +105,7 @@ Sıra kullanıcı kararıyla: A → B → C, ardından son faz olarak arayüz iy
 | 4A Bilgisayarı telefondan kontrol | Bilgisayar ekranı telefonda (H.264), dokunma fare, iki parmak kaydırma, tuşlar ve yazı; bilgisayarda onay ve "Durdur" çubuğu | Tamam; kullanıcı gerçek cihazda doğruladı |
 | 4B Telefonu iterek aktarım | Telefonu bilgisayara doğru itme ("fırlatarak gönder") | Gerçek cihazda kullanıcı tarafından doğrulandı |
 | 4C Bluetooth ile arama sesi | Bilgisayar telefonun kulaklığı gibi (HFP) | Linux gerçek görüşmede doğrulandı; Windows HFP ve A2DP uygulandı, fiziksel denemesi bekliyor |
-| 5 Arayüz iyileştirmeleri | Görsel düzen, gezinme ve kullanılabilirlik | 5.1 gezinme ve Ayarlar, 5.2 cihaz odaklı ana ekran yapıldı; 5.3 görsel düzen bekliyor |
+| 5 Arayüz iyileştirmeleri | Görsel düzen, gezinme ve kullanılabilirlik | 5.1 gezinme ve Ayarlar, 5.2 cihaz odaklı ana ekran, 5.3 görsel düzen yapıldı |
 
 4A ayrıntıları:
 
