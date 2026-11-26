@@ -288,7 +288,8 @@ pub unsafe extern "C" fn airlink_peers(node: *mut AirlinkNode) -> *mut c_char {
             .into_iter()
             .map(|p| {
                 let on = online.contains(&p.id) || discovered.iter().any(|d| d.id == p.id);
-                json!({"id": p.id, "name": p.name, "platform": p.platform, "paired": true, "online": on})
+                json!({"id": p.id, "name": p.name, "platform": p.platform, "paired": true, "online": on,
+                       "auto_accept": p.auto_accept})
             })
             .collect();
         for d in discovered {
@@ -357,6 +358,18 @@ pub unsafe extern "C" fn airlink_forget(node: *mut AirlinkNode, peer_id: *const 
         return false;
     };
     guard(false, || n.node.forget_peer(&id).unwrap_or(false))
+}
+
+/// Marks a paired device trusted (its file offers no longer ask) or not.
+///
+/// # Safety
+/// `node` as for `node_ref`; `peer_id` a valid C string.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn airlink_set_auto_accept(node: *mut AirlinkNode, peer_id: *const c_char, on: bool) -> bool {
+    let (Some(n), Some(id)) = (unsafe { node_ref(node) }, unsafe { read_str(peer_id) }) else {
+        return false;
+    };
+    guard(false, || n.node.set_peer_auto_accept(&id, on).unwrap_or(false))
 }
 
 /// # Safety

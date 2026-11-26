@@ -305,6 +305,11 @@ impl Node {
         self.inner.trust.lock().unwrap().is_trusted(id)
     }
 
+    /// Marks a paired peer trusted: its file offers no longer ask. False if it is not paired.
+    pub fn set_peer_auto_accept(&self, id: &str, on: bool) -> Result<bool> {
+        self.inner.trust.lock().unwrap().set_auto_accept(id, on)
+    }
+
     pub fn forget_peer(&self, id: &str) -> Result<bool> {
         if let Some((c, _)) = self.inner.connections.lock().unwrap().remove(id) {
             c.close(0u32.into(), b"forgotten");
@@ -944,7 +949,8 @@ async fn receive_files(
     }
     let total: u64 = files.iter().map(|f| f.size).sum();
 
-    let accepted = if inner.cfg.auto_accept_files {
+    let trusted = inner.trust.lock().unwrap().auto_accepts(&peer.id);
+    let accepted = if inner.cfg.auto_accept_files || trusted {
         true
     } else {
         let (request_id, rx) = inner.register_prompt();

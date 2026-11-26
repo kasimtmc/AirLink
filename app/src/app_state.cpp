@@ -206,6 +206,12 @@ struct App::Impl {
     std::vector<std::string> notices;
     std::vector<std::string> incomingClipboard;
     MutableState<std::vector<ClipboardItem>> clipboardHistory = mutableStateOf(std::vector<ClipboardItem>{});
+    std::string lastClipboard;   // this device's clipboard as last seen or set
+    bool clipboardSeen = false;  // the first reading is the clipboard AirLink found, not a copy
+    bool trusts(const std::string& peerId) const {
+        const auto& list = peers.peek();
+        return std::any_of(list.begin(), list.end(), [&](const Peer& p) { return p.id == peerId && p.paired && p.autoAccept; });
+    }
     int64_t nextClipboardId = 1;
     void rememberClipboard(const std::string& peerId, const std::string& text, bool incoming) {
         int64_t now = std::chrono::duration_cast<std::chrono::milliseconds>(
@@ -291,7 +297,8 @@ struct App::Impl {
                                 .name = p["name"].str(),
                                 .platform = p["platform"].str(),
                                 .paired = p["paired"].boolean(),
-                                .online = p["online"].boolean()});
+                                .online = p["online"].boolean(),
+                                .autoAccept = p["auto_accept"].boolean()});
         {
             std::lock_guard lock(pickedMutex);
             onlinePaired.clear();
@@ -547,6 +554,9 @@ struct App::Impl {
                 sendDesktop(peerId, "desktop.stopped", "{\"reason\":\"unsupported\"}");
             } else if (desktopViewer.peek() == peerId) {
                 track(airlink_desktop_start(node, peerId.c_str(), body.dump().c_str()), OpKind::DesktopShare);
+            } else if (trusts(peerId)) {
+                desktopRequest.set(DesktopRequest{.peerId = peerId, .peerName = peer["name"].str(), .options = body.dump()});
+                App::get().answerDesktop(true);  // a trusted device: no question
             } else {
                 desktopRequest.set(DesktopRequest{.peerId = peerId, .peerName = peer["name"].str(), .options = body.dump()});
                 platform::showDesktopNotification(peer["name"].str() + " bu bilgisayarı kontrol etmek istiyor", "AirLink'te onaylayın");
@@ -1622,7 +1632,28 @@ std::string App::peerName(const std::string& id) const {
 }
 
 std::vector<std::string> App::takeNotices() const { return std::exchange(impl_->notices, {}); }
-std::vector<std::string> App::takeIncomingClipboard() const { return std::exchange(impl_->incomingClipboard, {}); }
+std::vector<std::string> App::takeIncomingClipboard() const {
+    auto list = std::exchange(impl_->incomingClipboard, {});
+    if (!list.empty()) impl_->lastClipboard = list.back();  // set here: not to be sent back
+    return list;
+}
+
+void App::syncClipboard(const std::string& text) const {
+    auto& s = *impl_;
+    if (!s.node || text.empty() || text == s.lastClipboard) return;
+    s.lastClipboard = text;
+    if (!std::exchange(s.clipboardSeen, true)) return;
+    for (const Peer& p : s.peers.peek()) {
+        if (!p.paired || !p.online || !p.autoAccept) continue;
+        s.track(airlink_send_clipboard(s.node, p.id.c_str(), text.c_str()), OpKind::SendClipboard);
+        s.rememberClipboard(p.id, text, false);
+    }
+}
+
+void App::setTrusted(const std::string& peerId, bool on) const {
+    if (!impl_->node) return;
+    if (airlink_set_auto_accept(impl_->node, peerId.c_str(), on)) impl_->refreshPeers();
+}
 
 void App::pair(const std::string& peerId) const {
     impl_->track(airlink_start_pairing(impl_->node, peerId.c_str()), OpKind::StartPairing);

@@ -19,6 +19,10 @@ pub struct TrustedPeer {
     pub last_addr: Option<SocketAddr>,
     /// Unix seconds.
     pub paired_at: u64,
+    /// The user marked it trusted ("Güvenilir"): its file offers are accepted without asking
+    /// (the app also skips its other prompts and shares the clipboard with it).
+    #[serde(default)]
+    pub auto_accept: bool,
 }
 
 pub struct TrustStore {
@@ -66,6 +70,7 @@ impl TrustStore {
             .duration_since(UNIX_EPOCH)
             .map(|d| d.as_secs())
             .unwrap_or(0);
+        let auto_accept = self.peers.get(&dev.id).is_some_and(|p| p.auto_accept);
         self.peers.insert(
             dev.id.clone(),
             TrustedPeer {
@@ -74,6 +79,7 @@ impl TrustStore {
                 platform: dev.platform.clone(),
                 last_addr: addr,
                 paired_at,
+                auto_accept,
             },
         );
         self.save()
@@ -90,6 +96,22 @@ impl TrustStore {
         p.name = dev.name.clone();
         p.last_addr = Some(addr);
         self.save()
+    }
+
+    pub fn auto_accepts(&self, id: &str) -> bool {
+        self.peers.get(id).is_some_and(|p| p.auto_accept)
+    }
+
+    /// Marks a paired peer trusted (or not). False if it is not paired.
+    pub fn set_auto_accept(&mut self, id: &str, on: bool) -> Result<bool> {
+        let Some(p) = self.peers.get_mut(id) else {
+            return Ok(false);
+        };
+        if p.auto_accept != on {
+            p.auto_accept = on;
+            self.save()?;
+        }
+        Ok(true)
     }
 
     pub fn remove(&mut self, id: &str) -> Result<bool> {

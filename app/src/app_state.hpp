@@ -29,6 +29,7 @@ struct Peer {
     std::string platform;
     bool paired = false;
     bool online = false;
+    bool autoAccept = false;  // "Güvenilir": no prompts, the clipboard is shared with it
     bool operator==(const Peer&) const = default;
 };
 
@@ -281,6 +282,10 @@ public:
     std::vector<std::string> takeNotices() const;
     std::vector<std::string> takeIncomingClipboard() const;
     std::vector<ClipboardItem> clipboardHistory() const;
+    // This device's clipboard as the UI reads it (about once a second): a change goes to the
+    // trusted devices that are online.
+    void syncClipboard(const std::string& text) const;
+    void setTrusted(const std::string& peerId, bool on) const;
     void removeClipboardItem(int64_t id) const;
     void clearClipboardHistory() const;
 

@@ -68,6 +68,9 @@ void airlink_set_prompt_listener(AirlinkNode* node, airlink_prompt_fn listener, 
 
 /* Removes a paired device. */
 bool airlink_forget(AirlinkNode* node, const char* peer_id);
+/* Marks a paired device trusted ("auto_accept" in airlink_peers): its file offers are accepted
+ * without a file_offer prompt. False if it is not paired. */
+bool airlink_set_auto_accept(AirlinkNode* node, const char* peer_id, bool on);
 
 /* Starts pairing with a discovered device. Result: a pairing_code event (show the code,
  * then call airlink_confirm_pairing) or a failed op_result. */

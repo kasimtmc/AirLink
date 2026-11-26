@@ -23,6 +23,8 @@ inline const ImageVector Devices = materialIcon("Filled.Devices", "M4,6h18V4H4c-
 inline const ImageVector Sms = materialIcon("Filled.Sms", "M20,2H4c-1.1,0 -1.99,0.9 -1.99,2L2,22l4,-4h14c1.1,0 2,-0.9 2,-2V4c0,-1.1 -0.9,-2 -2,-2zM9,11H7V9h2v2zm4,0h-2V9h2v2zm4,0h-2V9h2v2z");
 inline const ImageVector Phone = materialIcon("Filled.Phone", "M6.62,10.79c1.44,2.83 3.76,5.14 6.59,6.59l2.2,-2.2c0.27,-0.27 0.67,-0.36 1.02,-0.24 1.12,0.37 2.33,0.57 3.57,0.57 0.55,0 1,0.45 1,1V20c0,0.55 -0.45,1 -1,1 -9.39,0 -17,-7.61 -17,-17 0,-0.55 0.45,-1 1,-1h3.5c0.55,0 1,0.45 1,1 0,1.25 0.2,2.45 0.57,3.57 0.11,0.35 0.03,0.74 -0.25,1.02l-2.2,2.2z");
 inline const ImageVector Apps = materialIcon("Filled.Apps", "M4,8h4V4H4v4zm6,12h4v-4h-4v4zm-6,0h4v-4H4v4zm0,-6h4v-4H4v4zm6,0h4v-4h-4v4zm6,-10v4h4V4h-4zm-6,4h4V4h-4v4zm6,6h4v-4h-4v4zm0,6h4v-4h-4v4z");
+inline const ImageVector VerifiedUser = materialIcon("Filled.VerifiedUser", "M12,1L3,5v6c0,5.55 3.84,10.74 9,12 5.16,-1.26 9,-6.45 9,-12V5l-9,-4zM10,17l-4,-4 1.41,-1.41L10,14.17l6.59,-6.59L18,9l-8,8z");
+inline const ImageVector Shield = materialIcon("Outlined.Shield", "M12,2L4,5v6.09c0,5.05 3.41,9.76 8,10.91 4.59,-1.15 8,-5.86 8,-10.91V5l-8,-3zM18,11.09c0,4 -2.55,7.7 -6,8.83 -3.45,-1.13 -6,-4.82 -6,-8.83v-4.7l6,-2.25 6,2.25v4.7z");
 // clang-format on
 
 inline const ImageVector& forPlatform(const std::string& platform) {

@@ -435,9 +435,11 @@ fun Home() {
 
     // The core's events, applied on the UI thread.
     LaunchedEffect(Unit) {
+        var clipboardTicks = 0
         while (true) {
             app.pump()
             for (text in app.takeIncomingClipboard()) clipboard.setText(text)
+            if (++clipboardTicks % 20 == 0) app.syncClipboard(clipboard.getText())
             for (message in app.takeNotices()) scope.launch { snackbar.showSnackbar(message) }
             delay(50)
         }
@@ -665,6 +667,7 @@ fun DeviceList(app: App, clipboard: ClipboardManager, onOpenSettings: () -> Unit
                     onForget = { forgetting = peer.id },
                     onShowScreen = { app.startScreen(peer.id) },
                     onControl = { app.startDesktop(peer.id) },
+                    onTrust = { app.setTrusted(peer.id, it) },
                 )
             }
         }
@@ -1777,15 +1780,18 @@ fun PairedPeerCard(
     onForget: () -> Unit,
     onShowScreen: () -> Unit,
     onControl: () -> Unit,
+    onTrust: (Boolean) -> Unit,
 ) {
     var dragging by remember { mutableStateOf(false) }
     val cs = MaterialTheme.colorScheme
     val status = when {
         dragging -> "Göndermek için bırakın"
-        !peer.online -> "Çevrimdışı"
+        !peer.online -> if (peer.autoAccept) "Çevrimdışı · Güvenilir" else "Çevrimdışı"
+        peer.autoAccept -> "Çevrimiçi · Güvenilir"
         isDesktop() -> "Çevrimiçi · dosyaları buraya sürükleyin"
         else -> "Çevrimiçi"
     }
+    var confirmTrust by remember { mutableStateOf(false) }
     val drop = Modifier.dragAndDropTarget(
         shouldStartDragAndDrop = { e -> carriesFiles(e) },
         target = DragAndDropTarget(
@@ -1814,6 +1820,10 @@ fun PairedPeerCard(
                 Column(modifier = Modifier.weight(1f)) {
                     Text(peer.name, style = MaterialTheme.typography.titleMedium)
                     Text(status, style = MaterialTheme.typography.bodyMedium, color = cs.onSurfaceVariant)
+                }
+                IconButton(onClick = { if (peer.autoAccept) onTrust(false) else confirmTrust = true }) {
+                    if (peer.autoAccept) Icon(AppIcons.VerifiedUser, contentDescription = "Güvenilir: geri al", tint = cs.primary)
+                    else Icon(AppIcons.Shield, contentDescription = "Güvenilir yap", tint = cs.onSurfaceVariant)
                 }
                 Box {
                     IconButton(onClick = { menu = true }) { Icon(Icons.Filled.MoreVert, contentDescription = "Diğer") }
@@ -1844,6 +1854,18 @@ fun PairedPeerCard(
                 }
             }
         }
+    }
+    if (confirmTrust) {
+        AlertDialog(
+            onDismissRequest = { confirmTrust = false },
+            icon = { Icon(AppIcons.VerifiedUser, contentDescription = null) },
+            title = { Text("${peer.name} güvenilir olsun mu?") },
+            text = {
+                Text("Bu cihazdan gelen dosyalar sorulmadan kaydedilir, bilgisayarı kontrol etme istekleri sorulmadan kabul edilir ve kopyaladığınız metinler ona otomatik gider. Kalkan simgesine yeniden dokunarak istediğiniz zaman geri alabilirsiniz.")
+            },
+            confirmButton = { TextButton(onClick = { confirmTrust = false; onTrust(true) }) { Text("Güvenilir yap") } },
+            dismissButton = { TextButton(onClick = { confirmTrust = false }) { Text("Vazgeç") } },
+        )
     }
 }
 

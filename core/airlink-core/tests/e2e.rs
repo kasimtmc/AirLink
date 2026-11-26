@@ -361,3 +361,44 @@ async fn media_frames_latest_wins() {
     })
     .await;
 }
+
+#[tokio::test]
+async fn trusted_device_sends_without_a_prompt() {
+    let tmp = tempfile::tempdir().unwrap();
+    let a = node(&tmp.path().join("a"), "Alpha", false).await;
+    let b = node(&tmp.path().join("b"), "Beta", false).await;
+    assert!(pair(&a, &b, true).await);
+    let a_id = a.info().id.clone();
+    assert!(b.set_peer_auto_accept(&a_id, true).unwrap());
+    assert!(!b.set_peer_auto_accept("not-paired", true).unwrap());
+
+    // b trusts a: no FileOffer, the file is saved.
+    let mut b_events = b.subscribe();
+    std::fs::write(tmp.path().join("t.txt"), b"trusted").unwrap();
+    a.send_files(&b.info().id, &[tmp.path().join("t.txt")]).await.unwrap();
+    while let Ok(e) = b_events.try_recv() {
+        assert!(!matches!(e, Event::FileOffer { .. }), "a trusted device must not prompt");
+    }
+    assert_eq!(std::fs::read(tmp.path().join("b/downloads/t.txt")).unwrap(), b"trusted");
+
+    // Taking the mark back asks again.
+    assert!(b.set_peer_auto_accept(&a_id, false).unwrap());
+    let b_id = b.info().id.clone();
+    let path = tmp.path().join("t.txt");
+    let send = tokio::spawn(async move {
+        let _ = a.send_files(&b_id, &[path]).await;
+    });
+    let req = next_matching(&mut b_events, |e| match e {
+        Event::FileOffer { request_id, .. } => Some(request_id),
+        _ => None,
+    })
+    .await;
+    assert!(b.respond(req, false));
+    let _ = send.await;
+
+    // The mark is saved with the pairing.
+    assert!(b.set_peer_auto_accept(&a_id, true).unwrap());
+    b.shutdown().await;
+    let b = node(&tmp.path().join("b"), "Beta", false).await;
+    assert!(b.trusted_peers().iter().any(|p| p.id == a_id && p.auto_accept));
+}
