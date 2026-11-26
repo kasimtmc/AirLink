@@ -4,7 +4,8 @@
 set -euo pipefail
 root="$(cd "$(dirname "$0")/../.." && pwd)"
 version="$(cat "$root/VERSION")"
-zip="${1:-$root/dist/AirLink-$version-windows-x64.zip}"
+zip="$(realpath "${1:-$root/dist/AirLink-$version-windows-x64.zip}")"
+# Absolute: makensis works in the .nsi's folder.
 out="$(dirname "$zip")/AirLink-$version-windows-x64-setup.exe"
 stage="$(mktemp -d)"
 trap 'rm -rf "$stage"' EXIT

@@ -55,12 +55,18 @@ jobs:
         with: { name: linux, path: dist }
       - id: version
         run: echo "version=$(cat VERSION)" >> "$GITHUB_OUTPUT"
-      - uses: flatpak/flatpak-github-actions/flatpak-builder@v6
-        with:
-          manifest-path: app/packaging/linux/flatpak/com.plyg.AirLink.yml
-          bundle: AirLink-${{ steps.version.outputs.version }}-x86_64.flatpak
-          upload-artifact: false
-          cache: false
+      # flatpak-builder by hand: its build, state and repository folders and the user installation
+      # on one file system, the container's own (the checkout and /github/home are mounted from the
+      # runner: across them installing the runtime fails with "Invalid cross-device link").
+      - name: Build
+        run: |
+          export HOME=/root  # (the job's own HOME, /github/home, is mounted from the runner)
+          [ -s /etc/machine-id ] || dbus-uuidgen > /etc/machine-id
+          flatpak remote-add --user --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo
+          dbus-run-session flatpak-builder --user --disable-rofiles-fuse --install-deps-from=flathub --force-clean \
+            --state-dir="$HOME/fp/state" --repo="$HOME/fp/repo" "$HOME/fp/build" \
+            app/packaging/linux/flatpak/com.plyg.AirLink.yml
+          flatpak build-bundle "$HOME/fp/repo" "AirLink-${{ steps.version.outputs.version }}-x86_64.flatpak" com.plyg.AirLink
       - uses: actions/upload-artifact@v4
         with: { name: flatpak, path: '*.flatpak' }
 
