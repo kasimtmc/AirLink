@@ -8,6 +8,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <filesystem>
 #include <ctime>
 
 #include "app_icons.hpp"
@@ -330,6 +331,34 @@ static std::string callTypeLabel(const std::string& type) {
     return "Arama";
 }
 
+static bool fileExists(const std::string& path) {
+    std::error_code ec;
+    return std::filesystem::exists(std::filesystem::path(std::u8string(path.begin(), path.end())), ec);
+}
+
+static void openFile(const std::string& path) { airlink::platform::openFile(path); }
+static void publishStatus(const std::string& status, const std::string& tip) { airlink::platform::publishStatus(status, tip); }
+static void showInFolder(const std::string& path) { airlink::platform::showInFolder(path); }
+static void shareWithApps(const std::string& path) { airlink::platform::shareWithApps(path); }
+
+// "cachyPC cihazından · 12,3 MB · 26 Kas 07:58", or that the file is gone.
+static std::string fileLine(const FileRecord& f, bool exists) {
+    std::time_t t = std::time_t(f.time / 1000);
+    std::tm local{};
+#if defined(_WIN32)
+    localtime_s(&local, &t);
+#else
+    localtime_r(&t, &local);
+#endif
+    static const char* const months[] = {"Oca", "Şub", "Mar", "Nis", "May", "Haz", "Tem", "Ağu", "Eyl", "Eki", "Kas", "Ara"};
+    char when[32];
+    std::snprintf(when, sizeof when, "%d %s %02d:%02d", local.tm_mday, months[local.tm_mon], local.tm_hour, local.tm_min);
+    std::string who = f.peerName.empty() ? "Bir cihaz" : f.peerName;
+    std::string line = who + (f.incoming ? " cihazından" : " cihazına") + " · " + when;
+    if (!exists) return line + " · dosya artık yok";
+    return f.size > 0 ? line + " · " + humanSize(f.size) : line;
+}
+
 static std::string desktopRequestText() {
     std::string text = "Ekranınızı görecek, fare ve klavyeyi kullanabilecek. İstediğiniz zaman buradan durdurabilirsiniz.";
 #if defined(__linux__) && !defined(__ANDROID__)
@@ -459,6 +488,15 @@ fun AirLinkTray(app: App) {
     val tip = if (paused) "AirLink · paylaşım duraklatıldı" else if (status == TrayIconStatus.Error) "AirLink · işlem hatası"
               else if (status == TrayIconStatus.Starting) "AirLink · başlatılıyor"
               else if (online.isEmpty()) "AirLink · bağlı cihaz yok" else "AirLink · ${online.size} cihaz bağlı"
+    // The panel widget (Plasma) colors its icon as this one.
+    val statusName = when (status) {
+        TrayIconStatus.Connected -> "connected"
+        TrayIconStatus.NoDevices -> "nodevices"
+        TrayIconStatus.Paused -> "paused"
+        TrayIconStatus.Error -> "error"
+        else -> "starting"
+    }
+    LaunchedEffect(statusName, tip) { publishStatus(statusName, tip) }
     // A click on the icon opens the panel there; a click while it is open closes it (the panel loses
     // the focus first, then the click comes: one right after the panel closed is that click).
     var panel by remember { mutableStateOf<WindowPopup?>(null) }
@@ -511,7 +549,7 @@ fun AirLinkTray(app: App) {
 }
 
 // Home's destinations.
-constexpr int TAB_DEVICES = 0, TAB_MESSAGES = 1, TAB_PHONE = 2, TAB_APPS = 3, TAB_SETTINGS = 4, TAB_CLIPBOARD = 5;
+constexpr int TAB_DEVICES = 0, TAB_MESSAGES = 1, TAB_PHONE = 2, TAB_APPS = 3, TAB_SETTINGS = 4, TAB_CLIPBOARD = 5, TAB_FILES = 6;
 
 static std::string tabTitle(int tab) {
     switch (tab) {
@@ -520,6 +558,7 @@ static std::string tabTitle(int tab) {
         case TAB_APPS: return "Uygulamalar";
         case TAB_SETTINGS: return "Ayarlar";
         case TAB_CLIPBOARD: return "Pano";
+        case TAB_FILES: return "Dosyalar";
         default: return "AirLink";
     }
 }
@@ -550,7 +589,7 @@ fun Home() {
     var minimizedCall by remember { mutableStateOf(0L) }
     val callOpen = activeCall != null && isDesktop() && minimizedCall != activeCall!!.since
     val fullView = app.ready() && (app.desktopPeer().isNotEmpty() || app.screenPeer().isNotEmpty() || callOpen)
-    if (!desktopTabs && tab != TAB_SETTINGS && tab != TAB_DEVICES && tab != TAB_CLIPBOARD) tab = TAB_DEVICES
+    if (!desktopTabs && tab != TAB_SETTINGS && tab != TAB_DEVICES && tab != TAB_CLIPBOARD && tab != TAB_FILES) tab = TAB_DEVICES
     val navType = if (!app.ready() || fullView) NavigationSuiteType.None
                   else NavigationSuiteScaffoldDefaults.navigationSuiteType(currentWindowAdaptiveInfo())
 
@@ -558,6 +597,8 @@ fun Home() {
         navigationItems = {
             NavigationSuiteItem(selected = tab == TAB_DEVICES, onClick = { tab = TAB_DEVICES },
                                 icon = { Icon(AppIcons.Devices, contentDescription = null) }, label = { Text("Cihazlar") })
+            NavigationSuiteItem(selected = tab == TAB_FILES, onClick = { tab = TAB_FILES },
+                                icon = { Icon(AppIcons.Folder, contentDescription = null) }, label = { Text("Dosyalar") })
             NavigationSuiteItem(selected = tab == TAB_CLIPBOARD, onClick = { tab = TAB_CLIPBOARD },
                                 icon = { Icon(AppIcons.ContentPaste, contentDescription = null) }, label = { Text("Pano") })
             if (desktopTabs) {
@@ -581,6 +622,9 @@ fun Home() {
                     actions = {
                         if (tab == TAB_DEVICES && app.transfers().any { !it.active() }) {
                             TextButton(onClick = { app.clearFinishedTransfers() }) { Text("Temizle") }
+                        }
+                        if (tab == TAB_FILES && app.fileHistory().isNotEmpty()) {
+                            TextButton(onClick = { app.clearFileHistory() }) { Text("Geçmişi temizle") }
                         }
                         if (tab == TAB_CLIPBOARD && app.clipboardHistory().isNotEmpty()) {
                             TextButton(onClick = { app.clearClipboardHistory() }) { Text("Temizle") }
@@ -606,6 +650,7 @@ fun Home() {
                         else if (tab == TAB_APPS) AppsScreen(app)
                         else if (tab == TAB_SETTINGS) SettingsScreen(app)
                         else if (tab == TAB_CLIPBOARD) ClipboardScreen(app, clipboard)
+                        else if (tab == TAB_FILES) FilesScreen(app)
                         else DeviceList(app, clipboard, onOpenSettings = { tab = TAB_SETTINGS })
                     } else if (app.sharingPaused()) {
                         Column(modifier = Modifier.align(Alignment.Center), horizontalAlignment = Alignment.CenterHorizontally) {
@@ -1065,6 +1110,106 @@ fun missingPermissions(app: App): Int {
     return n
 }
 
+// Files sent and received: open, show in the file manager, send on, delete.
+@Kompozable
+fun FilesScreen(app: App) {
+    val files = app.fileHistory()
+    if (files.isEmpty()) {
+        EmptyState(AppIcons.Folder, "Dosya geçmişi boş", "Eşleşmiş cihazlarla gönderdiğiniz ve aldığınız dosyalar burada görünür.")
+        return
+    }
+    LazyColumn(
+        modifier = Modifier.fillMaxSize().wrapContentWidth().widthIn(0.dp, 760.dp),
+        contentPadding = PaddingValues(16.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        items(files) { f -> FileRow(app, f, fileExists(f.path)) }  // (looked up here: a delete recomposes the list)
+    }
+}
+
+@Preview(widthDp = 560, heightDp = 260)
+@Kompozable
+fun FileRowPreview() {
+    MaterialTheme {
+        Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            FileRow(appState(), FileRecord(id = 1, peerName = "Xiaomi 14 Ultra", path = "/etc/hostname", size = 2457600, time = nowMs(), incoming = true), true)
+            FileRow(appState(), FileRecord(id = 2, peerName = "cachyPC", path = "/tmp/yok/IMG_20261126_0942.jpg", size = 0, time = nowMs() - 86400000, incoming = false), false)
+        }
+    }
+}
+
+@Kompozable
+fun FileRow(app: App, f: FileRecord, exists: Boolean) {
+    val cs = MaterialTheme.colorScheme
+    var shareMenu by remember { mutableStateOf(false) }
+    var confirmDelete by remember { mutableStateOf(false) }
+    val targets = app.pairedPeers().filter { it.online }
+    // A deleted file keeps its card, tinted, until its "x" takes it off the list.
+    Card(modifier = Modifier.fillMaxWidth(),
+         colors = CardDefaults.cardColors(containerColor = if (exists) cs.surfaceContainerHigh else cs.errorContainer.copy(alpha = 0.6f))) {
+        Row(modifier = Modifier.fillMaxWidth().padding(start = 12.dp, top = 8.dp, end = 4.dp, bottom = 8.dp),
+            verticalAlignment = Alignment.CenterVertically) {
+            Box(modifier = Modifier.size(40.dp).background(if (exists) cs.primaryContainer else cs.errorContainer, RoundedCornerShape(8.dp)),
+                contentAlignment = Alignment.Center) {
+                Icon(if (!exists) Icons.Filled.Delete else if (f.incoming) AppIcons.Download else AppIcons.Upload, contentDescription = null,
+                     tint = if (exists) cs.onPrimaryContainer else cs.onErrorContainer)
+            }
+            Spacer(modifier = Modifier.width(12.dp))
+            Column(modifier = Modifier.weight(1f)) {
+                Text(f.name(), style = MaterialTheme.typography.titleSmall, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                     color = if (exists) cs.onSurface else cs.onSurfaceVariant)
+                Text(fileLine(f, exists), style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant, maxLines = 2,
+                     overflow = TextOverflow.Ellipsis)
+            }
+            IconButton(onClick = { openFile(f.path) }, enabled = exists) { Icon(AppIcons.OpenInNew, contentDescription = "Aç") }
+            IconButton(onClick = { showInFolder(f.path) }) { Icon(AppIcons.Folder, contentDescription = "Dosya yöneticisinde göster") }
+            Box {
+                IconButton(onClick = { shareMenu = true }, enabled = exists) { Icon(Icons.Filled.Share, contentDescription = "Paylaş") }
+                DropdownMenu(expanded = shareMenu, onDismissRequest = { shareMenu = false }) {
+                    for (peer in targets) {
+                        DropdownMenuItem(text = { Text("${peer.name} cihazına gönder") },
+                                         onClick = {
+                                             shareMenu = false
+                                             app.sendFiles(peer.id, listOf(f.path))
+                                         },
+                                         leadingIcon = { Icon(AppIcons.forPlatform(peer.platform), contentDescription = null) })
+                    }
+                    if (!isDesktop()) {
+                        DropdownMenuItem(text = { Text("Uygulamalarla paylaş") },
+                                         onClick = {
+                                             shareMenu = false
+                                             shareWithApps(f.path)
+                                         },
+                                         leadingIcon = { Icon(Icons.Filled.Share, contentDescription = null) })
+                    }
+                    if (targets.isEmpty() && isDesktop()) {
+                        DropdownMenuItem(text = { Text("Çevrimiçi cihaz yok") }, onClick = { shareMenu = false }, enabled = false)
+                    }
+                }
+            }
+            IconButton(onClick = { confirmDelete = true }, enabled = exists) { Icon(Icons.Filled.Delete, contentDescription = "Dosyayı sil") }
+            IconButton(onClick = { app.forgetFileRecord(f.id) }) { Icon(Icons.Filled.Close, contentDescription = "Geçmişten kaldır") }
+        }
+    }
+    if (confirmDelete) {
+        AlertDialog(
+            onDismissRequest = { confirmDelete = false },
+            title = { Text("${f.name()} silinsin mi?") },
+            text = {
+                Text(if (f.incoming) "Dosya bu cihazdan kalıcı olarak silinir. Kaydı geçmişte kalır."
+                     else "Gönderdiğiniz özgün dosya bu cihazdan kalıcı olarak silinir. Kaydı geçmişte kalır.")
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    confirmDelete = false
+                    app.deleteFile(f.id)
+                }) { Text("Sil") }
+            },
+            dismissButton = { TextButton(onClick = { confirmDelete = false }) { Text("Vazgeç") } },
+        )
+    }
+}
+
 // What went through the clipboard share: copy it again, open its link, or remove it.
 @Kompozable
 fun ClipboardScreen(app: App, clipboard: ClipboardManager) {
@@ -1384,6 +1529,7 @@ fun TrayPanel(app: App, onOpenApp: () -> Unit) {
                          style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant)
                 }
                 TextButton(onClick = onOpenApp) { Text("AirLink'i aç") }
+                TextButton(onClick = { exitApplication() }) { Text("Çık") }
             }
         }
         if (target.isNotEmpty()) {

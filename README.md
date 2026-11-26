@@ -68,6 +68,32 @@ app/packaging/linux/install.sh
 
 Run `install.sh --uninstall` to remove them again.
 
+#### KDE Plasma panel widget
+
+On Plasma 6, `install.sh` also installs the AirLink panel widget (`app/packaging/linux/plasmoid`, id `dev.airlink.panel`) when `kpackagetool6` is available. It puts AirLink on the panel as an icon of its own: a click opens AirLink's tray panel under the icon (or starts AirLink), and the icon takes the tray icon's colors (blue starting, green connected, orange no devices, grey paused or not running, red error), read from `$XDG_RUNTIME_DIR/airlink.status`.
+
+The widget runs the binary `install.sh` was given (default `app/build/airlink`); pass another path to point it elsewhere, and run `install.sh` again after moving the build:
+
+```bash
+app/packaging/linux/install.sh /path/to/airlink
+```
+
+Then right-click the panel, choose **Add Widgets…** and drag **AirLink** onto it. If it isn't listed yet, restart the Plasma shell:
+
+```bash
+systemctl --user restart plasma-plasmashell
+```
+
+To package the widget as a `.plasmoid` file for another machine (the binary's path is filled in when it is packaged):
+
+```bash
+widget=$(mktemp -d) && cp -r app/packaging/linux/plasmoid/. "$widget" && \
+  sed -i "s|@AIRLINK_BIN@|/path/to/airlink|" "$widget/contents/ui/main.qml" && \
+  (cd "$widget" && python3 -m zipfile -c "$OLDPWD/AirLink.plasmoid" metadata.json contents) && rm -rf "$widget"
+```
+
+Install it with `kpackagetool6 --type Plasma/Applet --install AirLink.plasmoid` (`--upgrade` for a newer one), or in **Add Widgets… → Get New → Install Widget From Local File…**. `install.sh --uninstall` removes it, as does `kpackagetool6 --type Plasma/Applet --remove dev.airlink.panel`.
+
 ### Windows
 
 Cross-compiled from Linux with MinGW-w64. The result is a single `.exe` that depends only on Windows' own DLLs.

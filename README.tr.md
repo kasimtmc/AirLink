@@ -68,6 +68,32 @@ app/packaging/linux/install.sh
 
 Kaldırmak için `install.sh --uninstall` çalıştırın.
 
+#### KDE Plasma panel bileşeni
+
+Plasma 6'da `kpackagetool6` varsa `install.sh` AirLink panel bileşenini de kurar (`app/packaging/linux/plasmoid`, kimliği `dev.airlink.panel`). Bileşen AirLink'i panele kendi simgesi olarak ekler: tıklanınca AirLink'in tepsi paneli simgenin altında açılır (AirLink kapalıysa başlar). Simge tepsi simgesinin renklerini alır (başlatılıyor mavi, bağlı yeşil, cihaz yok turuncu, duraklatıldı ya da çalışmıyor gri, hata kırmızı); durumu `$XDG_RUNTIME_DIR/airlink.status` dosyasından okur.
+
+Bileşen, `install.sh`'e verilen programı çalıştırır (varsayılan `app/build/airlink`). Başka bir yol için onu verin; derlemeyi taşıdıktan sonra `install.sh`'i yeniden çalıştırın:
+
+```bash
+app/packaging/linux/install.sh /yol/airlink
+```
+
+Ardından panele sağ tıklayıp **Bileşen Ekle…**'yi seçin ve **AirLink**'i panele sürükleyin. Listede görünmüyorsa Plasma kabuğunu yeniden başlatın:
+
+```bash
+systemctl --user restart plasma-plasmashell
+```
+
+Bileşeni başka bir bilgisayar için `.plasmoid` dosyası olarak paketlemek için (programın yolu paketlerken yazılır):
+
+```bash
+widget=$(mktemp -d) && cp -r app/packaging/linux/plasmoid/. "$widget" && \
+  sed -i "s|@AIRLINK_BIN@|/yol/airlink|" "$widget/contents/ui/main.qml" && \
+  (cd "$widget" && python3 -m zipfile -c "$OLDPWD/AirLink.plasmoid" metadata.json contents) && rm -rf "$widget"
+```
+
+`kpackagetool6 --type Plasma/Applet --install AirLink.plasmoid` ile (yenisi için `--upgrade`) ya da **Bileşen Ekle… → Yeni Al → Yerel Dosyadan Bileşen Kur…** ile kurun. `install.sh --uninstall` ya da `kpackagetool6 --type Plasma/Applet --remove dev.airlink.panel` kaldırır.
+
 ### Windows
 
 Linux'tan MinGW-w64 ile çapraz derlenir. Sonuç, yalnızca Windows'un kendi DLL'lerine bağlı tek bir `.exe`'dir.

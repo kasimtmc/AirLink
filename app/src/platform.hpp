@@ -41,6 +41,9 @@ void setShareHandler(std::function<void(std::vector<std::string>)> handler);
 // `airlink --panel X Y` (the Plasma panel widget's click, at that screen point): the tray panel
 // asked for there, taken once by the app's loop. Linux desktops only; none elsewhere.
 std::optional<std::pair<int, int>> takePanelRequest();
+// What the tray icon shows (starting, connected, nodevices, paused, error) and its tooltip, for the
+// Plasma panel widget: $XDG_RUNTIME_DIR/airlink.status, gone as AirLink ends. Linux only.
+void publishStatus(const std::string& status, const std::string& tooltip);
 
 // The core started: Android hooks its background notifications to it. `node` is an AirlinkNode*.
 void nodeStarted(void* node);
@@ -128,6 +131,12 @@ void chooseMediaAudioPlayers();
 void setPlayerAudioTarget(const std::string& peerId);
 void setPlayerBluetoothPhone(const std::string& phoneName);
 std::string playerBluetoothStatus();
+
+// A file of the Files tab: opened with its app, shown in the file manager (selected where the
+// platform can), or handed to another app (Android's share sheet; desktops: false).
+void openFile(const std::string& path);
+void showInFolder(const std::string& path);
+bool shareWithApps(const std::string& path);
 
 // A line in the platform's log (Android's logcat, stderr on the desktop).
 void log(const std::string& line);

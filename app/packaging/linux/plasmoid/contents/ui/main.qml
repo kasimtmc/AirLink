@@ -9,8 +9,16 @@ import org.kde.plasma.plasma5support as P5Support
 PlasmoidItem {
     id: root
     preferredRepresentation: compactRepresentation
+    // AirLink's state, as its tray icon shows it ($XDG_RUNTIME_DIR/airlink.status: the state, then
+    // the tooltip; no file: AirLink isn't running).
+    property string state: "off"
+    property string detail: "AirLink çalışmıyor · tıklayınca başlar"
+    readonly property color stateColor: ({
+        "connected": "#16A34A", "nodevices": "#D97706", "paused": "#6B7280", "error": "#DC2626", "starting": "#2563EB"
+    })[state] ?? "#6B7280"
+
     toolTipMainText: "AirLink"
-    toolTipSubText: "Cihazlar, medya, mesajlar ve aramalar"
+    toolTipSubText: detail
 
     compactRepresentation: Item {
         // A panel sizes its applets by their Layout hints.
@@ -19,10 +27,22 @@ PlasmoidItem {
         Layout.preferredWidth: Kirigami.Units.iconSizes.medium
         Layout.preferredHeight: Kirigami.Units.iconSizes.medium
 
-        Kirigami.Icon {
-            anchors.fill: parent
-            source: "airlink"  // installed with the app (install.sh)
-            active: area.containsMouse
+        // The disc in the state's color, AirLink's link mark on it (as the tray icon).
+        Rectangle {
+            id: disc
+            anchors.centerIn: parent
+            width: Math.min(parent.width, parent.height) * 0.92
+            height: width
+            radius: width / 2
+            color: root.stateColor
+            opacity: root.state === "off" ? 0.6 : (area.containsMouse ? 1 : 0.95)
+            Image {
+                anchors.centerIn: parent
+                width: parent.width * 0.62
+                height: width
+                source: Qt.resolvedUrl("../images/link.svg")
+                sourceSize: Qt.size(64, 64)
+            }
         }
         MouseArea {
             id: area
@@ -39,6 +59,18 @@ PlasmoidItem {
     fullRepresentation: Item {
         Layout.minimumWidth: 1
         Layout.minimumHeight: 1
+    }
+
+    P5Support.DataSource {
+        id: status
+        engine: "executable"
+        connectedSources: ["cat \"$XDG_RUNTIME_DIR/airlink.status\" 2>/dev/null"]
+        interval: 2000
+        onNewData: (source, data) => {
+            const lines = (data["stdout"] || "").split("\n")
+            root.state = lines[0] ? lines[0] : "off"
+            root.detail = lines[0] ? (lines[1] || "AirLink") : "AirLink çalışmıyor · tıklayınca başlar"
+        }
     }
 
     P5Support.DataSource {

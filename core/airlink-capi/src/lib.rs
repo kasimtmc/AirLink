@@ -266,6 +266,7 @@ pub unsafe extern "C" fn airlink_info(node: *mut AirlinkNode) -> *mut c_char {
             json!({
                 "id": i.id, "name": i.name, "platform": i.platform, "port": i.port,
                 "download_dir": n.node.config().download_dir.display().to_string(),
+                "data_dir": n.node.config().data_dir.display().to_string(),
             })
             .to_string(),
         )

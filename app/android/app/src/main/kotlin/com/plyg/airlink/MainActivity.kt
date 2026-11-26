@@ -223,6 +223,56 @@ class MainActivity : KompozActivity() {
         @JvmStatic fun requestFlingMedia() {
             currentActivity?.let { activity -> activity.runOnUiThread { activity.requestPermissions(FLING_MEDIA, 3) } }
         }
+        /** A file of the Files tab as MediaStore has it (AirLink's received files are scanned there). */
+        private fun contentUri(path: String): android.net.Uri? {
+            val context = AirLinkService.appContext ?: currentActivity ?: return null
+            val files = android.provider.MediaStore.Files.getContentUri("external")
+            return try {
+                @Suppress("DEPRECATION")
+                context.contentResolver.query(files, arrayOf(android.provider.MediaStore.MediaColumns._ID),
+                    "${android.provider.MediaStore.MediaColumns.DATA} = ?", arrayOf(path), null)?.use { c ->
+                    if (c.moveToFirst()) android.content.ContentUris.withAppendedId(files, c.getLong(0)) else null
+                }
+            } catch (_: Exception) { null }
+        }
+
+        private fun mimeOf(path: String): String =
+            android.webkit.MimeTypeMap.getSingleton().getMimeTypeFromExtension(path.substringAfterLast('.', "").lowercase()) ?: "*/*"
+
+        @JvmStatic fun openFile(path: String) {
+            val activity = currentActivity ?: return
+            val uri = contentUri(path) ?: return activity.runOnUiThread {
+                android.widget.Toast.makeText(activity, "Dosya bulunamadı", android.widget.Toast.LENGTH_SHORT).show()
+            }
+            activity.runOnUiThread {
+                try {
+                    activity.startActivity(Intent(Intent.ACTION_VIEW).setDataAndType(uri, mimeOf(path))
+                        .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION))
+                } catch (_: Exception) {
+                    android.widget.Toast.makeText(activity, "Bu dosyayı açacak uygulama yok", android.widget.Toast.LENGTH_SHORT).show()
+                }
+            }
+        }
+
+        /** The folder AirLink saves to, in the system's file browser (Downloads). */
+        @JvmStatic fun showInFolder(path: String) {
+            val activity = currentActivity ?: return
+            activity.runOnUiThread {
+                try { activity.startActivity(Intent(android.app.DownloadManager.ACTION_VIEW_DOWNLOADS)) } catch (_: Exception) { }
+            }
+        }
+
+        @JvmStatic fun shareWithApps(path: String): Boolean {
+            val activity = currentActivity ?: return false
+            val uri = contentUri(path) ?: return false
+            activity.runOnUiThread {
+                val send = Intent(Intent.ACTION_SEND).setType(mimeOf(path)).putExtra(Intent.EXTRA_STREAM, uri)
+                    .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                activity.startActivity(Intent.createChooser(send, null))
+            }
+            return true
+        }
+
         @JvmStatic fun chooseMediaAudioPlayers() {
             currentActivity?.let { activity -> activity.runOnUiThread { PlayerBluetoothAudio.choosePlayers(activity) } }
         }

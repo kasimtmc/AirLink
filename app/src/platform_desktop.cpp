@@ -4,12 +4,14 @@
 
 #include <cstdio>
 #include <cstdlib>
+#include <cctype>
 #include <cstring>
 #include <filesystem>
 #include <mutex>
 #include <string>
 #include <thread>
 #include <utility>
+#include <vector>
 
 #if defined(_WIN32)
 #ifndef NOMINMAX
@@ -36,6 +38,58 @@ namespace airlink::platform {
 std::optional<Config> config() {
     return Config{};  // the core's defaults: per-user data dir, Downloads/AirLink, hostname
 }
+
+namespace {
+// Runs a program without a shell, not waited on.
+void spawn(std::vector<std::string> argv) {
+#if defined(__linux__)
+    std::vector<char*> args;
+    for (auto& a : argv) args.push_back(a.data());
+    args.push_back(nullptr);
+    pid_t pid = 0;
+    if (posix_spawnp(&pid, args[0], nullptr, nullptr, args.data(), environ) != 0) return log(std::string("cannot run ") + argv[0]);
+    std::thread([pid] { waitpid(pid, nullptr, 0); }).detach();
+#else
+    (void)argv;
+#endif
+}
+}  // namespace
+
+void openFile(const std::string& path) {
+    if (path.empty()) return;
+#if defined(__linux__)
+    spawn({"xdg-open", path});
+#elif defined(_WIN32)
+    std::wstring wide = std::filesystem::path(std::u8string(path.begin(), path.end())).wstring();
+    ShellExecuteW(nullptr, L"open", wide.c_str(), nullptr, nullptr, SW_SHOWNORMAL);
+#endif
+}
+
+void showInFolder(const std::string& path) {
+    if (path.empty()) return;
+    const std::filesystem::path file(std::u8string(path.begin(), path.end()));
+#if defined(__linux__)
+    // The file manager selects it (Dolphin, Nautilus: org.freedesktop.FileManager1), else the folder opens.
+    std::error_code ec;
+    if (std::filesystem::exists(file, ec)) {
+        std::string uri = "file://";
+        for (unsigned char c : path) {
+            if (std::isalnum(c) || std::strchr("/-._~", c)) uri += char(c);
+            else { char hex[4]; std::snprintf(hex, sizeof hex, "%%%02X", c); uri += hex; }
+        }
+        spawn({"gdbus", "call", "--session", "--dest", "org.freedesktop.FileManager1", "--object-path",
+               "/org/freedesktop/FileManager1", "--method", "org.freedesktop.FileManager1.ShowItems", "['" + uri + "']", ""});
+        return;
+    }
+    std::u8string parent = file.parent_path().u8string();
+    openFolder(std::string(parent.begin(), parent.end()));  // (the file is gone: its folder)
+#elif defined(_WIN32)
+    std::wstring args = L"/select,\"" + file.wstring() + L"\"";
+    ShellExecuteW(nullptr, L"open", L"explorer.exe", args.c_str(), nullptr, SW_SHOWNORMAL);
+#endif
+}
+
+bool shareWithApps(const std::string&) { return false; }
 
 void openFolder(const std::string& path) {
     if (path.empty()) return;
@@ -477,6 +531,30 @@ void setShareHandler(std::function<void(std::vector<std::string>)> handler) {
     }
     if (!early.empty()) shareHandler(std::move(early));
 }
+
+#if defined(__linux__)
+namespace {
+std::string statusPath() {
+    const char* runtime = std::getenv("XDG_RUNTIME_DIR");
+    return runtime && *runtime ? std::string(runtime) + "/airlink.status" : std::string();
+}
+}  // namespace
+
+void publishStatus(const std::string& status, const std::string& tooltip) {
+    static const std::string path = statusPath();
+    if (path.empty()) return;
+    static bool cleanup = (std::atexit([] { std::remove(statusPath().c_str()); }), true);
+    (void)cleanup;
+    std::string temp = path + ".tmp";
+    if (FILE* f = std::fopen(temp.c_str(), "w")) {
+        std::fprintf(f, "%s\n%s\n", status.c_str(), tooltip.c_str());
+        std::fclose(f);
+        std::rename(temp.c_str(), path.c_str());
+    }
+}
+#else
+void publishStatus(const std::string&, const std::string&) {}
+#endif
 
 std::optional<std::pair<int, int>> takePanelRequest() {
     std::lock_guard lock(shareMutex);

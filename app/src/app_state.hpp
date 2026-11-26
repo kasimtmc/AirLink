@@ -20,6 +20,7 @@ struct DeviceInfo {
     std::string platform;
     int port = 0;
     std::string downloadDir;
+    std::string dataDir;  // the core's: identity, pairings, AirLink's own files
     bool operator==(const DeviceInfo&) const = default;
 };
 
@@ -84,6 +85,19 @@ struct PhoneNotification {
     int64_t time = 0;  // ms since the epoch
     bool canReply = false;
     bool operator==(const PhoneNotification&) const = default;
+};
+
+// A file that went to or came from a paired device (the Files tab); kept across restarts.
+struct FileRecord {
+    int64_t id = 0;
+    std::string peerId;
+    std::string peerName;  // as it was then (the device may be forgotten since)
+    std::string path;      // received: where it was saved; sent: what was sent
+    int64_t size = 0;
+    int64_t time = 0;  // ms since the epoch
+    bool incoming = true;
+    std::string name() const { auto slash = path.find_last_of("/\\"); return slash == std::string::npos ? path : path.substr(slash + 1); }
+    bool operator==(const FileRecord&) const = default;
 };
 
 // What plays on a paired phone (its media.state), for the tray panel.
@@ -294,6 +308,10 @@ public:
     std::vector<std::string> takeNotices() const;
     std::vector<std::string> takeIncomingClipboard() const;
     std::vector<ClipboardItem> clipboardHistory() const;
+    std::vector<FileRecord> fileHistory() const;
+    void forgetFileRecord(int64_t id) const;  // from the list (the "x")
+    bool deleteFile(int64_t id) const;        // the file from the disk; its card stays, marked deleted
+    void clearFileHistory() const;
     PhoneMedia phoneMedia() const;
     // The tray panel asked for from outside (the Plasma panel widget): a new serial each time.
     struct PanelRequest { int serial = 0, x = 0, y = 0; bool operator==(const PanelRequest&) const = default; };

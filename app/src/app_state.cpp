@@ -11,6 +11,7 @@
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
+#include <iterator>
 #include <map>
 #include <mutex>
 
@@ -208,6 +209,63 @@ struct App::Impl {
     std::vector<std::string> incomingClipboard;
     MutableState<std::vector<ClipboardItem>> clipboardHistory = mutableStateOf(std::vector<ClipboardItem>{});
     MutableState<PhoneMedia> phoneMedia = mutableStateOf(PhoneMedia{});
+    // The Files tab's list, newest first, in <data dir>/file-history.json.
+    MutableState<std::vector<FileRecord>> fileHistory = mutableStateOf(std::vector<FileRecord>{});
+    int64_t nextFileId = 1;
+    MutableState<int> filesOnDisk = mutableStateOf(0);  // bumped as AirLink deletes one: the cards look at the disk again
+    std::string fileHistoryPath() const {
+        auto dir = me.peek().dataDir;
+        return dir.empty() ? std::string() : dir + "/file-history.json";
+    }
+    void loadFileHistory() {
+        std::string path = fileHistoryPath();
+        if (path.empty()) return;
+        std::ifstream in(std::filesystem::path(std::u8string(path.begin(), path.end())));
+        if (!in) return;
+        std::string text((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+        json::Value parsed = json::Value::parse(text);
+        std::vector<FileRecord> list;
+        for (const auto& f : parsed.array())
+            list.push_back(FileRecord{.id = nextFileId++, .peerId = f["peer_id"].str(), .peerName = f["peer_name"].str(),
+                                      .path = f["path"].str(), .size = f["size"].i64(), .time = f["time"].i64(),
+                                      .incoming = f["incoming"].boolean()});
+        fileHistory.set(std::move(list));
+    }
+    void saveFileHistory() {
+        std::string path = fileHistoryPath();
+        if (path.empty()) return;
+        std::string out = "[";
+        for (const FileRecord& f : fileHistory.peek()) {
+            if (out.size() > 1) out += ",\n";
+            out += "{\"peer_id\":" + json::quote(f.peerId) + ",\"peer_name\":" + json::quote(f.peerName) +
+                   ",\"path\":" + json::quote(f.path) + ",\"size\":" + std::to_string(f.size) +
+                   ",\"time\":" + std::to_string(f.time) + ",\"incoming\":" + (f.incoming ? "true" : "false") + "}";
+        }
+        out += "]\n";
+        auto file = std::filesystem::path(std::u8string(path.begin(), path.end()));
+        auto temp = file;
+        temp += ".tmp";
+        { std::ofstream(temp, std::ios::binary) << out; }
+        std::error_code ec;
+        std::filesystem::rename(temp, file, ec);
+    }
+    void recordFiles(const std::string& peerId, const std::vector<std::string>& paths, bool incoming) {
+        if (paths.empty()) return;
+        int64_t now = std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::system_clock::now().time_since_epoch()).count();
+        std::string name = peerNameOf(peerId);
+        fileHistory.update([&](std::vector<FileRecord>& list) {
+            for (const std::string& p : paths) {
+                std::error_code ec;
+                auto fs = std::filesystem::path(std::u8string(p.begin(), p.end()));
+                int64_t size = std::filesystem::is_regular_file(fs, ec) ? int64_t(std::filesystem::file_size(fs, ec)) : 0;
+                list.insert(list.begin(), FileRecord{.id = nextFileId++, .peerId = peerId, .peerName = name, .path = p,
+                                                     .size = size, .time = now, .incoming = incoming});
+            }
+            if (list.size() > 500) list.resize(500);
+        });
+        saveFileHistory();
+    }
     MutableState<App::PanelRequest> panelRequest = mutableStateOf(App::PanelRequest{});
     std::string lastClipboard;   // this device's clipboard as last seen or set
     bool clipboardSeen = false;  // the first reading is the clipboard AirLink found, not a copy
@@ -282,7 +340,9 @@ struct App::Impl {
                           .name = info["name"].str(),
                           .platform = info["platform"].str(),
                           .port = int(info["port"].i64()),
-                          .downloadDir = info["download_dir"].str()});
+                          .downloadDir = info["download_dir"].str(),
+                          .dataDir = info["data_dir"].str()});
+        loadFileHistory();
         refreshPeers();
         startError.set({});
         recentError.set(false);
@@ -416,6 +476,7 @@ struct App::Impl {
                 t.fileCount = int(files.size());
             });
             notices.push_back(std::to_string(files.size()) + (incoming ? " dosya alındı" : " dosya gönderildi"));
+            recordFiles(e["peer_id"].str(), files, incoming);
             if (incoming) platform::filesReceived(files);
         } else if (kind == "transfer_failed") {
             markRecentError();
@@ -1752,6 +1813,35 @@ void App::sendClipboard(const std::string& peerId, const std::string& text) cons
     impl_->rememberClipboard(peerId, text, false);
 }
 
+std::vector<FileRecord> App::fileHistory() const {
+    impl_->filesOnDisk.get();
+    return impl_->fileHistory.get();
+}
+void App::forgetFileRecord(int64_t id) const {
+    impl_->fileHistory.update([&](std::vector<FileRecord>& list) {
+        std::erase_if(list, [&](const FileRecord& f) { return f.id == id; });
+    });
+    impl_->saveFileHistory();
+}
+bool App::deleteFile(int64_t id) const {
+    for (const FileRecord& f : impl_->fileHistory.peek()) {
+        if (f.id != id) continue;
+        std::error_code ec;
+        auto path = std::filesystem::path(std::u8string(f.path.begin(), f.path.end()));
+        bool gone = !std::filesystem::exists(path, ec) || std::filesystem::remove_all(path, ec) > 0;
+        if (!gone) {
+            impl_->notices.push_back("Dosya silinemedi: " + ec.message());
+            return false;
+        }
+        impl_->filesOnDisk.set(impl_->filesOnDisk.peek() + 1);  // (its card redrawn as deleted)
+        return true;
+    }
+    return false;
+}
+void App::clearFileHistory() const {
+    impl_->fileHistory.set({});
+    impl_->saveFileHistory();
+}
 PhoneMedia App::phoneMedia() const { return impl_->phoneMedia.get(); }
 App::PanelRequest App::panelRequest() const { return impl_->panelRequest.get(); }
 void App::requestPhoneMedia() const { impl_->phoneAsk("media.state_request", "{}"); }

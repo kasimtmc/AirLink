@@ -34,6 +34,7 @@ jmethodID screenControlOn = nullptr, screenControlSettings = nullptr;
 jmethodID backgroundAutostartNeeded = nullptr, backgroundAutostartSettings = nullptr;
 jmethodID flingAvailableId = nullptr, flingEnabledId = nullptr, setFlingEnabledId = nullptr;
 jmethodID flingMediaGrantedId = nullptr, requestFlingMediaId = nullptr;
+jmethodID openFileId = nullptr, showInFolderId = nullptr, shareWithAppsId = nullptr;
 jclass adbPairingClass = nullptr;
 jmethodID adbStart = nullptr, adbDone = nullptr;
 jclass appStreamsClass = nullptr;
@@ -113,6 +114,7 @@ void stageUris(const std::vector<std::string>& uris, std::function<void(std::vec
 void handleLaunch(int, char**) {}  // Android: shares come as intents (MainActivity)
 
 std::optional<std::pair<int, int>> takePanelRequest() { return std::nullopt; }
+void publishStatus(const std::string&, const std::string&) {}
 
 void setShareHandler(std::function<void(std::vector<std::string>)> handler) {
     std::vector<std::string> early;
@@ -291,6 +293,29 @@ bool flingEnabled() {
     return on;
 }
 
+namespace {
+void callWithPath(jmethodID method, const std::string& path) {
+    JNIEnv* e = env();
+    if (!e || !activityClass || !method) return;
+    jstring p = e->NewStringUTF(path.c_str());
+    e->CallStaticVoidMethod(activityClass, method, p);
+    e->DeleteLocalRef(p);
+    if (e->ExceptionCheck()) e->ExceptionClear();
+}
+}  // namespace
+
+void openFile(const std::string& path) { callWithPath(openFileId, path); }
+void showInFolder(const std::string& path) { callWithPath(showInFolderId, path); }
+bool shareWithApps(const std::string& path) {
+    JNIEnv* e = env();
+    if (!e || !activityClass || !shareWithAppsId) return false;
+    jstring p = e->NewStringUTF(path.c_str());
+    bool ok = e->CallStaticBooleanMethod(activityClass, shareWithAppsId, p);
+    e->DeleteLocalRef(p);
+    if (e->ExceptionCheck()) e->ExceptionClear(), ok = false;
+    return ok;
+}
+
 bool flingMediaAccess() {
     JNIEnv* e = env();
     if (!e || !activityClass || !flingMediaGrantedId) return false;
@@ -461,6 +486,9 @@ extern "C" JNIEXPORT void JNICALL Java_com_plyg_airlink_MainActivity_nativeInit(
         setFlingEnabledId = e->GetStaticMethodID(activityClass, "setFlingEnabled", "(Z)V");
         flingMediaGrantedId = e->GetStaticMethodID(activityClass, "flingMediaGranted", "()Z");
         requestFlingMediaId = e->GetStaticMethodID(activityClass, "requestFlingMedia", "()V");
+        openFileId = e->GetStaticMethodID(activityClass, "openFile", "(Ljava/lang/String;)V");
+        showInFolderId = e->GetStaticMethodID(activityClass, "showInFolder", "(Ljava/lang/String;)V");
+        shareWithAppsId = e->GetStaticMethodID(activityClass, "shareWithApps", "(Ljava/lang/String;)Z");
         callsGranted = e->GetStaticMethodID(activityClass, "callsGranted", "()Z");
         callRequestPermissions = e->GetStaticMethodID(activityClass, "requestCallPermissions", "()V");
         screenControlOn = e->GetStaticMethodID(activityClass, "screenControlEnabled", "()Z");
