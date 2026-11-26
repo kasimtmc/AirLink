@@ -277,6 +277,16 @@ static std::string desktopScroll(Offset p, Size box, int iw, int ih, Offset pan)
     return desktopPoint("scroll", p, box, iw, ih, extra);
 }
 
+// The running transfers and the last `finished` finished ones, in their order.
+static std::vector<Transfer> recentTransfers(const std::vector<Transfer>& all, size_t finished) {
+    size_t done = std::count_if(all.begin(), all.end(), [](const Transfer& t) { return !t.active(); });
+    std::vector<Transfer> out;
+    for (const Transfer& t : all) {
+        if (t.active() || done-- <= finished) out.push_back(t);
+    }
+    return out;
+}
+
 static std::string desktopRequestText() {
     std::string text = "Ekranınızı görecek, fare ve klavyeyi kullanabilecek. İstediğiniz zaman buradan durdurabilirsiniz.";
 #if defined(__linux__) && !defined(__ANDROID__)
@@ -601,6 +611,8 @@ fun DeviceList(app: App, clipboard: ClipboardManager, onOpenSettings: () -> Unit
     var replyTo by remember { mutableStateOf(PhoneNotification()) }
     var replyText by remember { mutableStateOf("") }
     var manualAddress by remember { mutableStateOf("") }
+    var pairByAddress by remember { mutableStateOf(false) }
+    var allTransfers by remember { mutableStateOf(false) }
 
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
@@ -612,23 +624,9 @@ fun DeviceList(app: App, clipboard: ClipboardManager, onOpenSettings: () -> Unit
             item { MissingPermissionsBanner(missing, onOpenSettings) }
         }
 
-        if (notifications.isNotEmpty()) {
-            item { SectionTitle("Telefon bildirimleri") }
-            items(notifications) { n ->
-                PhoneNotificationCard(n, app.peerName(n.peerId),
-                    onDismiss = { app.dismissPhoneNotification(n) },
-                    onReply = { replyTo = n })
-            }
-        }
-
-        if (transfers.isNotEmpty()) {
-            item { SectionTitle("Aktarımlar") }
-            items(transfers) { t -> TransferRow(t, app.peerName(t.peerId)) }
-        }
-
         item { SectionTitle("Eşleşmiş cihazlar") }
         if (paired.isEmpty()) {
-            item { Hint("Henüz eşleşmiş cihaz yok. Aşağıdan yakındaki bir cihazla eşleşin.", loading = false) }
+            item { NoPairedDevices() }
         } else {
             items(paired) { peer ->
                 PairedPeerCard(
@@ -643,26 +641,51 @@ fun DeviceList(app: App, clipboard: ClipboardManager, onOpenSettings: () -> Unit
             }
         }
 
-        item { SectionTitle("Yakındaki cihazlar") }
-        item {
-            OutlinedCard(modifier = Modifier.fillMaxWidth()) {
-                Column(modifier = Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text("IP adresiyle eşleştir", style = MaterialTheme.typography.titleSmall)
-                    Text("Ağ keşfi çalışmıyorsa diğer cihazın IP adresini yazın. Varsayılan bağlantı noktası 47820.",
-                         style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        OutlinedTextField(value = manualAddress, onValueChange = { manualAddress = it }, singleLine = true,
-                                          label = "IP adresi veya IP:port", modifier = Modifier.weight(1f))
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Button(onClick = { app.pairAddress(manualAddress) }, enabled = manualAddress.isNotBlank()) { Text("Eşleştir") }
-                    }
+        // The running ones and the latest few finished ones; the rest on request.
+        if (transfers.isNotEmpty()) {
+            val shown = if (allTransfers) transfers else recentTransfers(transfers, 3)
+            item { SectionTitle("Aktarımlar") }
+            items(shown) { t -> TransferRow(t, app.peerName(t.peerId)) }
+            if (shown.size < transfers.size) {
+                item {
+                    TextButton(onClick = { allTransfers = true }) { Text("Tümünü göster (${transfers.size})") }
                 }
             }
         }
+
+        if (notifications.isNotEmpty()) {
+            item { SectionTitle("Telefon bildirimleri") }
+            items(notifications) { n ->
+                PhoneNotificationCard(n, app.peerName(n.peerId),
+                    onDismiss = { app.dismissPhoneNotification(n) },
+                    onReply = { replyTo = n })
+            }
+        }
+
+        item { SectionTitle("Yakındaki cihazlar") }
         if (nearby.isEmpty()) {
             item { Hint("Aranıyor… Diğer cihazda AirLink açık ve aynı ağda olmalı.", loading = true) }
         } else {
             items(nearby) { peer -> NearbyPeerCard(peer, onPair = { app.pair(peer.id) }) }
+        }
+        item {
+            if (pairByAddress) {
+                OutlinedCard(modifier = Modifier.fillMaxWidth()) {
+                    Column(modifier = Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text("IP adresiyle eşleştir", style = MaterialTheme.typography.titleSmall)
+                        Text("Ağ keşfi çalışmıyorsa diğer cihazın IP adresini yazın. Varsayılan bağlantı noktası 47820.",
+                             style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            OutlinedTextField(value = manualAddress, onValueChange = { manualAddress = it }, singleLine = true,
+                                              label = "IP adresi veya IP:port", modifier = Modifier.weight(1f))
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Button(onClick = { app.pairAddress(manualAddress) }, enabled = manualAddress.isNotBlank()) { Text("Eşleştir") }
+                        }
+                    }
+                }
+            } else {
+                TextButton(onClick = { pairByAddress = true }) { Text("Cihaz görünmüyor mu? IP adresiyle eşleştir") }
+            }
         }
     }
 
@@ -1664,29 +1687,75 @@ fun PairedPeerCard(
             onEnded = { dragging = false },
         ),
     )
+    var menu by remember { mutableStateOf(false) }
     OutlinedCard(
         modifier = drop.fillMaxWidth(),
         colors = CardDefaults.outlinedCardColors(containerColor = if (dragging) cs.secondaryContainer else cs.surface),
     ) {
-        Row(modifier = Modifier.fillMaxWidth().padding(16.dp, 12.dp), verticalAlignment = Alignment.CenterVertically) {
-            Box {
-                Icon(AppIcons.forPlatform(peer.platform), contentDescription = null, modifier = Modifier.size(32.dp))
-                Box(modifier = Modifier.align(Alignment.TopEnd)) { OnlineDot(peer.online) }
+        Column(modifier = Modifier.fillMaxWidth().padding(start = 16.dp, top = 12.dp, end = 4.dp, bottom = 12.dp)) {
+            Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                Box {
+                    Icon(AppIcons.forPlatform(peer.platform), contentDescription = null, modifier = Modifier.size(32.dp))
+                    Box(modifier = Modifier.align(Alignment.TopEnd)) { OnlineDot(peer.online) }
+                }
+                Spacer(modifier = Modifier.width(16.dp))
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(peer.name, style = MaterialTheme.typography.titleMedium)
+                    Text(status, style = MaterialTheme.typography.bodyMedium, color = cs.onSurfaceVariant)
+                }
+                Box {
+                    IconButton(onClick = { menu = true }) { Icon(Icons.Filled.MoreVert, contentDescription = "Diğer") }
+                    DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
+                        DropdownMenuItem(
+                            text = { Text("Cihazı unut") },
+                            onClick = {
+                                menu = false
+                                onForget()
+                            },
+                            leadingIcon = { Icon(Icons.Filled.Delete, contentDescription = null) })
+                    }
+                }
             }
+            Spacer(modifier = Modifier.height(8.dp))
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.padding(start = 48.dp, end = 12.dp)) {
+                AssistChip(onClick = onSendFiles, enabled = peer.online, label = { Text("Dosya gönder") },
+                           leadingIcon = { Icon(AppIcons.UploadFile, contentDescription = null, modifier = Modifier.size(18.dp)) })
+                AssistChip(onClick = onSendClipboard, enabled = peer.online, label = { Text("Pano") },
+                           leadingIcon = { Icon(AppIcons.ContentPaste, contentDescription = null, modifier = Modifier.size(18.dp)) })
+                if (isDesktop() && peer.platform == "android") {
+                    AssistChip(onClick = onShowScreen, enabled = peer.online, label = { Text("Ekranı göster") },
+                               leadingIcon = { Icon(AppIcons.Smartphone, contentDescription = null, modifier = Modifier.size(18.dp)) })
+                }
+                if (!isDesktop() && peer.platform != "android") {
+                    AssistChip(onClick = onControl, enabled = peer.online, label = { Text("Kontrol et") },
+                               leadingIcon = { Icon(AppIcons.Computer, contentDescription = null, modifier = Modifier.size(18.dp)) })
+                }
+            }
+        }
+    }
+}
+
+fun platformName(platform: String): String = when (platform) {
+    "android" -> "Android"
+    "linux" -> "Linux"
+    "windows" -> "Windows"
+    "macos" -> "macOS"
+    else -> platform
+}
+
+// No paired device yet: what pairing gives and how to start.
+@Kompozable
+fun NoPairedDevices() {
+    val cs = MaterialTheme.colorScheme
+    Card(colors = CardDefaults.cardColors(containerColor = cs.surfaceVariant), modifier = Modifier.fillMaxWidth()) {
+        Row(modifier = Modifier.fillMaxWidth().padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+            Icon(AppIcons.Devices, contentDescription = null, modifier = Modifier.size(36.dp), tint = cs.primary)
             Spacer(modifier = Modifier.width(16.dp))
             Column(modifier = Modifier.weight(1f)) {
-                Text(peer.name, style = MaterialTheme.typography.titleMedium)
-                Text(status, style = MaterialTheme.typography.bodyMedium, color = cs.onSurfaceVariant)
+                Text("Henüz eşleşmiş cihaz yok", style = MaterialTheme.typography.titleSmall)
+                Text("Diğer cihazda da AirLink'i açın; aşağıda görününce Eşleş'e basıp iki ekrandaki kodu karşılaştırın.",
+                     style = MaterialTheme.typography.bodyMedium, color = cs.onSurfaceVariant)
             }
-            IconButton(onClick = onSendFiles) { Icon(AppIcons.UploadFile, contentDescription = "Dosya gönder") }
-            IconButton(onClick = onSendClipboard) { Icon(AppIcons.ContentPaste, contentDescription = "Panoyu gönder") }
-            if (isDesktop() && peer.platform == "android" && peer.online) {
-                IconButton(onClick = onShowScreen) { Icon(AppIcons.Smartphone, contentDescription = "Ekranı göster") }
-            }
-            if (!isDesktop() && peer.platform != "android" && peer.online) {
-                IconButton(onClick = onControl) { Icon(AppIcons.Computer, contentDescription = "Bilgisayarı kontrol et") }
-            }
-            IconButton(onClick = onForget) { Icon(Icons.Filled.Delete, contentDescription = "Cihazı unut") }
         }
     }
 }
@@ -1699,7 +1768,7 @@ fun NearbyPeerCard(peer: Peer, onPair: () -> Unit) {
             Spacer(modifier = Modifier.width(16.dp))
             Column(modifier = Modifier.weight(1f)) {
                 Text(peer.name, style = MaterialTheme.typography.titleMedium)
-                Text("${peer.platform} · ${shortId(peer.id)}", style = MaterialTheme.typography.bodyMedium,
+                Text("${platformName(peer.platform)} · ${shortId(peer.id)}", style = MaterialTheme.typography.bodyMedium,
                      color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
             FilledTonalButton(onClick = onPair) {
