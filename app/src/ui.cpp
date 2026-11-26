@@ -1329,6 +1329,15 @@ fun TrayPanel(app: App, onOpenApp: () -> Unit) {
     var query by remember { mutableStateOf("") }
     var replyThread by remember { mutableStateOf("") }
     var replyText by remember { mutableStateOf("") }
+    // Ctrl+V sends what is copied (files, else text) to the chosen device: the panel closes when
+    // anything else is clicked, so dragging onto it can't work.
+    var chosen by remember { mutableStateOf("") }
+    var pasted by remember { mutableStateOf("") }
+    val target = if (online.any { it.id == chosen }) chosen
+                 else if (online.any { it.platform == "android" }) online.first { it.platform == "android" }.id
+                 else if (online.isNotEmpty()) online.first().id else ""
+    val focus = remember { FocusRequester() }
+    LaunchedEffect(Unit) { focus.requestFocus() }
     LaunchedEffect(phone) {
         if (phone) {
             app.requestPhoneMedia()
@@ -1342,8 +1351,31 @@ fun TrayPanel(app: App, onOpenApp: () -> Unit) {
             delay(1500)
         }
     }
-    LazyColumn(modifier = Modifier.fillMaxSize().background(cs.surfaceContainer), contentPadding = PaddingValues(12.dp),
-               verticalArrangement = Arrangement.spacedBy(6.dp)) {
+    LazyColumn(modifier = Modifier.fillMaxSize().background(cs.surfaceContainer)
+                   .onKeyEvent { e ->
+                       if (e.type != KeyEventType.KeyDown || !e.isCtrlPressed || e.isAltPressed || e.key != Key.V) false
+                       else if (target.isEmpty()) {
+                           pasted = "Gönderilecek çevrimiçi cihaz yok"
+                           true
+                       } else {
+                           val files = copiedFiles(clip)
+                           val copiedText = text.getText()
+                           if (files.isNotEmpty()) {
+                               app.sendFiles(target, files)
+                               pasted = if (files.size == 1) "1 dosya ${app.peerName(target)} cihazına gönderildi"
+                                        else "${files.size} dosya ${app.peerName(target)} cihazına gönderildi"
+                           } else if (copiedText.isNotEmpty()) {
+                               app.sendClipboard(target, copiedText)
+                               pasted = "Metin ${app.peerName(target)} cihazının panosuna gönderildi"
+                           } else {
+                               pasted = "Panoda gönderilecek dosya ya da metin yok"
+                           }
+                           true
+                       }
+                   }
+                   .focusRequester(focus)
+                   .focusable(),
+               contentPadding = PaddingValues(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
         item {
             Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                 Column(modifier = Modifier.weight(1f)) {
@@ -1354,6 +1386,14 @@ fun TrayPanel(app: App, onOpenApp: () -> Unit) {
                 TextButton(onClick = onOpenApp) { Text("AirLink'i aç") }
             }
         }
+        if (target.isNotEmpty()) {
+            item {
+                Text(if (pasted.isNotEmpty()) pasted
+                     else "Ctrl+V: kopyaladığınız dosyalar ya da metin ${app.peerName(target)} cihazına gider",
+                     style = MaterialTheme.typography.bodySmall, color = if (pasted.isNotEmpty()) cs.primary else cs.onSurfaceVariant,
+                     modifier = Modifier.padding(horizontal = 4.dp))
+            }
+        }
         // Devices
         if (online.isEmpty()) {
             item {
@@ -1362,7 +1402,7 @@ fun TrayPanel(app: App, onOpenApp: () -> Unit) {
             }
         }
         for (peer in online) {
-            item { TrayDevice(app, peer, copied, text) }
+            item { TrayDevice(app, peer, copied, text, peer.id == target && online.size > 1, onChoose = { chosen = peer.id }) }
         }
         // Media
         val media = app.phoneMedia()
@@ -1497,7 +1537,7 @@ fun TraySection(title: String) {
 
 // A connected device in the panel: its actions, and a place to drop files on.
 @Kompozable
-fun TrayDevice(app: App, peer: Peer, copied: List<String>, text: ClipboardManager) {
+fun TrayDevice(app: App, peer: Peer, copied: List<String>, text: ClipboardManager, chosen: Boolean, onChoose: () -> Unit) {
     val cs = MaterialTheme.colorScheme
     var dragging by remember { mutableStateOf(false) }
     val drop = Modifier.dragAndDropTarget(
@@ -1513,7 +1553,10 @@ fun TrayDevice(app: App, peer: Peer, copied: List<String>, text: ClipboardManage
             onEnded = { dragging = false },
         ),
     )
-    Card(modifier = drop.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = if (dragging) cs.secondaryContainer else cs.surface)) {
+    // With more than one device, a click on a card makes it the one Ctrl+V sends to (outlined).
+    Card(modifier = drop.fillMaxWidth().clickable(onClick = onChoose)
+                        .then(if (chosen) Modifier.border(2.dp, cs.primary, RoundedCornerShape(12.dp)) else Modifier),
+         colors = CardDefaults.cardColors(containerColor = if (dragging) cs.secondaryContainer else cs.surface)) {
         Column(modifier = Modifier.fillMaxWidth().padding(12.dp, 8.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Box {
@@ -1523,7 +1566,7 @@ fun TrayDevice(app: App, peer: Peer, copied: List<String>, text: ClipboardManage
                 Spacer(modifier = Modifier.width(12.dp))
                 Column(modifier = Modifier.weight(1f)) {
                     Text(peer.name, style = MaterialTheme.typography.titleSmall)
-                    Text(if (dragging) "Göndermek için bırakın" else "Dosyaları buraya sürükleyin",
+                    Text(if (dragging) "Göndermek için bırakın" else if (chosen) "Ctrl+V buraya gönderir" else "Dosyaları buraya sürükleyin",
                          style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant)
                 }
                 if (peer.platform == "android") {

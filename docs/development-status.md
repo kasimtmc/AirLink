@@ -175,3 +175,5 @@ AirLink Plasma bileşeni: `app/packaging/linux/plasmoid` (dev.airlink.panel), `i
 Tepsi menüsünden "Çık" ile kapanışta yaklaşık 2,1 saniyelik bir gecikme ölçüldü: çekirdeğin durması 5 ms, SIGTERM ile kapanış 0,6 s; gecikme Kompoz döngüsünün bitişi ile uygulama durumunun yok edilmesi arasında, büyük olasılıkla tepsi (D-Bus menü) tarafında. Kaynağı henüz bulunmadı.
 
 Ayrıca: `call.dtmf` telefonun yönlendirme listesine eklendi (önceki görüşme ekranı commit'inde tuş tonları telefona ulaşmıyordu). Android derlemesinde Kompoz yolu `-PkompozDir=/yol` ile değiştirilebiliyor.
+
+Tepsi panelinde Ctrl+V (26 Kasım 2026): Panel odak kaybedince kapandığı için başka pencereden sürükle-bırak çalışmıyor. Bunun yerine panel açıkken Ctrl+V kopyalanan dosyaları (dosya yöneticisinde Ctrl+C), yoksa kopyalanan metni seçili cihaza gönderiyor; panelin üstündeki satır hedefi ve sonucu gösteriyor. Birden fazla cihazda karta tıklamak hedefi seçer (çerçeveyle işaretlenir); varsayılan telefon. Kişi arama alanında Ctrl+V normal yapıştırmadır. Kullanıcı KDE Plasma 6'da doğruladı.
