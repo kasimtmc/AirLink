@@ -276,18 +276,33 @@ struct App::Impl {
     }
     MutableState<App::PanelRequest> panelRequest = mutableStateOf(App::PanelRequest{});
     std::string lastClipboard;   // this device's clipboard as last seen or set
+    bool lastClipboardSensitive = false;
+    MutableState<bool> passwordPrivacy = mutableStateOf(true);
+    MutableState<bool> passwordPending = mutableStateOf(false);
+    std::string pendingPassword;  // waiting for the user's yes (password privacy)
+    std::string settingPath(const char* name) const {
+        auto dir = me.peek().dataDir;
+        return dir.empty() ? std::string() : dir + "/" + name;
+    }
+    void sendToTrusted(const std::string& text, bool sensitive) {
+        for (const Peer& p : peers.peek()) {
+            if (!p.paired || !p.online || !p.autoAccept) continue;
+            track(airlink_send_clipboard_marked(node, p.id.c_str(), text.c_str(), sensitive), OpKind::SendClipboard);
+            rememberClipboard(p.id, text, false, sensitive);
+        }
+    }
     bool clipboardSeen = false;  // the first reading is the clipboard AirLink found, not a copy
     bool trusts(const std::string& peerId) const {
         const auto& list = peers.peek();
         return std::any_of(list.begin(), list.end(), [&](const Peer& p) { return p.id == peerId && p.paired && p.autoAccept; });
     }
     int64_t nextClipboardId = 1;
-    void rememberClipboard(const std::string& peerId, const std::string& text, bool incoming) {
+    void rememberClipboard(const std::string& peerId, const std::string& text, bool incoming, bool sensitive = false) {
         int64_t now = std::chrono::duration_cast<std::chrono::milliseconds>(
             std::chrono::system_clock::now().time_since_epoch()).count();
         clipboardHistory.update([&](std::vector<ClipboardItem>& list) {
             list.insert(list.begin(), ClipboardItem{.id = nextClipboardId++, .peerId = peerId, .text = text,
-                                                    .time = now, .incoming = incoming});
+                                                    .time = now, .incoming = incoming, .sensitive = sensitive});
             if (list.size() > 100) list.resize(100);
         });
     }
@@ -351,6 +366,11 @@ struct App::Impl {
                           .downloadDir = info["download_dir"].str(),
                           .dataDir = info["data_dir"].str()});
         loadFileHistory();
+        if (auto path = settingPath("password-privacy"); !path.empty()) {
+            std::ifstream in(path);
+            int on = 1;
+            if (in >> on) passwordPrivacy.set(on != 0);
+        }
         refreshPeers();
         startError.set({});
         recentError.set(false);
@@ -520,10 +540,12 @@ struct App::Impl {
         } else if (kind == "app_message") {
             handleAppMessage(e["peer"], e["kind"].str(), e["body"]);
         } else if (kind == "clipboard_received") {
+            bool secret = e["sensitive"].boolean();
             incomingClipboard.push_back(e["text"].str());
-            rememberClipboard(e["peer"]["id"].str(), e["text"].str(), true);
-            notices.push_back(e["peer"]["name"].str() + " panosunu paylaştı");
-            platform::notifyReceived(e["peer"]["name"].str(), {}, e["text"].str());
+            if (secret) lastClipboardSensitive = true;
+            rememberClipboard(e["peer"]["id"].str(), e["text"].str(), true, secret);
+            notices.push_back(e["peer"]["name"].str() + (secret ? " bir şifre gönderdi" : " panosunu paylaştı"));
+            platform::notifyReceived(e["peer"]["name"].str(), {}, e["text"].str(), secret);
             receivedCount.set(receivedCount.peek() + 1);
         } else if (kind == "pairing_code") {
             ops.erase(e["op"].u64());
@@ -1740,16 +1762,51 @@ std::vector<std::string> App::takeIncomingClipboard() const {
     return list;
 }
 
-void App::syncClipboard(const std::string& text) const {
+void App::syncClipboard(const std::string& text, bool sensitive) const {
     auto& s = *impl_;
     if (!s.node || text.empty() || text == s.lastClipboard) return;
     s.lastClipboard = text;
-    if (!std::exchange(s.clipboardSeen, true)) return;
-    for (const Peer& p : s.peers.peek()) {
-        if (!p.paired || !p.online || !p.autoAccept) continue;
-        s.track(airlink_send_clipboard(s.node, p.id.c_str(), text.c_str()), OpKind::SendClipboard);
-        s.rememberClipboard(p.id, text, false);
+    s.lastClipboardSensitive = sensitive;
+    // The first reading is what was there already, not a copy: not sent. A password still asks: on
+    // Android the clipboard is read only with the app in front, so a fresh copy can be the first.
+    bool first = !std::exchange(s.clipboardSeen, true);
+    if (first && !(sensitive && s.passwordPrivacy.peek())) return;
+    if (sensitive && s.passwordPrivacy.peek()) {
+        // A password: to the trusted devices only after a yes.
+        bool anyTrusted = std::any_of(s.peers.peek().begin(), s.peers.peek().end(),
+                                      [](const Peer& p) { return p.paired && p.online && p.autoAccept; });
+        if (!anyTrusted) return;
+        s.pendingPassword = text;
+        s.passwordPending.set(true);
+        platform::askSendPassword([](bool send) { App::get().answerPasswordSend(send); });
+        return;
     }
+    s.sendToTrusted(text, sensitive);
+}
+
+bool App::passwordPrivacy() const { return impl_->passwordPrivacy.get(); }
+void App::setPasswordPrivacy(bool on) const {
+    impl_->passwordPrivacy.set(on);
+    if (auto path = impl_->settingPath("password-privacy"); !path.empty()) std::ofstream(path) << (on ? 1 : 0);
+}
+bool App::passwordPending() const { return impl_->passwordPending.get(); }
+void App::answerPasswordSend(bool send) const {
+    auto& s = *impl_;
+    if (!s.passwordPending.peek()) return;  // (answered already: the dialog or the notification)
+    s.passwordPending.set(false);
+    platform::passwordAnswered();
+    std::string text = std::exchange(s.pendingPassword, {});
+    if (send && !text.empty()) s.sendToTrusted(text, true);
+}
+void App::dropPasswords() const {
+    impl_->clipboardHistory.update([](std::vector<ClipboardItem>& list) {
+        std::erase_if(list, [](const ClipboardItem& item) { return item.sensitive; });
+    });
+}
+void App::copiedClipboardItem(int64_t id) const {
+    impl_->clipboardHistory.update([&](std::vector<ClipboardItem>& list) {
+        std::erase_if(list, [&](const ClipboardItem& item) { return item.id == id && item.sensitive; });
+    });
 }
 
 void App::setTrusted(const std::string& peerId, bool on) const {
@@ -1823,8 +1880,10 @@ void App::sendClipboard(const std::string& peerId, const std::string& text) cons
         impl_->notices.push_back("Pano boş");
         return;
     }
-    impl_->track(airlink_send_clipboard(impl_->node, peerId.c_str(), text.c_str()), OpKind::SendClipboard);
-    impl_->rememberClipboard(peerId, text, false);
+    // Sent by hand: a password goes, marked so.
+    bool secret = text == impl_->lastClipboard && impl_->lastClipboardSensitive;
+    impl_->track(airlink_send_clipboard_marked(impl_->node, peerId.c_str(), text.c_str(), secret), OpKind::SendClipboard);
+    impl_->rememberClipboard(peerId, text, false, secret);
 }
 
 std::vector<FileRecord> App::fileHistory() const {

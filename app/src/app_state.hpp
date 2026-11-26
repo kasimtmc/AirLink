@@ -125,6 +125,7 @@ struct ClipboardItem {
     std::string text;
     int64_t time = 0;  // ms since the epoch
     bool incoming = true;
+    bool sensitive = false;  // a password: shown masked, gone once copied or the panel closes
     bool operator==(const ClipboardItem&) const = default;
 };
 
@@ -328,7 +329,15 @@ public:
     void phoneMediaControl(const std::string& action) const;  // play, pause, toggle, next, previous
     // This device's clipboard as the UI reads it (about once a second): a change goes to the
     // trusted devices that are online.
-    void syncClipboard(const std::string& text) const;
+    // `sensitive`: the clipboard holds a password (its source marked it).
+    void syncClipboard(const std::string& text, bool sensitive) const;
+    // "Şifre gizliliği" (on by default): a copied password goes to trusted devices only after a yes.
+    bool passwordPrivacy() const;
+    void setPasswordPrivacy(bool on) const;
+    bool passwordPending() const;            // a copied password waits for that yes
+    void answerPasswordSend(bool send) const;
+    void dropPasswords() const;              // the history's passwords (the panel closed)
+    void copiedClipboardItem(int64_t id) const;  // copied again from the list: a password then goes
     void setTrusted(const std::string& peerId, bool on) const;
     void removeClipboardItem(int64_t id) const;
     void clearClipboardHistory() const;

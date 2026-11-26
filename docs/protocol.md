@@ -98,7 +98,7 @@ Bluetooth "Numeric Comparison" yönteminin aynısıdır.
 
 | Adım | Yön | Mesaj |
 |---|---|---|
-| 1 | A → B | `clipboard { text }` (en fazla 1 MiB) |
+| 1 | A → B | `clipboard { text, sensitive? }` (en fazla 1 MiB; `sensitive: true` bir şifre: alıcı gizli gösterir ve kısa süre tutar, eski sürümler alanı göndermez) |
 | 2 | B → A | `ack` |
 
 ## 9. Uygulama mesajları

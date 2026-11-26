@@ -63,6 +63,10 @@ pub enum Message {
 
     Clipboard {
         text: String,
+        /// A password (the sender's clipboard marked it so): the receiver hides it and keeps it
+        /// only for a short while. Absent from older peers' messages.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        sensitive: bool,
     },
 
     /// Opens a media stream (on a unidirectional stream): binary frames follow, each

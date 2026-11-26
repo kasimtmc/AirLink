@@ -617,7 +617,7 @@ std::atomic<bool> appForeground{true};
 
 void setAppForeground(bool foreground) { appForeground = foreground; }
 
-void notifyReceived(const std::string& from, const std::vector<std::string>& files, const std::string& text) {
+void notifyReceived(const std::string& from, const std::vector<std::string>& files, const std::string& text, bool secret) {
     if (appForeground) return;
 #if defined(__linux__)
     std::string title, body;
@@ -626,6 +626,9 @@ void notifyReceived(const std::string& from, const std::vector<std::string>& fil
         title = files.size() == 1 ? from + " bir dosya gönderdi" : from + " " + std::to_string(files.size()) + " dosya gönderdi";
         body = name(files[0]);
         if (files.size() > 1) body += " ve " + std::to_string(files.size() - 1) + " dosya daha";
+    } else if (secret) {
+        title = from + " bir şifre gönderdi";
+        body = "Panoya kondu (gizli)";
     } else {
         title = from + " panosunu paylaştı";
         body = text.size() > 240 ? text.substr(0, 240) + "…" : text;
@@ -661,7 +664,48 @@ void notifyReceived(const std::string& from, const std::vector<std::string>& fil
         else if (chosen.starts_with("folder")) showInFolder(first);
     }).detach();
 #else
-    (void)from, (void)files, (void)text;  // TODO(windows): a toast
+    (void)from, (void)files, (void)text, (void)secret;  // TODO(windows): a toast
+#endif
+}
+
+void passwordAnswered() {}  // (notify-send's question stays until it is closed; answering it again does nothing)
+
+bool clipboardMarkedSensitive() {
+#if defined(_WIN32)
+    static const UINT exclude = RegisterClipboardFormatW(L"ExcludeClipboardContentFromMonitorProcessing");
+    return exclude && IsClipboardFormatAvailable(exclude);
+#else
+    return false;  // (Linux: Kompoz's ClipMetadata.isSensitive)
+#endif
+}
+
+void askSendPassword(std::function<void(bool)> answer) {
+#if defined(__linux__)
+    std::thread([answer = std::move(answer)] {
+        const char* args[] = {"notify-send", "--app-name=AirLink", "--icon=airlink", "--urgency=normal",
+                              "--action=send=Gönder", "--action=skip=Gönderme",
+                              "Panoda şifre var", "Güvenilir cihazlarınıza gönderilsin mi?", nullptr};
+        int out[2];
+        if (pipe(out) != 0) return;
+        posix_spawn_file_actions_t actions;
+        posix_spawn_file_actions_init(&actions);
+        posix_spawn_file_actions_adddup2(&actions, out[1], 1);
+        posix_spawn_file_actions_addclose(&actions, out[0]);
+        pid_t pid = 0;
+        bool spawned = posix_spawnp(&pid, "notify-send", &actions, nullptr, const_cast<char* const*>(args), environ) == 0;
+        posix_spawn_file_actions_destroy(&actions);
+        close(out[1]);
+        std::string chosen;
+        char buf[32];
+        ssize_t n;
+        while ((n = read(out[0], buf, sizeof buf)) > 0) chosen.append(buf, size_t(n));
+        close(out[0]);
+        if (spawned) waitpid(pid, nullptr, 0);
+        if (chosen.starts_with("send")) answer(true);
+        else if (chosen.starts_with("skip")) answer(false);
+    }).detach();
+#else
+    (void)answer;  // the app's own dialog asks
 #endif
 }
 

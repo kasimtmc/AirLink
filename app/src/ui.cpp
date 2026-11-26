@@ -335,6 +335,12 @@ static std::string callTypeLabel(const std::string& type) {
 static bool fileExists(const std::string& path) { return airlink::platform::fileExists(path); }
 
 static void openFile(const std::string& path) { airlink::platform::openFile(path); }
+static Clipboard systemClipboard() { return kompoz::clipboard(); }  // (Home's `clipboard` is the text manager)
+// The clipboard holds a password: Kompoz's metadata (Linux: a password manager's hint) or the platform's own mark.
+static bool clipSensitive(const Clipboard& clip) {
+    auto entry = clip.getClipEntry().value;
+    return (entry && entry->clipMetadata.isSensitive) || airlink::platform::clipboardMarkedSensitive();
+}
 static void setAppForeground(bool focused) { airlink::platform::setAppForeground(focused); }
 static void publishStatus(const std::string& status, const std::string& tip, int received) {
     airlink::platform::publishStatus(status, tip, received);
@@ -585,6 +591,7 @@ fun Home() {
     val clipboard = clipboardManager()
     var tab by remember { mutableStateOf(0) }
 
+    val clipEntries = systemClipboard()
     // Received files and text notify only while AirLink's window isn't the focused one.
     val focused = LocalWindowInfo.current.isWindowFocused
     LaunchedEffect(focused) { setAppForeground(focused) }
@@ -595,7 +602,7 @@ fun Home() {
         while (true) {
             app.pump()
             for (text in app.takeIncomingClipboard()) clipboard.setText(text)
-            if (++clipboardTicks % 20 == 0) app.syncClipboard(clipboard.getText())
+            if (++clipboardTicks % 20 == 0) app.syncClipboard(clipboard.getText(), clipSensitive(clipEntries))
             for (message in app.takeNotices()) scope.launch { snackbar.showSnackbar(message) }
             delay(50)
         }
@@ -685,6 +692,17 @@ fun Home() {
         }
     }
 
+    // Password privacy: a copied password goes to trusted devices only after a yes.
+    if (app.passwordPending()) {
+        AlertDialog(
+            onDismissRequest = { app.answerPasswordSend(false) },
+            icon = { Icon(Icons.Filled.Lock, contentDescription = null) },
+            title = { Text("Panoda şifre var") },
+            text = { Text("Kopyaladığınız şifre güvenilir cihazlarınıza gönderilsin mi?") },
+            confirmButton = { TextButton(onClick = { app.answerPasswordSend(true) }) { Text("Gönder") } },
+            dismissButton = { TextButton(onClick = { app.answerPasswordSend(false) }) { Text("Gönderme") } },
+        )
+    }
     IncomingPrompt(app)
     OutgoingPairingDialog(app)
     ShareDialog(app)
@@ -1237,6 +1255,10 @@ fun FileRow(app: App, f: FileRecord, exists: Boolean) {
 @Kompozable
 fun ClipboardScreen(app: App, clipboard: ClipboardManager) {
     val items = app.clipboardHistory()
+    // Passwords go as the list leaves the screen (another tab, the window closed, the app gone).
+    DisposableEffect(Unit) {
+        onDispose { app.dropPasswords() }
+    }
     if (items.isEmpty()) {
         EmptyState(AppIcons.ContentPaste, "Pano geçmişi boş",
                    "Eşleşmiş cihazlarla paylaşılan metinler ve bağlantılar burada görünür.")
@@ -1255,20 +1277,51 @@ fun ClipboardScreen(app: App, clipboard: ClipboardManager) {
 fun ClipboardRow(app: App, item: ClipboardItem, clipboard: ClipboardManager) {
     val cs = MaterialTheme.colorScheme
     val links = uriHandler()
-    val link = firstLink(item.text)
+    val link = if (item.sensitive) "" else firstLink(item.text)
     val peer = app.peerName(item.peerId)
-    Card(modifier = Modifier.fillMaxWidth()) {
+    // A password: masked, on a card of its own color; copying it takes it off the list.
+    Card(modifier = Modifier.fillMaxWidth(),
+         colors = CardDefaults.cardColors(containerColor = if (item.sensitive) cs.tertiaryContainer else cs.surfaceContainerHigh)) {
         Column(modifier = Modifier.fillMaxWidth().padding(start = 16.dp, top = 12.dp, end = 8.dp, bottom = 4.dp)) {
-            Text(if (item.incoming) "$peer cihazından · ${clockTime(item.time)}" else "$peer cihazına · ${clockTime(item.time)}",
-                 style = MaterialTheme.typography.labelMedium, color = cs.primary)
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                if (item.sensitive) {
+                    Icon(Icons.Filled.Lock, contentDescription = null, modifier = Modifier.size(14.dp), tint = cs.onTertiaryContainer)
+                    Spacer(modifier = Modifier.width(6.dp))
+                }
+                Text((if (item.sensitive) "Şifre · " else "") +
+                     (if (item.incoming) "$peer cihazından · ${clockTime(item.time)}" else "$peer cihazına · ${clockTime(item.time)}"),
+                     style = MaterialTheme.typography.labelMedium, color = if (item.sensitive) cs.onTertiaryContainer else cs.primary)
+            }
             Spacer(modifier = Modifier.height(4.dp))
-            Text(item.text, style = MaterialTheme.typography.bodyMedium, maxLines = 6, overflow = TextOverflow.Ellipsis,
-                 modifier = Modifier.padding(end = 8.dp))
+            Text(if (item.sensitive) "••••••••" else item.text, style = MaterialTheme.typography.bodyMedium, maxLines = 6,
+                 overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(end = 8.dp))
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
                 if (link.isNotEmpty()) TextButton(onClick = { links.openUri(link) }) { Text("Bağlantıyı aç") }
-                TextButton(onClick = { clipboard.setText(item.text) }) { Text("Kopyala") }
+                TextButton(onClick = {
+                    clipboard.setText(item.text)
+                    app.copiedClipboardItem(item.id)
+                }) { Text("Kopyala") }
                 TextButton(onClick = { app.removeClipboardItem(item.id) }) { Text("Sil") }
             }
+        }
+    }
+}
+
+// With a trusted device the clipboard goes to it as it changes: a copied password asks first.
+@Kompozable
+fun PasswordPrivacyCard(app: App) {
+    val cs = MaterialTheme.colorScheme
+    OutlinedCard(modifier = Modifier.fillMaxWidth()) {
+        Row(modifier = Modifier.fillMaxWidth().padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+            Icon(Icons.Filled.Lock, contentDescription = null, tint = cs.primary)
+            Spacer(modifier = Modifier.width(12.dp))
+            Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text("Şifre gizliliği", style = MaterialTheme.typography.titleMedium)
+                Text("Açıkken parola yöneticisinden kopyalanan şifreler güvenilir cihazlara kendiliğinden gitmez; \"Panoda şifre var, gönderilsin mi?\" diye sorulur. Kapalıyken şifreler de kendiliğinden gider. Her iki durumda da şifreler pano geçmişinde gizli görünür ve kopyalandıktan, panel ya da uygulama kapandıktan sonra silinir.",
+                     style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant)
+            }
+            Spacer(modifier = Modifier.width(12.dp))
+            Switch(checked = app.passwordPrivacy(), onCheckedChange = { app.setPasswordPrivacy(it) })
         }
     }
 }
@@ -1306,6 +1359,10 @@ fun SettingsScreen(app: App) {
             if (app.canShareSms()) item { SmsAccessCard(app) }
             if (app.canShareCalls()) item { CallAccessCard(app) }
             if (app.canShareScreen()) item { ScreenControlCard(app) }
+        }
+        if (paired.any { it.autoAccept }) {
+            item { SectionTitle("Gizlilik") }
+            item { PasswordPrivacyCard(app) }
         }
         if (features) {
             item { SectionTitle("Özellikler") }
@@ -1506,6 +1563,10 @@ fun TrayPanel(app: App, onOpenApp: () -> Unit) {
                  else if (online.isNotEmpty()) online.first().id else ""
     val focus = remember { FocusRequester() }
     LaunchedEffect(Unit) { focus.requestFocus() }
+    // Passwords in the clipboard history go as the panel closes.
+    DisposableEffect(Unit) {
+        onDispose { app.dropPasswords() }
+    }
     LaunchedEffect(phone) {
         if (phone) {
             app.requestPhoneMedia()
@@ -2827,6 +2888,7 @@ kompoz::Application kompoz::createApplication(int argc, char** argv) {
     // On a computer, closing the window keeps AirLink running in the tray (where there is one).
     // Wide enough for the side rail and a readable list (Kompoz's default is phone-sized).
     return {.title = "AirLink", .width = 880, .height = 820, .content = [] { AirLinkApp(); }, .onCloseRequest = [] {
+                App::get().dropPasswords();  // (the window closes: the clipboard history's passwords go)
                 if (kompoz::isTraySupported()) kompoz::setAppWindowVisible(false);
                 else kompoz::exitApplication();
             }};

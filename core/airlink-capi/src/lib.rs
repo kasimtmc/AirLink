@@ -512,6 +512,20 @@ pub unsafe extern "C" fn airlink_send_clipboard(
     peer_id: *const c_char,
     text: *const c_char,
 ) -> u64 {
+    unsafe { airlink_send_clipboard_marked(node, peer_id, text, false) }
+}
+
+/// As `airlink_send_clipboard`, `sensitive` marking a password.
+///
+/// # Safety
+/// `node` as for `node_ref`; strings valid C strings.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn airlink_send_clipboard_marked(
+    node: *mut AirlinkNode,
+    peer_id: *const c_char,
+    text: *const c_char,
+    sensitive: bool,
+) -> u64 {
     let (Some(n), Some(id), Some(text)) = (
         unsafe { node_ref(node) },
         unsafe { read_str(peer_id) },
@@ -523,7 +537,7 @@ pub unsafe extern "C" fn airlink_send_clipboard(
         let op = n.shared.id();
         let (node, shared) = (n.node.clone(), n.shared.clone());
         n.rt.spawn(async move {
-            let res = node.send_clipboard(&id, &text).await;
+            let res = node.send_clipboard_marked(&id, &text, sensitive).await;
             shared.op_result(op, res);
         });
         op

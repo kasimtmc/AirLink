@@ -160,6 +160,8 @@ pub enum Event {
     ClipboardReceived {
         peer: DeviceInfo,
         text: String,
+        /// A password, as the sender marked it.
+        sensitive: bool,
     },
     /// A paired device began a media stream (`name`, e.g. "screen"): take its frames with
     /// [`Node::take_media`].
@@ -443,11 +445,17 @@ impl Node {
     }
 
     pub async fn send_clipboard(&self, peer_id: &str, text: &str) -> Result<()> {
+        self.send_clipboard_marked(peer_id, text, false).await
+    }
+
+    /// As `send_clipboard`, `sensitive` marking a password (the receiver hides it).
+    pub async fn send_clipboard_marked(&self, peer_id: &str, text: &str, sensitive: bool) -> Result<()> {
         if text.len() > MAX_CLIPBOARD_LEN {
             bail!("clipboard text too large");
         }
         let msg = Message::Clipboard {
             text: text.to_owned(),
+            sensitive,
         };
         match self.inner.request(peer_id, &msg).await? {
             Message::Ack => Ok(()),
@@ -843,13 +851,14 @@ async fn handle_stream(
                 }
             }
         }
-        Message::Clipboard { text } => {
+        Message::Clipboard { text, sensitive } => {
             if text.len() > MAX_CLIPBOARD_LEN {
                 write_msg(&mut send, &Message::error("too_large")).await?;
             } else {
                 inner.emit(Event::ClipboardReceived {
                     peer: peer.clone(),
                     text,
+                    sensitive,
                 });
                 write_msg(&mut send, &Message::Ack).await?;
             }

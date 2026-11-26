@@ -402,3 +402,26 @@ async fn trusted_device_sends_without_a_prompt() {
     let b = node(&tmp.path().join("b"), "Beta", false).await;
     assert!(b.trusted_peers().iter().any(|p| p.id == a_id && p.auto_accept));
 }
+
+#[tokio::test]
+async fn a_password_arrives_marked() {
+    let tmp = tempfile::tempdir().unwrap();
+    let a = node(&tmp.path().join("a"), "Alpha", false).await;
+    let b = node(&tmp.path().join("b"), "Beta", false).await;
+    assert!(pair(&a, &b, true).await);
+    let mut b_events = b.subscribe();
+    a.send_clipboard_marked(&b.info().id, "s3cret", true).await.unwrap();
+    let (text, sensitive) = next_matching(&mut b_events, |e| match e {
+        Event::ClipboardReceived { text, sensitive, .. } => Some((text, sensitive)),
+        _ => None,
+    })
+    .await;
+    assert_eq!((text.as_str(), sensitive), ("s3cret", true));
+    a.send_clipboard(&b.info().id, "plain").await.unwrap();
+    let sensitive = next_matching(&mut b_events, |e| match e {
+        Event::ClipboardReceived { sensitive, .. } => Some(sensitive),
+        _ => None,
+    })
+    .await;
+    assert!(!sensitive);
+}

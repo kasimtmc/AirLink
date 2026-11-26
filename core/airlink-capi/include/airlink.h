@@ -90,6 +90,9 @@ uint64_t airlink_send_files(AirlinkNode* node, const char* peer_id, const char* 
 
 /* Result: op_result. */
 uint64_t airlink_send_clipboard(AirlinkNode* node, const char* peer_id, const char* text);
+/* As airlink_send_clipboard, `sensitive` marking a password: the receiver's clipboard_received
+ * has "sensitive": true (it hides the text and keeps it only briefly). */
+uint64_t airlink_send_clipboard_marked(AirlinkNode* node, const char* peer_id, const char* text, bool sensitive);
 
 /* An app message to a paired device (see docs/protocol.md, app_message): `kind` names it
  * ("notification.posted"...), body_json is any JSON value. Result: op_result. The other side gets

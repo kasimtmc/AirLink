@@ -64,7 +64,16 @@ void notificationAction(const std::string& kind, const std::string& key, const s
 // Files (saved paths) or clipboard text that came from `from` while AirLink isn't in front: a
 // notification of this device's (files: open, show in folder; Android also scans them for the
 // gallery and, the app being away, puts the text on the clipboard itself).
-void notifyReceived(const std::string& from, const std::vector<std::string>& files, const std::string& text);
+void notifyReceived(const std::string& from, const std::vector<std::string>& files, const std::string& text,
+                    bool secret = false);  // a password: not shown, kept off clipboard histories
+// A copied password waits for the user's yes before going to trusted devices (password privacy):
+// desktops ask in a notification too (Send / Don't); `answer` runs on any thread, maybe never.
+void askSendPassword(std::function<void(bool)> answer);
+// The clipboard's source marked it a password, as the platform tells it besides Kompoz's metadata
+// (Windows: ExcludeClipboardContentFromMonitorProcessing; Android: EXTRA_IS_SENSITIVE).
+bool clipboardMarkedSensitive();
+// The password question was answered (in the app): its notification goes (Android).
+void passwordAnswered();
 // The app's window has the focus (desktops): no notifications then.
 void setAppForeground(bool foreground);
 

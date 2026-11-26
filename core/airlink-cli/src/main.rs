@@ -428,7 +428,7 @@ async fn run(cfg: NodeConfig, clipboard_sync: bool, json: bool) -> Result<()> {
                     Event::AppMessage { peer, kind, body } if !json => {
                         println!("✉ {} from {}: {}", kind, peer.name, body);
                     }
-                    Event::ClipboardReceived { peer, text } => {
+                    Event::ClipboardReceived { peer, text, .. } => {
                         #[cfg(feature = "clipboard")]
                         if let Some(c) = &clip {
                             c.set_remote(text.clone());

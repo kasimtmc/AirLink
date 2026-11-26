@@ -297,15 +297,15 @@ class MainActivity : KompozActivity() {
 
         /** Files or clipboard text from a paired device: scanned for the gallery, and, the app being
          *  away, a notification (the text also goes on the clipboard: the app's screen does that otherwise). */
-        @JvmStatic fun notifyReceived(from: String, files: Array<String>, text: String) {
+        @JvmStatic fun notifyReceived(from: String, files: Array<String>, text: String, secret: Boolean) {
             val context = AirLinkService.appContext ?: return
             if (files.isEmpty()) {
                 if (visible || text.isEmpty()) return
                 try {
-                    context.getSystemService(android.content.ClipboardManager::class.java)
-                        ?.setPrimaryClip(android.content.ClipData.newPlainText("AirLink", text))
+                    context.getSystemService(android.content.ClipboardManager::class.java)?.setPrimaryClip(clipOf(text, secret))
                 } catch (_: Exception) { }
-                postReceived(context, "$from panosunu paylaştı", text, null, null)
+                if (secret) postReceived(context, "$from bir şifre gönderdi", "Panoya kondu (gizli)", null, null)
+                else postReceived(context, "$from panosunu paylaştı", text, null, null)
                 return
             }
             val first = files[0]
@@ -316,6 +316,24 @@ class MainActivity : KompozActivity() {
                 val body = if (files.size == 1) name else "$name ve ${files.size - 1} dosya daha"
                 postReceived(context, title, body, uri, mimeOf(first))
             }
+        }
+
+        /** A password is marked sensitive: keyboards and clipboard previews don't show it (Android 13+). */
+        @JvmStatic fun clipOf(text: String, secret: Boolean): android.content.ClipData {
+            val clip = android.content.ClipData.newPlainText("AirLink", text)
+            if (secret) clip.description.extras = android.os.PersistableBundle().apply {
+                putBoolean("android.content.extra.IS_SENSITIVE", true)
+            }
+            return clip
+        }
+
+        /** The clipboard holds a password (its source marked it), read while the app is in front. */
+        @JvmStatic fun clipboardSensitive(): Boolean {
+            val activity = currentActivity ?: return false
+            return try {
+                activity.getSystemService(android.content.ClipboardManager::class.java)?.primaryClipDescription
+                    ?.extras?.getBoolean("android.content.extra.IS_SENSITIVE") == true
+            } catch (_: Exception) { false }
         }
 
         private fun postReceived(context: android.content.Context, title: String, body: String, file: android.net.Uri?, type: String?) {
@@ -362,6 +380,40 @@ class MainActivity : KompozActivity() {
         }
 
         @JvmStatic fun respond(requestId: Long, accept: Boolean) = nativeRespond(requestId, accept)
+
+        private const val PASSWORD_NOTIFICATION = 4900
+
+        /** "Panoda şifre var": the question as a notification too, answered from either. */
+        @JvmStatic fun askSendPassword() {
+            val context = AirLinkService.appContext ?: return
+            val notifications = context.getSystemService(android.app.NotificationManager::class.java) ?: return
+            if (Build.VERSION.SDK_INT >= 26 && notifications.getNotificationChannel(CHANNEL_RECEIVED) == null) {
+                notifications.createNotificationChannel(android.app.NotificationChannel(
+                    CHANNEL_RECEIVED, "Gelen dosyalar ve pano", android.app.NotificationManager.IMPORTANCE_DEFAULT))
+            }
+            fun answer(send: Boolean) = android.app.PendingIntent.getBroadcast(context, if (send) 4901 else 4902,
+                Intent(context, PromptReceiver::class.java).putExtra(PromptReceiver.EXTRA_PASSWORD, send),
+                android.app.PendingIntent.FLAG_IMMUTABLE or android.app.PendingIntent.FLAG_UPDATE_CURRENT)
+            @Suppress("DEPRECATION")
+            val builder = (if (Build.VERSION.SDK_INT >= 26) android.app.Notification.Builder(context, CHANNEL_RECEIVED)
+                           else android.app.Notification.Builder(context))
+                .setSmallIcon(R.drawable.ic_stat_airlink)
+                .setContentTitle("Panoda şifre var")
+                .setContentText("Güvenilir cihazlarınıza gönderilsin mi?")
+                .setAutoCancel(true)
+                .addAction(android.app.Notification.Action.Builder(null, "Gönderme", answer(false)).build())
+                .addAction(android.app.Notification.Action.Builder(null, "Gönder", answer(true)).build())
+            notifications.notify(PASSWORD_NOTIFICATION, builder.build())
+        }
+
+        @JvmStatic fun passwordAnswered() {
+            AirLinkService.appContext?.getSystemService(android.app.NotificationManager::class.java)?.cancel(PASSWORD_NOTIFICATION)
+        }
+
+        @JvmStatic fun answerPassword(send: Boolean) {
+            passwordAnswered()
+            if (nativeReady) nativeAnswerPassword(send)
+        }
         @JvmStatic fun pump() = nativePump()
         @JvmStatic fun adbPair(code: String) = nativeAdbPair(code)
         @JvmStatic fun startHelper(command: String) = nativeStartHelper(command)
@@ -386,5 +438,6 @@ class MainActivity : KompozActivity() {
         @JvmStatic private external fun nativeAdbPair(code: String)
         @JvmStatic private external fun nativeStartHelper(command: String)
         @JvmStatic private external fun nativeRespond(requestId: Long, accept: Boolean)
+        @JvmStatic private external fun nativeAnswerPassword(send: Boolean)
     }
 }

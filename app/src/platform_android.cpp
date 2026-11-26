@@ -311,17 +311,47 @@ void openFile(const std::string& path) { callWithPath(openFileId, path); }
 
 void setAppForeground(bool) {}  // (Android: MainActivity knows)
 
-void notifyReceived(const std::string& from, const std::vector<std::string>& files, const std::string& text) {
+bool clipboardMarkedSensitive() {
+    JNIEnv* e = env();
+    if (!e || !activityClass) return false;
+    static jmethodID method = e->GetStaticMethodID(activityClass, "clipboardSensitive", "()Z");
+    if (!method) {
+        if (e->ExceptionCheck()) e->ExceptionClear();
+        return false;
+    }
+    bool on = e->CallStaticBooleanMethod(activityClass, method);
+    if (e->ExceptionCheck()) e->ExceptionClear(), on = false;
+    return on;
+}
+
+void askSendPassword(std::function<void(bool)>) {
+    // (the app's dialog and this notification answer through App::answerPasswordSend)
     JNIEnv* e = env();
     if (!e || !activityClass) return;
-    static jmethodID method = e->GetStaticMethodID(activityClass, "notifyReceived", "(Ljava/lang/String;[Ljava/lang/String;Ljava/lang/String;)V");
+    static jmethodID method = e->GetStaticMethodID(activityClass, "askSendPassword", "()V");
+    if (method) e->CallStaticVoidMethod(activityClass, method);
+    if (e->ExceptionCheck()) e->ExceptionClear();
+}
+
+void passwordAnswered() {
+    JNIEnv* e = env();
+    if (!e || !activityClass) return;
+    static jmethodID method = e->GetStaticMethodID(activityClass, "passwordAnswered", "()V");
+    if (method) e->CallStaticVoidMethod(activityClass, method);
+    if (e->ExceptionCheck()) e->ExceptionClear();
+}  // (the app's dialog asks: Android reads the clipboard only in front)
+
+void notifyReceived(const std::string& from, const std::vector<std::string>& files, const std::string& text, bool secret) {
+    JNIEnv* e = env();
+    if (!e || !activityClass) return;
+    static jmethodID method = e->GetStaticMethodID(activityClass, "notifyReceived", "(Ljava/lang/String;[Ljava/lang/String;Ljava/lang/String;Z)V");
     if (!method) {
         if (e->ExceptionCheck()) e->ExceptionClear();
         return;
     }
     jobjectArray list = toJava(e, files);
     jstring f = e->NewStringUTF(from.c_str()), t = e->NewStringUTF(text.c_str());
-    e->CallStaticVoidMethod(activityClass, method, f, list, t);
+    e->CallStaticVoidMethod(activityClass, method, f, list, t, jboolean(secret));
     if (e->ExceptionCheck()) e->ExceptionClear();
     e->DeleteLocalRef(f), e->DeleteLocalRef(t), e->DeleteLocalRef(list);
 }
@@ -670,6 +700,10 @@ extern "C" JNIEXPORT void JNICALL Java_com_plyg_airlink_SmsBridge_nativeSendTo(J
 
 extern "C" JNIEXPORT void JNICALL Java_com_plyg_airlink_SmsBridge_nativeBroadcast(JNIEnv* e, jclass, jstring kind, jstring body) {
     airlink::App::get().broadcast(fromJava(e, kind), fromJava(e, body));
+}
+
+extern "C" JNIEXPORT void JNICALL Java_com_plyg_airlink_MainActivity_nativeAnswerPassword(JNIEnv*, jclass, jboolean send) {
+    airlink::App::get().answerPasswordSend(send);  // (a notification's action: on the main thread)
 }
 
 extern "C" JNIEXPORT void JNICALL Java_com_plyg_airlink_MainActivity_nativeRespond(JNIEnv*, jclass, jlong requestId, jboolean accept) {
