@@ -34,6 +34,8 @@ static std::string batteryText(const PhoneBattery& b) {
     return "%" + std::to_string(b.level) + (b.charging ? " · şarj oluyor" : "");
 }
 
+static std::string appVersion() { return AIRLINK_VERSION; }
+
 static void requestBatteryExemption() { airlink::platform::requestBatteryExemption(); }
 static bool launchedAtLogin() { return airlink::platform::launchedAtLogin(); }
 static void openBackgroundAutostartSettings() { airlink::platform::openBackgroundAutostartSettings(); }
@@ -1429,7 +1431,7 @@ fun ThisDeviceCard(me: DeviceInfo) {
             Spacer(modifier = Modifier.width(16.dp))
             Column(modifier = Modifier.weight(1f)) {
                 Text(me.name, style = MaterialTheme.typography.titleLarge, color = cs.onPrimaryContainer)
-                Text("Bu cihaz · ${shortId(me.id)} · port ${me.port}", color = cs.onPrimaryContainer)
+                Text("Bu cihaz · ${shortId(me.id)} · port ${me.port} · sürüm ${appVersion()}", color = cs.onPrimaryContainer)
                 Text("Gelen dosyalar: ${me.downloadDir}", style = MaterialTheme.typography.bodySmall,
                      color = cs.onPrimaryContainer, maxLines = 1, overflow = TextOverflow.Ellipsis)
             }

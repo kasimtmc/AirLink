@@ -551,7 +551,8 @@ bool launchedAtLogin() { return backgroundLaunch; }
 namespace {
 // ~/.config/autostart/dev.airlink.AirLink.desktop (XDG autostart; KDE, GNOME and the others).
 std::filesystem::path autostartFile() {
-    const char* config = std::getenv("XDG_CONFIG_HOME");
+    // (a Flatpak's XDG_CONFIG_HOME is its own, under ~/.var/app: the host's autostart is ~/.config's)
+    const char* config = std::getenv("FLATPAK_ID") ? nullptr : std::getenv("XDG_CONFIG_HOME");
     std::filesystem::path dir = config && *config ? std::filesystem::path(config)
                                                   : std::filesystem::path(std::getenv("HOME") ? std::getenv("HOME") : "") / ".config";
     return dir / "autostart" / "dev.airlink.AirLink.desktop";
@@ -572,15 +573,22 @@ void setStartAtLogin(bool on) {
         std::filesystem::remove(file, ec);
         return;
     }
-    auto exe = std::filesystem::read_symlink("/proc/self/exe", ec);
-    if (ec) return log("autostart: cannot find this binary");
+    // Inside a Flatpak this binary's path is the sandbox's: the host starts it through flatpak.
+    std::string command;
+    if (const char* app = std::getenv("FLATPAK_ID"); app && *app) {
+        command = std::string("flatpak run ") + app;
+    } else {
+        auto exe = std::filesystem::read_symlink("/proc/self/exe", ec);
+        if (ec) return log("autostart: cannot find this binary");
+        command = "\"" + exe.string() + "\"";
+    }
     std::filesystem::create_directories(file.parent_path(), ec);
     std::ofstream out(file, std::ios::trunc);
     out << "[Desktop Entry]\n"
            "Type=Application\n"
            "Name=AirLink\n"
            "Comment=Cihazlar arası bağlantı\n"
-           "Exec=\"" << exe.string() << "\" --background\n"
+           "Exec=" << command << " --background\n"
            "Icon=airlink\n"
            "Terminal=false\n"
            "X-GNOME-Autostart-enabled=true\n"

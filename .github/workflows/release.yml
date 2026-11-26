@@ -1,0 +1,174 @@
+# Release builds: Linux (tar.gz, .deb, AppImage, Flatpak), Windows (installer, portable zip) and
+# Android (APK). A version tag (v0.2.0, matching VERSION) makes a draft pre-release with them; the
+# release is published by hand. Run it from the Actions tab to only build the files.
+#
+# Android signing secrets (without them the APK is unsigned): ANDROID_KEYSTORE_BASE64 (the .jks,
+# base64), ANDROID_KEYSTORE_PASSWORD, ANDROID_KEY_ALIAS, ANDROID_KEY_PASSWORD.
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  linux:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with: { path: AirLink }
+      - id: kompoz
+        run: echo "ref=$(cat AirLink/KOMPOZ_REF)" >> "$GITHUB_OUTPUT"
+      - uses: actions/checkout@v4
+        with: { repository: kasimtmc/kompoz, ref: '${{ steps.kompoz.outputs.ref }}', path: kompoz }
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Packages
+        run: AirLink/scripts/release/linux-deps.sh
+      - name: Kompoz's dependencies
+        run: kompoz/scripts/fetch-deps.sh
+      - name: Build
+        run: AirLink/scripts/release/build-linux.sh
+      - name: Package
+        run: |
+          AirLink/scripts/release/package-linux.sh
+          cp AirLink/dist/AirLink-*-linux-x86_64.tar.gz AirLink/dist/airlink-linux.tar.gz
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux
+          path: |
+            AirLink/dist/*.tar.gz
+            AirLink/dist/*.deb
+            AirLink/dist/*.AppImage
+
+  flatpak:
+    needs: linux
+    runs-on: ubuntu-24.04
+    container:
+      image: ghcr.io/flathub-infra/flatpak-github-actions:freedesktop-25.08
+      options: --privileged
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with: { name: linux, path: dist }
+      - id: version
+        run: echo "version=$(cat VERSION)" >> "$GITHUB_OUTPUT"
+      - uses: flatpak/flatpak-github-actions/flatpak-builder@v6
+        with:
+          manifest-path: app/packaging/linux/flatpak/com.plyg.AirLink.yml
+          bundle: AirLink-${{ steps.version.outputs.version }}-x86_64.flatpak
+          upload-artifact: false
+          cache: false
+      - uses: actions/upload-artifact@v4
+        with: { name: flatpak, path: '*.flatpak' }
+
+  windows:
+    # Ubuntu's MinGW is GCC 13, which Kompoz doesn't build with: Arch's is current.
+    runs-on: ubuntu-24.04
+    container: archlinux:latest
+    steps:
+      - name: Packages
+        run: pacman -Syu --noconfirm --needed git mingw-w64-gcc cmake ninja python rustup curl patch base-devel
+      - uses: actions/checkout@v4
+        with: { path: AirLink }
+      - id: kompoz
+        run: echo "ref=$(cat AirLink/KOMPOZ_REF)" >> "$GITHUB_OUTPUT"
+      - uses: actions/checkout@v4
+        with: { repository: kasimtmc/kompoz, ref: '${{ steps.kompoz.outputs.ref }}', path: kompoz }
+      - name: Rust
+        run: |
+          rustup default stable
+          rustup target add x86_64-pc-windows-gnu
+      - name: Kompoz's dependencies
+        run: kompoz/scripts/fetch-deps.sh
+      - name: Build
+        run: AirLink/scripts/release/build-windows.sh
+      - uses: actions/upload-artifact@v4
+        with: { name: windows-zip, path: AirLink/dist/*.zip }
+
+  windows-installer:
+    needs: windows
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends nsis
+      - uses: actions/download-artifact@v4
+        with: { name: windows-zip, path: dist }
+      - run: scripts/release/windows-installer.sh dist/AirLink-$(cat VERSION)-windows-x64.zip
+      - uses: actions/upload-artifact@v4
+        with: { name: windows-installer, path: dist/*-setup.exe }
+
+  android:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with: { path: AirLink }
+      - id: kompoz
+        run: echo "ref=$(cat AirLink/KOMPOZ_REF)" >> "$GITHUB_OUTPUT"
+      - uses: actions/checkout@v4
+        with: { repository: kasimtmc/kompoz, ref: '${{ steps.kompoz.outputs.ref }}', path: kompoz }
+      - uses: actions/setup-java@v4
+        with: { distribution: temurin, java-version: '21' }
+      - uses: dtolnay/rust-toolchain@stable
+        with: { targets: aarch64-linux-android }
+      - name: NDK, CMake and cargo-ndk
+        run: |
+          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses >/dev/null || true
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "ndk;29.0.14206865" "cmake;4.1.2" "platforms;android-36"
+          cargo install cargo-ndk --locked
+          sudo apt-get update && sudo apt-get install -y --no-install-recommends ninja-build
+      - name: Kompoz's dependencies
+        run: kompoz/scripts/fetch-deps.sh
+      - name: Signing key
+        env:
+          KEYSTORE: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+        run: |
+          if [ -n "$KEYSTORE" ]; then
+            echo "$KEYSTORE" | base64 -d > "$RUNNER_TEMP/airlink.jks"
+            echo "AIRLINK_KEYSTORE=$RUNNER_TEMP/airlink.jks" >> "$GITHUB_ENV"
+          else
+            echo "::warning::No ANDROID_KEYSTORE_BASE64 secret: the APK is unsigned"
+          fi
+      - name: Build
+        working-directory: AirLink/app/android
+        env:
+          AIRLINK_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          AIRLINK_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          AIRLINK_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          ./gradlew assembleRelease --no-daemon
+          version=$(cat ../../VERSION)
+          apk=$(ls app/build/outputs/apk/release/*.apk | head -1)
+          mkdir -p ../../dist
+          case "$apk" in
+            *unsigned*) cp "$apk" "../../dist/AirLink-$version-android-arm64-unsigned.apk" ;;
+            *) cp "$apk" "../../dist/AirLink-$version-android-arm64.apk" ;;
+          esac
+      - uses: actions/upload-artifact@v4
+        with: { name: android, path: AirLink/dist/*.apk }
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [linux, flatpak, windows, windows-installer, android]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with: { path: artifacts }
+      - name: Draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          version=$(cat VERSION)
+          tag=${GITHUB_REF_NAME}
+          [ "$tag" = "v$version" ] || { echo "Tag $tag does not match VERSION $version" >&2; exit 1; }
+          mkdir files
+          find artifacts -type f ! -name airlink-linux.tar.gz -exec cp {} files/ \;
+          (cd files && sha256sum * > SHA256SUMS)
+          notes=docs/releases/$tag.md
+          [ -f "$notes" ] || notes=/dev/null
+          gh release create "$tag" files/* --draft --prerelease --title "AirLink $version" --notes-file "$notes"

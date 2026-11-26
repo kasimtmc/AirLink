@@ -50,7 +50,7 @@ dependencies = [
 
 [[package]]
 name = "airlink-adb"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "libadb",
@@ -61,7 +61,7 @@ dependencies = [
 
 [[package]]
 name = "airlink-capi"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "airlink-adb",
  "airlink-core",
@@ -76,7 +76,7 @@ dependencies = [
 
 [[package]]
 name = "airlink-cli"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "airlink-core",
  "anyhow",
@@ -89,7 +89,7 @@ dependencies = [
 
 [[package]]
 name = "airlink-core"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "directories",
@@ -111,7 +111,7 @@ dependencies = [
 
 [[package]]
 name = "airlink-desktop"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "ashpd",

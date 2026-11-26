@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=AirLink
+GenericName=Device link
+Comment=Linux, Windows ve Android cihazlarınız arasında dosya, pano, bildirim ve arama
+Exec=airlink %F
+Icon=com.plyg.AirLink
+Terminal=false
+Categories=Network;FileTransfer;Utility;
+Keywords=phone;android;share;transfer;clipboard;sms;
+StartupWMClass=airlink

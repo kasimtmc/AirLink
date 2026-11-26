@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>com.plyg.AirLink</id>
+  <name>AirLink</name>
+  <summary>Seamless link between Linux, Windows and Android devices</summary>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>LicenseRef-proprietary=https://github.com/kasimtmc/AirLink/blob/main/LICENSE</project_license>
+  <developer id="com.github.kasimtmc">
+    <name>Kasim</name>
+  </developer>
+  <description>
+    <p>Files, clipboard, notifications, SMS, calls, the phone's screen and its audio between your
+      paired devices, on your own network, with no account and no cloud.</p>
+  </description>
+  <url type="homepage">https://github.com/kasimtmc/AirLink</url>
+  <launchable type="desktop-id">com.plyg.AirLink.desktop</launchable>
+  <content_rating type="oars-1.1"/>
+  <releases>
+    <release version="0.2.0" date="2026-11-26"/>
+  </releases>
+</component>

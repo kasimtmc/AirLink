@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Package the Windows build with ANGLE for VMs and Remote Desktop sessions."""
 
+import sys
 from hashlib import sha256
 from pathlib import Path
 from urllib.request import urlopen
@@ -8,7 +9,8 @@ from zipfile import ZIP_DEFLATED, ZipFile
 
 
 ROOT = Path(__file__).resolve().parents[3]
-BUILD = ROOT / "app/build-windows"
+import os
+BUILD = Path(os.environ.get("AIRLINK_WINDOWS_BUILD", ROOT / "app/build-windows"))
 ANGLE_TAG = "v2.1.28252"
 ANGLE_NAME = f"angle-windows-x64-{ANGLE_TAG}.zip"
 ANGLE_SHA256 = "e57ac5ce6fb20f24dde931b96ade3ddfbbb7518a52cf17811d996a97de6b7ef9"
@@ -31,7 +33,9 @@ def main() -> None:
     if not exe.is_file():
         raise SystemExit(f"Build airlink.exe first: {exe}")
     BUILD.mkdir(parents=True, exist_ok=True)
-    out = BUILD / "AirLink-Windows-ANGLE.zip"
+    # (a release names it with its version: package.py dist/AirLink-0.2.0-windows-x64.zip)
+    out = Path(sys.argv[1]).resolve() if len(sys.argv) > 1 else BUILD / "AirLink-Windows-ANGLE.zip"
+    out.parent.mkdir(parents=True, exist_ok=True)
     with ZipFile(angle_archive()) as angle, ZipFile(out, "w", ZIP_DEFLATED, compresslevel=6) as bundle:
         bundle.write(exe, "AirLink/airlink.exe")
         for folder in ("fonts", "licenses"):

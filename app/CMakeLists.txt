@@ -2,7 +2,9 @@
 #   Desktop:  cmake -S app -B app/build && cmake --build app/build -j && ./app/build/airlink
 #   Android:  app/android (Gradle builds this file as libmain.so)
 cmake_minimum_required(VERSION 3.24)
-project(airlink_app LANGUAGES C CXX)
+# One version for every platform: VERSION at the repository's root (Gradle reads it too).
+file(STRINGS "${CMAKE_CURRENT_LIST_DIR}/../VERSION" AIRLINK_VERSION LIMIT_COUNT 1)
+project(airlink_app VERSION ${AIRLINK_VERSION} LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -94,6 +96,7 @@ else()
     set(AIRLINK_TARGET airlink)
 endif()
 target_include_directories(${AIRLINK_TARGET} PRIVATE src)
+target_compile_definitions(${AIRLINK_TARGET} PRIVATE AIRLINK_VERSION="${AIRLINK_VERSION}")
 # kompoz::app (an OBJECT library with the entry points: main, the activity's JNI methods) is
 # linked straight into the final binary, so the linker keeps them.
 target_link_libraries(${AIRLINK_TARGET} PRIVATE kompoz::app airlink_core)

@@ -7,3 +7,5 @@ build/
 app/build/
 app/build-windows/
 app/android/.kotlin/
+app/build-*/
+/dist/

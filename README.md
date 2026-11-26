@@ -30,6 +30,10 @@ Linux, Windows and Android are tested on real devices, including automatic disco
 
 Phone apps and screen sharing stream H.264 (Android MediaCodec, OpenH264 on the computer) and fall back to JPEG. See [development status](docs/development-status.md) for open items.
 
+## Download
+
+Builds for Linux (AppImage, .deb, Flatpak, tar.gz), Windows (installer, portable zip) and Android (APK) are on the [Releases](https://github.com/kasimtmc/AirLink/releases) page. See [releasing](docs/releasing.md) for how they are made.
+
 ## Layout
 
 ```

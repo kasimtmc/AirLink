@@ -3,7 +3,7 @@ resolver = "3"
 members = ["core/airlink-core", "core/airlink-cli", "core/airlink-capi", "core/airlink-adb", "core/airlink-desktop"]
 
 [workspace.package]
-version = "0.1.0"
+version = "0.2.0"
 edition = "2024"
 license-file = "LICENSE"
 

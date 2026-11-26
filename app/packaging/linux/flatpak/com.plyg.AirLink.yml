@@ -1,0 +1,60 @@
+# AirLink as a Flatpak (experimental), from the release tarball (scripts/release/package-linux.sh):
+#   flatpak-builder --user --install --force-clean build-flatpak app/packaging/linux/flatpak/com.plyg.AirLink.yml
+# The tarball is expected at dist/airlink-linux.tar.gz (the release workflow copies it there).
+#
+# The sandbox limits some features: call audio over Bluetooth (bluetoothctl, pactl and BlueZ's
+# profiles on the host) and the KDE panel widget (it reads a status file outside the sandbox)
+# don't work from the Flatpak; use the AppImage, the .deb or the tarball for those.
+id: com.plyg.AirLink
+runtime: org.freedesktop.Platform
+runtime-version: '25.08'
+sdk: org.freedesktop.Sdk
+command: airlink
+finish-args:
+  - --share=network
+  - --share=ipc
+  - --socket=wayland
+  - --socket=fallback-x11
+  - --socket=pulseaudio
+  - --device=dri
+  # Received files, and files picked to send from anywhere in the home folder.
+  - --filesystem=xdg-download
+  - --filesystem=home:ro
+  # "Start at login": the host's autostart entry.
+  - --filesystem=xdg-config/autostart:create
+  # The screen-cast portal's PipeWire stream (sharing this computer's screen).
+  - --filesystem=xdg-run/pipewire-0
+  - --talk-name=org.freedesktop.Notifications
+  - --talk-name=org.kde.StatusNotifierWatcher
+  - --talk-name=org.freedesktop.FileManager1
+  - --system-talk-name=org.bluez
+modules:
+  # notify-send, which AirLink runs for its notifications (with their buttons).
+  - name: libnotify
+    buildsystem: meson
+    config-opts:
+      - -Dtests=false
+      - -Dintrospection=disabled
+      - -Dgtk_doc=false
+      - -Dman=false
+      - -Ddocbook_docs=disabled
+    sources:
+      - type: archive
+        url: https://download.gnome.org/sources/libnotify/0.8/libnotify-0.8.3.tar.xz
+        sha256: ee8f3ef946156ad3406fdf45feedbdcd932dbd211ab4f16f75eba4f36fb2f6c0
+  - name: airlink
+    buildsystem: simple
+    build-commands:
+      - mkdir -p /app/lib/airlink /app/bin
+      - cp -r airlink fonts licenses LICENSE /app/lib/airlink/
+      - ln -s /app/lib/airlink/airlink /app/bin/airlink
+      - install -Dm644 packaging/airlink.svg /app/share/icons/hicolor/scalable/apps/com.plyg.AirLink.svg
+      - install -Dm644 com.plyg.AirLink.desktop /app/share/applications/com.plyg.AirLink.desktop
+      - install -Dm644 com.plyg.AirLink.metainfo.xml /app/share/metainfo/com.plyg.AirLink.metainfo.xml
+    sources:
+      - type: archive
+        path: ../../../../dist/airlink-linux.tar.gz
+      - type: file
+        path: com.plyg.AirLink.desktop
+      - type: file
+        path: com.plyg.AirLink.metainfo.xml

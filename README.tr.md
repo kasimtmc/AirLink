@@ -30,6 +30,10 @@ Linux, Windows ve Android gerçek cihazlarda denendi; Windows'la otomatik keşif
 
 Telefon uygulamaları ve ekran paylaşımı H.264 ile akar (Android'de MediaCodec, bilgisayarda OpenH264); gerekirse JPEG'e döner. Açık işler için [geliştirme durumu](docs/development-status.md) belgesine bakın.
 
+## İndirme
+
+Linux (AppImage, .deb, Flatpak, tar.gz), Windows (kurulum dosyası, taşınabilir zip) ve Android (APK) derlemeleri [Sürümler](https://github.com/kasimtmc/AirLink/releases) sayfasındadır. Nasıl hazırlandıkları için bkz. [sürüm çıkarma](docs/releasing.md).
+
 ## Yapı
 
 ```

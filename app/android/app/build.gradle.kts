@@ -21,8 +21,11 @@ android {
         applicationId = "com.plyg.airlink"
         minSdk = 24
         targetSdk = 36
-        versionCode = 2
-        versionName = "0.2.0"
+        // VERSION at the repository's root, for every platform; the code grows with it (0.2.0 -> 200).
+        val version = rootProject.file("../../VERSION").readText().trim()
+        val (major, minor, patch) = version.split(".").map { it.takeWhile(Char::isDigit).toInt() }
+        versionCode = major * 10000 + minor * 100 + patch
+        versionName = version
         ndk {
             // Keep the phone APK small; CI/emulator builds can request another ABI explicitly.
             abiFilters += (providers.gradleProperty("airlinkAbi").orNull ?: "arm64-v8a")
@@ -35,6 +38,26 @@ android {
                     "-DKOMPOZ_DIR=${kompozRoot.absolutePath}",
                 )
             }
+        }
+    }
+
+    // Release signing from the environment (CI secrets, or a local keystore): AIRLINK_KEYSTORE (the
+    // .jks file), AIRLINK_KEYSTORE_PASSWORD, AIRLINK_KEY_ALIAS, AIRLINK_KEY_PASSWORD. Without them a
+    // release build is unsigned.
+    val keystore = System.getenv("AIRLINK_KEYSTORE")?.let(::File)?.takeIf { it.isFile }
+    signingConfigs {
+        if (keystore != null) create("release") {
+            storeFile = keystore
+            storePassword = System.getenv("AIRLINK_KEYSTORE_PASSWORD")
+            keyAlias = System.getenv("AIRLINK_KEY_ALIAS")
+            keyPassword = System.getenv("AIRLINK_KEY_PASSWORD") ?: System.getenv("AIRLINK_KEYSTORE_PASSWORD")
+        }
+    }
+    buildTypes {
+        getByName("release") {
+            // The native side reaches Kotlin classes and methods by name (JNI): no shrinking.
+            isMinifyEnabled = false
+            if (keystore != null) signingConfig = signingConfigs.getByName("release")
         }
     }
 
