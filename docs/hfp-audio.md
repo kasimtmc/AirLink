@@ -12,7 +12,7 @@ Android, üçüncü taraf uygulamalara normal telefon görüşmesinin giden/gele
 
 ## Doğrulama durumu
 
-Linux makinede Xiaomi 14 Ultra ile Bluetooth eşleşmesi ve bağlantısı görüldü. Telefonun HFP Audio Gateway hizmeti ilan ediliyor. Gerçek görüşmede kullanıcı gelen sesi bilgisayarda duyduğunu, bilgisayar mikrofonunun karşı tarafa ulaştığını, düğmeyle sesi telefona geri alabildiğini ve görüşme bitince arka planda ses akışı kalmadığını doğruladı. Bekletme/sürdürme ayrıca doğrulanmadı.
+Linux makinede Xiaomi 14 Ultra ile Bluetooth eşleşmesi ve bağlantısı görüldü. Telefonun HFP Audio Gateway hizmeti ilan ediliyor. Gerçek görüşmede gelen sesi bilgisayarda duydum; bilgisayar mikrofonunun karşı tarafa ulaştığını, düğmeyle sesi telefona geri alabildiğimi ve görüşme bitince arka planda ses akışı kalmadığını doğruladım. Bekletme/sürdürme ayrıca doğrulanmadı.
 
 Bu görüşme denemesi önceki masaüstü düğmesiyle yapıldı. Sonraki sürümde aynı HFP köprüsünü
 telefondaki anahtar başlatıyor; bu yeni başlatma yolu gerçek görüşmede ayrıca denenecek.
