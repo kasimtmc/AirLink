@@ -87,6 +87,7 @@ struct App::Impl {
     MutableState<std::vector<PhoneNotification>> phoneNotifications = mutableStateOf(std::vector<PhoneNotification>{});
     MutableState<bool> notificationAccess = mutableStateOf(false);
     MutableState<bool> batteryRestricted = mutableStateOf(false);
+    MutableState<std::vector<PhoneBattery>> phoneBatteries = mutableStateOf(std::vector<PhoneBattery>{});
     MutableState<std::vector<SmsThread>> smsThreads = mutableStateOf(std::vector<SmsThread>{});
     MutableState<std::optional<SmsThread>> smsOpen = mutableStateOf(std::optional<SmsThread>{});
     MutableState<std::vector<SmsMessage>> smsMessages = mutableStateOf(std::vector<SmsMessage>{});
@@ -391,12 +392,23 @@ struct App::Impl {
                                 .paired = p["paired"].boolean(),
                                 .online = p["online"].boolean(),
                                 .autoAccept = p["auto_accept"].boolean()});
+        std::vector<std::string> wasOnline;
         {
             std::lock_guard lock(pickedMutex);
-            onlinePaired.clear();
+            wasOnline.swap(onlinePaired);
             for (const Peer& p : list)
                 if (p.paired && p.online) onlinePaired.push_back(p.id);
         }
+        // A phone that just came online: its battery (it tells the changes itself afterwards).
+        for (const Peer& p : list)
+            if (p.paired && p.online && p.platform == "android" && std::find(wasOnline.begin(), wasOnline.end(), p.id) == wasOnline.end())
+                airlink_send_message(node, p.id.c_str(), "phone.battery_request", "{}");
+        // An offline phone's battery is old news; its ringing too.
+        auto gone = [&](const PhoneBattery& b) {
+            return std::none_of(list.begin(), list.end(), [&](const Peer& p) { return p.id == b.peerId && p.online; });
+        };
+        if (auto batteries = phoneBatteries.peek(); std::any_of(batteries.begin(), batteries.end(), gone))
+            phoneBatteries.update([&](std::vector<PhoneBattery>& all) { std::erase_if(all, gone); });
         auto online = [&](const std::string& id) {
             return std::any_of(list.begin(), list.end(), [&](const Peer& p) { return p.id == id && p.paired && p.online; });
         };
@@ -618,6 +630,7 @@ struct App::Impl {
                                             "calls.log_request", "call.answer", "call.reject", "call.dial", "call.hangup",
                                             "call.hold", "call.mute", "call.route", "call.volume", "call.status_request", "call.dtmf",
                                             "media.state_request", "media.control",
+                                            "phone.battery_request", "phone.find", "phone.find_stop",
                                             "screen.start", "screen.stop", "screen.input",
                                             "apps.list", "apps.open", "apps.close", "apps.input"};
         return std::find(std::begin(kinds), std::end(kinds), kind) != std::end(kinds);
@@ -746,6 +759,17 @@ struct App::Impl {
                 playerBluetoothPeer.clear();
             }
 #endif
+        } else if (kind == "phone.battery" || kind == "phone.find_state") {
+            phoneBatteries.update([&](std::vector<PhoneBattery>& list) {
+                auto it = std::find_if(list.begin(), list.end(), [&](const PhoneBattery& b) { return b.peerId == peerId; });
+                if (it == list.end()) it = list.insert(list.end(), PhoneBattery{.peerId = peerId});
+                if (kind == "phone.battery") {
+                    it->level = int(body["level"].i64());
+                    it->charging = body["charging"].boolean();
+                } else {
+                    it->ringing = body["ringing"].boolean();
+                }
+            });
         } else if (kind == "media.state") {
             PhoneMedia m{.peerId = peerId, .active = body["active"].boolean(), .app = body["app"].str(), .title = body["title"].str(),
                          .artist = body["artist"].str(), .album = body["album"].str(), .playing = body["playing"].boolean(),
@@ -1919,6 +1943,16 @@ void App::clearFileHistory() const {
     impl_->saveFileHistory();
 }
 PhoneMedia App::phoneMedia() const { return impl_->phoneMedia.get(); }
+
+PhoneBattery App::phoneBattery(const std::string& peerId) const {
+    for (const PhoneBattery& b : impl_->phoneBatteries.get())
+        if (b.peerId == peerId) return b;
+    return PhoneBattery{.peerId = peerId};
+}
+
+void App::findPhone(const std::string& peerId, bool ring) const {
+    if (impl_->node) airlink_send_message(impl_->node, peerId.c_str(), ring ? "phone.find" : "phone.find_stop", "{}");
+}
 int App::receivedCount() const { return impl_->receivedCount.get(); }
 App::PanelRequest App::panelRequest() const { return impl_->panelRequest.get(); }
 void App::requestPhoneMedia() const { impl_->phoneAsk("media.state_request", "{}"); }

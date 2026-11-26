@@ -118,6 +118,15 @@ struct PhoneMedia {
     bool operator==(const PhoneMedia&) const = default;
 };
 
+// A paired phone's battery (`phone.battery`), and whether "find my phone" rings it now.
+struct PhoneBattery {
+    std::string peerId;
+    int level = -1;  // percent; -1: not known
+    bool charging = false;
+    bool ringing = false;
+    bool operator==(const PhoneBattery&) const = default;
+};
+
 // Text that went through the clipboard share, newest first (kept while AirLink runs).
 struct ClipboardItem {
     int64_t id = 0;
@@ -321,6 +330,8 @@ public:
     bool deleteFile(int64_t id) const;        // the file from the disk; its card stays, marked deleted
     void clearFileHistory() const;
     PhoneMedia phoneMedia() const;
+    PhoneBattery phoneBattery(const std::string& peerId) const;  // level -1 when not known
+    void findPhone(const std::string& peerId, bool ring) const;  // ring it (through silent mode), or stop
     // Files or clipboard text came from a device: a new count each time (the tray icon blinks).
     int receivedCount() const;
     // The tray panel asked for from outside (the Plasma panel widget): a new serial each time.

@@ -10,6 +10,7 @@ Linux, Windows ve Android cihazlarınız arasında, kendi ağınızda, hesap ve 
 - **SMS**: konuşmaları bilgisayarda okuyun, yeni mesaj yazın ve alıcıyı kişilerinizden seçin.
 - **Aramalar**: gelen aramalar bilgisayarda görünür. Yanıtlayabilir, kapatabilir, bekletebilir ve sessize alabilirsiniz. Hoparlör, Bluetooth ve ahize arasında geçiş yapabilir, sesi ayarlayabilir, arama kaydını ve tuş takımını kullanabilirsiniz.
 - **Telefon sesi**: Eşleşmiş Linux bilgisayara görüşme sesini Bluetooth HFP, oynatıcı sesini Bluetooth A2DP üzerinden aktarın. Ekran paylaşımı sesi Android, Linux ve Windows arasında ayrı akışta taşınır.
+- **Pil ve telefonu bul**: telefonun pil seviyesi ve şarj durumu bilgisayarda görünür; **Telefonu bul** telefonu sessiz kipte bile tam sesle çaldırır.
 - **Ekran**: telefonun ekranı bilgisayarda, dokunma ve kaydırma ile.
 - **Telefon uygulamaları bilgisayarda** (gelişmiş mod): telefonun uygulama listesinden herhangi bir uygulamayı seçip bilgisayarda kendi penceresinde açın. Fare ve klavyeyle kullanabilir, küçültebilir ve kapatabilirsiniz. Telefonun kendi ekranı başka bir şey gösterirken de çalışmaya devam eder.
 

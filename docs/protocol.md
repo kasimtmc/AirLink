@@ -139,6 +139,10 @@ Yalnızca eşleşmiş cihazlar arasında gider. Tanımlı türler:
 | `media.state_request` | PC → telefon | `{}` → `media.state` |
 | `media.state` | telefon → PC | `{ active, app, package, title, artist, album, playing, position, position_at, duration, can_next, can_previous, art }`; çalan medya değişince tüm bilgisayarlara gider. `position_at` ms (epoch), `art` 160 px JPEG (base64) |
 | `media.control` | PC → telefon | `{ action }`: `play`, `pause`, `toggle`, `next`, `previous` |
+| `phone.battery_request` | PC → telefon | `{}` → `phone.battery`; bilgisayar telefon çevrimiçi olunca sorar |
+| `phone.battery` | telefon → PC | `{ level, charging }`; `level` yüzde, seviye ya da şarj durumu değişince tüm bilgisayarlara gider |
+| `phone.find` / `phone.find_stop` | PC → telefon | `{}`: telefon alarm sesini tam alarm sesiyle (sessiz kipte de) ve titreşimle çalar ya da durdurur; en çok bir dakika |
+| `phone.find_state` | telefon → PC | `{ ringing }`; çalma başlayınca ve durunca (telefondaki "Buldum" dahil) tüm bilgisayarlara gider |
 | `call.dial` | PC → telefon | `{ number }` → `call.dial_result { number, ok, error? }` (`no_number`, `no_permission`) |
 | `call.audio_share` | telefon → Linux PC | `{ on, once? }`; `on: true` Linux bilgisayarda yalnızca aktif görüşme sırasında HFP köprüsünü otomatik açar. `once: true` yalnızca sürmekte olan görüşmeye uygulanır. `on: false` otomatiği ve etkin köprüyü kapatır |
 | `screen.start` | PC → telefon | `{ quality, codec? }` (bkz. bölüm 10) → `screen.started { width, height }` veya `screen.stopped { reason }` |

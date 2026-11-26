@@ -10,6 +10,7 @@ A seamless link between your Linux, Windows and Android devices, on your own net
 - **SMS**: read conversations on the computer, write new messages and pick recipients from your contacts.
 - **Calls**: incoming calls show on the computer. You can answer, hang up, hold and mute, switch between speaker, Bluetooth and earpiece, change the volume, and use the call log and dialer.
 - **Phone audio**: share calls over Bluetooth HFP or player audio over Bluetooth A2DP with a paired Linux PC. Screen sharing audio uses its own stream on Android, Linux and Windows.
+- **Battery and find my phone**: the phone's battery level and charging state show on the computer, and **Telefonu bul** (Find my phone) rings it at full volume, even in silent mode.
 - **Screen**: the phone's screen on the computer, with touch and swipe.
 - **Phone apps on the computer** (advanced mode): pick any app from the phone's app list and open it in its own window on the computer. You can use it with mouse and keyboard, minimize it and close it. It keeps running while the phone's own screen does something else.
 

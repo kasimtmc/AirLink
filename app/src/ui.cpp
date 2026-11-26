@@ -28,6 +28,12 @@ static bool needsBackgroundAutostartSettings() { return airlink::platform::needs
 static bool canStartAtLogin() { return airlink::platform::canStartAtLogin(); }
 static bool startAtLogin() { return airlink::platform::startAtLogin(); }
 static void setStartAtLogin(bool on) { airlink::platform::setStartAtLogin(on); }
+// "%85" / "%85 · şarj oluyor"; empty when not known.
+static std::string batteryText(const PhoneBattery& b) {
+    if (b.level < 0) return {};
+    return "%" + std::to_string(b.level) + (b.charging ? " · şarj oluyor" : "");
+}
+
 static void requestBatteryExemption() { airlink::platform::requestBatteryExemption(); }
 static bool launchedAtLogin() { return airlink::platform::launchedAtLogin(); }
 static void openBackgroundAutostartSettings() { airlink::platform::openBackgroundAutostartSettings(); }
@@ -1064,6 +1070,8 @@ fun DeviceList(app: App, clipboard: ClipboardManager, onOpenSettings: () -> Unit
                     onShowScreen = { app.startScreen(peer.id) },
                     onControl = { app.startDesktop(peer.id) },
                     onTrust = { app.setTrusted(peer.id, it) },
+                    battery = app.phoneBattery(peer.id),
+                    onFind = { app.findPhone(peer.id, it) },
                 )
             }
         }
@@ -1843,12 +1851,18 @@ fun TrayDevice(app: App, peer: Peer, copied: List<String>, text: ClipboardManage
                     Box(modifier = Modifier.align(Alignment.TopEnd)) { OnlineDot(true) }
                 }
                 Spacer(modifier = Modifier.width(12.dp))
+                val battery = app.phoneBattery(peer.id)
                 Column(modifier = Modifier.weight(1f)) {
                     Text(peer.name, style = MaterialTheme.typography.titleSmall)
+                    if (battery.level >= 0 && !dragging) BatteryLine(battery)
                     Text(if (dragging) "Göndermek için bırakın" else if (chosen) "Ctrl+V buraya gönderir" else "Dosyaları buraya sürükleyin",
                          style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant)
                 }
                 if (peer.platform == "android") {
+                    IconButton(onClick = { app.findPhone(peer.id, !battery.ringing) }) {
+                        Icon(AppIcons.PhonelinkRing, contentDescription = if (battery.ringing) "Çalmayı durdur" else "Telefonu bul",
+                             tint = if (battery.ringing) cs.primary else cs.onSurfaceVariant)
+                    }
                     IconButton(onClick = {
                             app.startScreen(peer.id)
                             setAppWindowVisible(true)
@@ -2665,6 +2679,19 @@ fun OnlineDot(online: Boolean) {
     Box(modifier = Modifier.size(10.dp).background(color, CircleShape))
 }
 
+// The phone's battery under its name: green while charging, red when low.
+@Kompozable
+fun BatteryLine(battery: PhoneBattery) {
+    val cs = MaterialTheme.colorScheme
+    val tint = if (battery.charging) Color(0xFF2E7D32) else if (battery.level <= 15) cs.error else cs.onSurfaceVariant
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Icon(if (battery.charging) AppIcons.BatteryCharging else AppIcons.Battery, contentDescription = null, tint = tint,
+             modifier = Modifier.size(14.dp))
+        Spacer(modifier = Modifier.width(2.dp))
+        Text(batteryText(battery), style = MaterialTheme.typography.bodySmall, color = tint)
+    }
+}
+
 @Kompozable
 fun PairedPeerCard(
     peer: Peer,
@@ -2675,6 +2702,8 @@ fun PairedPeerCard(
     onShowScreen: () -> Unit,
     onControl: () -> Unit,
     onTrust: (Boolean) -> Unit,
+    battery: PhoneBattery,
+    onFind: (Boolean) -> Unit,
 ) {
     var dragging by remember { mutableStateOf(false) }
     val cs = MaterialTheme.colorScheme
@@ -2714,6 +2743,7 @@ fun PairedPeerCard(
                 Column(modifier = Modifier.weight(1f)) {
                     Text(peer.name, style = MaterialTheme.typography.titleMedium)
                     Text(status, style = MaterialTheme.typography.bodyMedium, color = cs.onSurfaceVariant)
+                    if (peer.online && battery.level >= 0) BatteryLine(battery)
                 }
                 IconButton(onClick = { if (peer.autoAccept) onTrust(false) else confirmTrust = true }) {
                     if (peer.autoAccept) Icon(AppIcons.VerifiedUser, contentDescription = "Güvenilir: geri al", tint = cs.primary)
@@ -2741,6 +2771,9 @@ fun PairedPeerCard(
                 if (isDesktop() && peer.platform == "android") {
                     AssistChip(onClick = onShowScreen, enabled = peer.online, label = { Text("Ekranı göster") },
                                leadingIcon = { Icon(AppIcons.Smartphone, contentDescription = null, modifier = Modifier.size(18.dp)) })
+                    AssistChip(onClick = { onFind(!battery.ringing) }, enabled = peer.online,
+                               label = { Text(if (battery.ringing) "Çalmayı durdur" else "Telefonu bul") },
+                               leadingIcon = { Icon(AppIcons.PhonelinkRing, contentDescription = null, modifier = Modifier.size(18.dp)) })
                 }
                 if (!isDesktop() && peer.platform != "android") {
                     AssistChip(onClick = onControl, enabled = peer.online, label = { Text("Kontrol et") },

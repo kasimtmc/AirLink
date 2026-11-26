@@ -45,6 +45,7 @@ object SmsBridge {
                     }
                     kind.startsWith("call") -> CallBridge.handle(context, peerId, kind, request)
                     kind.startsWith("media.") -> PhoneMedia.handle(peerId, kind, request)
+                    kind.startsWith("phone.") -> PhoneStatus.handle(peerId, kind)
                     kind == "contacts.search" -> reply(peerId, "contacts.results", searchContacts(context, request.optString("query")))
                     kind == "contacts.list" -> reply(peerId, "contacts.page", listContacts(context,
                         request.optString("query"), request.optInt("offset").coerceAtLeast(0)))

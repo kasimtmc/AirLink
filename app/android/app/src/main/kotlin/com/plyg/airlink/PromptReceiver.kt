@@ -8,6 +8,10 @@ import android.content.Intent
 /** Answers the core when the user accepts or declines a request notification. */
 class PromptReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
+        if (intent.action == PhoneStatus.ACTION_FIND_STOP) {  // "Buldum" (or the notification tapped)
+            PhoneStatus.stopRinging()
+            return
+        }
         if (intent.hasExtra(EXTRA_PASSWORD)) {  // "Panoda şifre var": send it to the trusted devices or not
             MainActivity.answerPassword(intent.getBooleanExtra(EXTRA_PASSWORD, false))
             return
