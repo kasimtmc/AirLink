@@ -4,6 +4,7 @@
 
 #include <cstdio>
 #include <cstdlib>
+#include <atomic>
 #include <cctype>
 #include <cstring>
 #include <filesystem>
@@ -547,20 +548,20 @@ std::string statusPath() {
 }
 }  // namespace
 
-void publishStatus(const std::string& status, const std::string& tooltip) {
+void publishStatus(const std::string& status, const std::string& tooltip, int received) {
     static const std::string path = statusPath();
     if (path.empty()) return;
     static bool cleanup = (std::atexit([] { std::remove(statusPath().c_str()); }), true);
     (void)cleanup;
     std::string temp = path + ".tmp";
     if (FILE* f = std::fopen(temp.c_str(), "w")) {
-        std::fprintf(f, "%s\n%s\n", status.c_str(), tooltip.c_str());
+        std::fprintf(f, "%s\n%s\n%d\n", status.c_str(), tooltip.c_str(), received);
         std::fclose(f);
         std::rename(temp.c_str(), path.c_str());
     }
 }
 #else
-void publishStatus(const std::string&, const std::string&) {}
+void publishStatus(const std::string&, const std::string&, int) {}
 #endif
 
 std::optional<std::pair<int, int>> takePanelRequest() {
@@ -609,6 +610,60 @@ bool canShareNotifications() { return false; }
 bool notificationAccessGranted() { return false; }
 void openNotificationAccessSettings() {}
 void notificationAction(const std::string&, const std::string&, const std::string&) {}
+
+namespace {
+std::atomic<bool> appForeground{true};
+}  // namespace
+
+void setAppForeground(bool foreground) { appForeground = foreground; }
+
+void notifyReceived(const std::string& from, const std::vector<std::string>& files, const std::string& text) {
+    if (appForeground) return;
+#if defined(__linux__)
+    std::string title, body;
+    if (!files.empty()) {
+        auto name = [](const std::string& p) { auto s = p.find_last_of('/'); return s == std::string::npos ? p : p.substr(s + 1); };
+        title = files.size() == 1 ? from + " bir dosya gönderdi" : from + " " + std::to_string(files.size()) + " dosya gönderdi";
+        body = name(files[0]);
+        if (files.size() > 1) body += " ve " + std::to_string(files.size() - 1) + " dosya daha";
+    } else {
+        title = from + " panosunu paylaştı";
+        body = text.size() > 240 ? text.substr(0, 240) + "…" : text;
+    }
+    std::string first = files.empty() ? std::string() : files[0];
+    // notify-send waits for the user's choice and prints it: open the file or its folder.
+    std::thread([title, body, first] {
+        std::vector<std::string> argv = {"notify-send", "--app-name=AirLink", "--icon=airlink", title, body};
+        if (!first.empty()) {
+            argv.push_back("--action=open=Aç");
+            argv.push_back("--action=folder=Klasörde göster");
+        }
+        std::vector<char*> args;
+        for (auto& a : argv) args.push_back(a.data());
+        args.push_back(nullptr);
+        int out[2];
+        if (pipe(out) != 0) return;
+        posix_spawn_file_actions_t actions;
+        posix_spawn_file_actions_init(&actions);
+        posix_spawn_file_actions_adddup2(&actions, out[1], 1);
+        posix_spawn_file_actions_addclose(&actions, out[0]);
+        pid_t pid = 0;
+        bool spawned = posix_spawnp(&pid, "notify-send", &actions, nullptr, args.data(), environ) == 0;
+        posix_spawn_file_actions_destroy(&actions);
+        close(out[1]);
+        std::string chosen;
+        char buf[64];
+        ssize_t n;
+        while ((n = read(out[0], buf, sizeof buf)) > 0) chosen.append(buf, size_t(n));
+        close(out[0]);
+        if (spawned) waitpid(pid, nullptr, 0);
+        if (chosen.starts_with("open")) openFile(first);
+        else if (chosen.starts_with("folder")) showInFolder(first);
+    }).detach();
+#else
+    (void)from, (void)files, (void)text;  // TODO(windows): a toast
+#endif
+}
 
 void showDesktopNotification(const std::string& title, const std::string& body) {
 #if defined(__linux__)

@@ -292,6 +292,64 @@ class MainActivity : KompozActivity() {
             return true
         }
 
+        private const val CHANNEL_RECEIVED = "received"
+        private var receivedId = 5000
+
+        /** Files or clipboard text from a paired device: scanned for the gallery, and, the app being
+         *  away, a notification (the text also goes on the clipboard: the app's screen does that otherwise). */
+        @JvmStatic fun notifyReceived(from: String, files: Array<String>, text: String) {
+            val context = AirLinkService.appContext ?: return
+            if (files.isEmpty()) {
+                if (visible || text.isEmpty()) return
+                try {
+                    context.getSystemService(android.content.ClipboardManager::class.java)
+                        ?.setPrimaryClip(android.content.ClipData.newPlainText("AirLink", text))
+                } catch (_: Exception) { }
+                postReceived(context, "$from panosunu paylaştı", text, null, null)
+                return
+            }
+            val first = files[0]
+            MediaScannerConnection.scanFile(context, files, null) { path, uri ->
+                if (path != first || visible) return@scanFile
+                val title = if (files.size == 1) "$from bir dosya gönderdi" else "$from ${files.size} dosya gönderdi"
+                val name = first.substringAfterLast('/')
+                val body = if (files.size == 1) name else "$name ve ${files.size - 1} dosya daha"
+                postReceived(context, title, body, uri, mimeOf(first))
+            }
+        }
+
+        private fun postReceived(context: android.content.Context, title: String, body: String, file: android.net.Uri?, type: String?) {
+            val notifications = context.getSystemService(android.app.NotificationManager::class.java) ?: return
+            if (Build.VERSION.SDK_INT >= 26 && notifications.getNotificationChannel(CHANNEL_RECEIVED) == null) {
+                notifications.createNotificationChannel(android.app.NotificationChannel(
+                    CHANNEL_RECEIVED, "Gelen dosyalar ve pano", android.app.NotificationManager.IMPORTANCE_DEFAULT))
+            }
+            val id = receivedId++
+            val flags = android.app.PendingIntent.FLAG_IMMUTABLE or android.app.PendingIntent.FLAG_UPDATE_CURRENT
+            val open = android.app.PendingIntent.getActivity(context, id,
+                Intent(context, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK), flags)
+            @Suppress("DEPRECATION")
+            val builder = (if (Build.VERSION.SDK_INT >= 26) android.app.Notification.Builder(context, CHANNEL_RECEIVED)
+                           else android.app.Notification.Builder(context))
+                .setSmallIcon(R.drawable.ic_stat_airlink)
+                .setContentTitle(title)
+                .setContentText(body)
+                .setStyle(android.app.Notification.BigTextStyle().bigText(body))
+                .setContentIntent(open)
+                .setAutoCancel(true)
+            if (file != null) {
+                val view = Intent(Intent.ACTION_VIEW).setDataAndType(file, type)
+                    .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK)
+                builder.addAction(android.app.Notification.Action.Builder(null, "Aç",
+                    android.app.PendingIntent.getActivity(context, id * 2, view, flags)).build())
+                val send = Intent.createChooser(Intent(Intent.ACTION_SEND).setType(type).putExtra(Intent.EXTRA_STREAM, file)
+                    .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION), null).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                builder.addAction(android.app.Notification.Action.Builder(null, "Paylaş",
+                    android.app.PendingIntent.getActivity(context, id * 2 + 1, send, flags)).build())
+            }
+            notifications.notify(id, builder.build())
+        }
+
         @JvmStatic fun chooseMediaAudioPlayers() {
             currentActivity?.let { activity -> activity.runOnUiThread { PlayerBluetoothAudio.choosePlayers(activity) } }
         }

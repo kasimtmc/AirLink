@@ -319,6 +319,8 @@ public:
     bool deleteFile(int64_t id) const;        // the file from the disk; its card stays, marked deleted
     void clearFileHistory() const;
     PhoneMedia phoneMedia() const;
+    // Files or clipboard text came from a device: a new count each time (the tray icon blinks).
+    int receivedCount() const;
     // The tray panel asked for from outside (the Plasma panel widget): a new serial each time.
     struct PanelRequest { int serial = 0, x = 0, y = 0; bool operator==(const PanelRequest&) const = default; };
     PanelRequest panelRequest() const;

@@ -41,9 +41,10 @@ void setShareHandler(std::function<void(std::vector<std::string>)> handler);
 // `airlink --panel X Y` (the Plasma panel widget's click, at that screen point): the tray panel
 // asked for there, taken once by the app's loop. Linux desktops only; none elsewhere.
 std::optional<std::pair<int, int>> takePanelRequest();
-// What the tray icon shows (starting, connected, nodevices, paused, error) and its tooltip, for the
-// Plasma panel widget: $XDG_RUNTIME_DIR/airlink.status, gone as AirLink ends. Linux only.
-void publishStatus(const std::string& status, const std::string& tooltip);
+// What the tray icon shows (starting, connected, nodevices, paused, error), its tooltip and how many
+// times something was received (the widget blinks as it changes), for the Plasma panel widget:
+// $XDG_RUNTIME_DIR/airlink.status, gone as AirLink ends. Linux only.
+void publishStatus(const std::string& status, const std::string& tooltip, int received);
 
 // The core started: Android hooks its background notifications to it. `node` is an AirlinkNode*.
 void nodeStarted(void* node);
@@ -59,6 +60,13 @@ void openNotificationAccessSettings();
 // What a paired computer asked of one of this phone's notifications: kind "notification.dismiss"
 // or "notification.reply" (with `text`).
 void notificationAction(const std::string& kind, const std::string& key, const std::string& text);
+
+// Files (saved paths) or clipboard text that came from `from` while AirLink isn't in front: a
+// notification of this device's (files: open, show in folder; Android also scans them for the
+// gallery and, the app being away, puts the text on the clipboard itself).
+void notifyReceived(const std::string& from, const std::vector<std::string>& files, const std::string& text);
+// The app's window has the focus (desktops): no notifications then.
+void setAppForeground(bool foreground);
 
 // Shows a notification of this computer's desktop (a phone's notification mirrored here).
 void showDesktopNotification(const std::string& title, const std::string& body);

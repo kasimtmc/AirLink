@@ -13,6 +13,10 @@ PlasmoidItem {
     // the tooltip; no file: AirLink isn't running).
     property string state: "off"
     property string detail: "AirLink çalışmıyor · tıklayınca başlar"
+    // The third line counts what came (files, clipboard text): a change blinks the icon purple.
+    property int received: -1
+    property bool flash: false
+    property int flashes: 0
     readonly property color stateColor: ({
         "connected": "#16A34A", "nodevices": "#D97706", "paused": "#6B7280", "error": "#DC2626", "starting": "#2563EB"
     })[state] ?? "#6B7280"
@@ -34,7 +38,7 @@ PlasmoidItem {
             width: Math.min(parent.width, parent.height) * 0.92
             height: width
             radius: width / 2
-            color: root.stateColor
+            color: root.flash ? "#9333EA" : root.stateColor
             opacity: root.state === "off" ? 0.6 : (area.containsMouse ? 1 : 0.95)
             Image {
                 anchors.centerIn: parent
@@ -61,14 +65,35 @@ PlasmoidItem {
         Layout.minimumHeight: 1
     }
 
+    Timer {
+        id: blink
+        interval: 350
+        repeat: true
+        onTriggered: {
+            root.flash = !root.flash
+            if (--root.flashes <= 0) {
+                root.flash = false
+                stop()
+            }
+        }
+    }
+
     P5Support.DataSource {
         id: status
         engine: "executable"
         connectedSources: ["cat \"$XDG_RUNTIME_DIR/airlink.status\" 2>/dev/null"]
-        interval: 2000
+        interval: 1000
         onNewData: (source, data) => {
             const lines = (data["stdout"] || "").split("\n")
             root.state = lines[0] ? lines[0] : "off"
+            const count = parseInt(lines[2] || "")
+            if (!isNaN(count)) {
+                if (root.received >= 0 && count > root.received) {
+                    root.flashes = 6
+                    blink.restart()
+                }
+                root.received = count
+            }
             root.detail = lines[0] ? (lines[1] || "AirLink") : "AirLink çalışmıyor · tıklayınca başlar"
         }
     }

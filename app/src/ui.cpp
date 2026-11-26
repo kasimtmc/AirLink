@@ -27,7 +27,7 @@ static void openDownloads(const std::string& path) { airlink::platform::openFold
 static bool needsBackgroundAutostartSettings() { return airlink::platform::needsBackgroundAutostartSettings(); }
 static void openBackgroundAutostartSettings() { airlink::platform::openBackgroundAutostartSettings(); }
 
-enum class TrayIconStatus { Starting, Connected, NoDevices, Paused, Error };
+enum class TrayIconStatus { Starting, Connected, NoDevices, Paused, Error, Received };
 
 // Preserve the white link mark and the disc's soft edge while tinting its blue background.
 static ImageBitmap statusTrayIcon(TrayIconStatus status) {
@@ -39,6 +39,7 @@ static ImageBitmap statusTrayIcon(TrayIconStatus status) {
     case TrayIconStatus::NoDevices: color = {217, 119, 6}; break;
     case TrayIconStatus::Paused: color = {107, 114, 128}; break;
     case TrayIconStatus::Error: color = {220, 38, 38}; break;
+    case TrayIconStatus::Received: color = {147, 51, 234}; break;  // a blink: something came
     case TrayIconStatus::Starting: break;
     }
     std::vector<uint8_t> rgba(base.pixels(), base.pixels() + size_t(base.width()) * size_t(base.height()) * 4);
@@ -334,7 +335,10 @@ static std::string callTypeLabel(const std::string& type) {
 static bool fileExists(const std::string& path) { return airlink::platform::fileExists(path); }
 
 static void openFile(const std::string& path) { airlink::platform::openFile(path); }
-static void publishStatus(const std::string& status, const std::string& tip) { airlink::platform::publishStatus(status, tip); }
+static void setAppForeground(bool focused) { airlink::platform::setAppForeground(focused); }
+static void publishStatus(const std::string& status, const std::string& tip, int received) {
+    airlink::platform::publishStatus(status, tip, received);
+}
 static void showInFolder(const std::string& path) { airlink::platform::showInFolder(path); }
 static void shareWithApps(const std::string& path) { airlink::platform::shareWithApps(path); }
 
@@ -481,7 +485,20 @@ fun AirLinkTray(app: App) {
     val status = if (paused) TrayIconStatus.Paused else if (app.startError().isNotEmpty() || app.recentError()) TrayIconStatus.Error
                  else if (!app.ready()) TrayIconStatus.Starting else if (online.isEmpty()) TrayIconStatus.NoDevices
                  else TrayIconStatus.Connected
-    val icon = remember(status) { statusTrayIcon(status) }
+    // Something came (files, clipboard text): the icon blinks purple a few times.
+    val received = app.receivedCount()
+    var flash by remember { mutableStateOf(false) }
+    LaunchedEffect(received) {
+        if (received > 0) {
+            for (i in 0 until 6) {
+                flash = !flash
+                delay(350)
+            }
+            flash = false
+        }
+    }
+    val shown = if (flash) TrayIconStatus.Received else status
+    val icon = remember(shown) { statusTrayIcon(shown) }
     val tip = if (paused) "AirLink · paylaşım duraklatıldı" else if (status == TrayIconStatus.Error) "AirLink · işlem hatası"
               else if (status == TrayIconStatus.Starting) "AirLink · başlatılıyor"
               else if (online.isEmpty()) "AirLink · bağlı cihaz yok" else "AirLink · ${online.size} cihaz bağlı"
@@ -493,7 +510,7 @@ fun AirLinkTray(app: App) {
         TrayIconStatus.Error -> "error"
         else -> "starting"
     }
-    LaunchedEffect(statusName, tip) { publishStatus(statusName, tip) }
+    LaunchedEffect(statusName, tip, received) { publishStatus(statusName, tip, received) }
     // A click on the icon opens the panel there; a click while it is open closes it (the panel loses
     // the focus first, then the click comes: one right after the panel closed is that click).
     var panel by remember { mutableStateOf<WindowPopup?>(null) }
@@ -567,6 +584,10 @@ fun Home() {
     val scope = rememberCoroutineScope()
     val clipboard = clipboardManager()
     var tab by remember { mutableStateOf(0) }
+
+    // Received files and text notify only while AirLink's window isn't the focused one.
+    val focused = LocalWindowInfo.current.isWindowFocused
+    LaunchedEffect(focused) { setAppForeground(focused) }
 
     // The core's events, applied on the UI thread.
     LaunchedEffect(Unit) {

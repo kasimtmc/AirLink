@@ -209,6 +209,7 @@ struct App::Impl {
     std::vector<std::string> incomingClipboard;
     MutableState<std::vector<ClipboardItem>> clipboardHistory = mutableStateOf(std::vector<ClipboardItem>{});
     MutableState<PhoneMedia> phoneMedia = mutableStateOf(PhoneMedia{});
+    MutableState<int> receivedCount = mutableStateOf(0);
     // The Files tab's list, newest first, in <data dir>/file-history.json.
     MutableState<std::vector<FileRecord>> fileHistory = mutableStateOf(std::vector<FileRecord>{});
     int64_t nextFileId = 1;
@@ -484,7 +485,11 @@ struct App::Impl {
             });
             notices.push_back(std::to_string(files.size()) + (incoming ? " dosya alındı" : " dosya gönderildi"));
             recordFiles(e["peer_id"].str(), files, incoming);
-            if (incoming) platform::filesReceived(files);
+            if (incoming) {
+                platform::filesReceived(files);
+                platform::notifyReceived(peerNameOf(e["peer_id"].str()), files, {});
+                receivedCount.set(receivedCount.peek() + 1);
+            }
         } else if (kind == "transfer_failed") {
             markRecentError();
             updateTransfer(e["transfer_id"].str(), e["peer_id"].str(), e["direction"].str() == "incoming", [&](Transfer& t) {
@@ -518,6 +523,8 @@ struct App::Impl {
             incomingClipboard.push_back(e["text"].str());
             rememberClipboard(e["peer"]["id"].str(), e["text"].str(), true);
             notices.push_back(e["peer"]["name"].str() + " panosunu paylaştı");
+            platform::notifyReceived(e["peer"]["name"].str(), {}, e["text"].str());
+            receivedCount.set(receivedCount.peek() + 1);
         } else if (kind == "pairing_code") {
             ops.erase(e["op"].u64());
             outgoing.set(OutgoingPairing{.pairing = e["pairing"].u64(), .peerName = e["peer"]["name"].str(), .code = e["code"].str()});
@@ -1850,6 +1857,7 @@ void App::clearFileHistory() const {
     impl_->saveFileHistory();
 }
 PhoneMedia App::phoneMedia() const { return impl_->phoneMedia.get(); }
+int App::receivedCount() const { return impl_->receivedCount.get(); }
 App::PanelRequest App::panelRequest() const { return impl_->panelRequest.get(); }
 void App::requestPhoneMedia() const { impl_->phoneAsk("media.state_request", "{}"); }
 void App::phoneMediaControl(const std::string& action) const {

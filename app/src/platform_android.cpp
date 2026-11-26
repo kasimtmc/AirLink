@@ -117,7 +117,7 @@ void stageUris(const std::vector<std::string>& uris, std::function<void(std::vec
 void handleLaunch(int, char**) {}  // Android: shares come as intents (MainActivity)
 
 std::optional<std::pair<int, int>> takePanelRequest() { return std::nullopt; }
-void publishStatus(const std::string&, const std::string&) {}
+void publishStatus(const std::string&, const std::string&, int) {}
 
 void setShareHandler(std::function<void(std::vector<std::string>)> handler) {
     std::vector<std::string> early;
@@ -308,6 +308,23 @@ void callWithPath(jmethodID method, const std::string& path) {
 }  // namespace
 
 void openFile(const std::string& path) { callWithPath(openFileId, path); }
+
+void setAppForeground(bool) {}  // (Android: MainActivity knows)
+
+void notifyReceived(const std::string& from, const std::vector<std::string>& files, const std::string& text) {
+    JNIEnv* e = env();
+    if (!e || !activityClass) return;
+    static jmethodID method = e->GetStaticMethodID(activityClass, "notifyReceived", "(Ljava/lang/String;[Ljava/lang/String;Ljava/lang/String;)V");
+    if (!method) {
+        if (e->ExceptionCheck()) e->ExceptionClear();
+        return;
+    }
+    jobjectArray list = toJava(e, files);
+    jstring f = e->NewStringUTF(from.c_str()), t = e->NewStringUTF(text.c_str());
+    e->CallStaticVoidMethod(activityClass, method, f, list, t);
+    if (e->ExceptionCheck()) e->ExceptionClear();
+    e->DeleteLocalRef(f), e->DeleteLocalRef(t), e->DeleteLocalRef(list);
+}
 
 bool fileExists(const std::string& path) {
     if (!path.starts_with("content://")) {
