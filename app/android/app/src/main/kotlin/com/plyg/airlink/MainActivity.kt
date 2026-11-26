@@ -122,6 +122,10 @@ class MainActivity : KompozActivity() {
 
     private fun stage(uris: List<Uri>, share: Boolean) {
         Thread({
+            // Picked documents stay readable after a restart, for the Files tab's open and share.
+            if (!share) for (uri in uris) {
+                try { contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION) } catch (_: Exception) { }
+            }
             val result = Staging.copy(this, uris).toTypedArray()
             runOnUiThread { if (share) nativeShared(result) else nativeFilesPicked(result) }
         }, "airlink-pick").start()
@@ -223,8 +227,10 @@ class MainActivity : KompozActivity() {
         @JvmStatic fun requestFlingMedia() {
             currentActivity?.let { activity -> activity.runOnUiThread { activity.requestPermissions(FLING_MEDIA, 3) } }
         }
-        /** A file of the Files tab as MediaStore has it (AirLink's received files are scanned there). */
+        /** A file of the Files tab as MediaStore has it (AirLink's received files are scanned there); a sent
+         *  one is recorded by its own content URI already. */
         private fun contentUri(path: String): android.net.Uri? {
+            if (path.startsWith("content://")) return android.net.Uri.parse(path)
             val context = AirLinkService.appContext ?: currentActivity ?: return null
             val files = android.provider.MediaStore.Files.getContentUri("external")
             return try {
@@ -236,8 +242,21 @@ class MainActivity : KompozActivity() {
             } catch (_: Exception) { null }
         }
 
-        private fun mimeOf(path: String): String =
-            android.webkit.MimeTypeMap.getSingleton().getMimeTypeFromExtension(path.substringAfterLast('.', "").lowercase()) ?: "*/*"
+        private fun mimeOf(path: String): String {
+            if (path.startsWith("content://")) {
+                val context = AirLinkService.appContext ?: currentActivity
+                context?.contentResolver?.getType(android.net.Uri.parse(path))?.let { return it }
+            }
+            return android.webkit.MimeTypeMap.getSingleton().getMimeTypeFromExtension(path.substringAfterLast('.', "").lowercase()) ?: "*/*"
+        }
+
+        /** A content URI of the Files tab can still be read (the file is there, its grant holds). */
+        @JvmStatic fun uriReadable(uri: String): Boolean {
+            val context = AirLinkService.appContext ?: currentActivity ?: return false
+            return try {
+                context.contentResolver.openFileDescriptor(android.net.Uri.parse(uri), "r")?.use { true } ?: false
+            } catch (_: Exception) { false }
+        }
 
         @JvmStatic fun openFile(path: String) {
             val activity = currentActivity ?: return

@@ -8,6 +8,7 @@
 #include <jni.h>
 
 #include <mutex>
+#include <filesystem>
 #include <string>
 
 namespace airlink::platform {
@@ -34,7 +35,9 @@ jmethodID screenControlOn = nullptr, screenControlSettings = nullptr;
 jmethodID backgroundAutostartNeeded = nullptr, backgroundAutostartSettings = nullptr;
 jmethodID flingAvailableId = nullptr, flingEnabledId = nullptr, setFlingEnabledId = nullptr;
 jmethodID flingMediaGrantedId = nullptr, requestFlingMediaId = nullptr;
-jmethodID openFileId = nullptr, showInFolderId = nullptr, shareWithAppsId = nullptr;
+jmethodID openFileId = nullptr, showInFolderId = nullptr, shareWithAppsId = nullptr, uriReadableId = nullptr;
+jclass stagingClass = nullptr;
+jmethodID stagingOriginId = nullptr, stagingReleaseId = nullptr;
 jclass adbPairingClass = nullptr;
 jmethodID adbStart = nullptr, adbDone = nullptr;
 jclass appStreamsClass = nullptr;
@@ -305,6 +308,36 @@ void callWithPath(jmethodID method, const std::string& path) {
 }  // namespace
 
 void openFile(const std::string& path) { callWithPath(openFileId, path); }
+
+bool fileExists(const std::string& path) {
+    if (!path.starts_with("content://")) {
+        std::error_code ec;
+        return std::filesystem::exists(std::filesystem::path(path), ec);
+    }
+    JNIEnv* e = env();
+    if (!e || !activityClass || !uriReadableId) return false;
+    jstring p = e->NewStringUTF(path.c_str());
+    bool ok = e->CallStaticBooleanMethod(activityClass, uriReadableId, p);
+    e->DeleteLocalRef(p);
+    if (e->ExceptionCheck()) e->ExceptionClear(), ok = false;
+    return ok;
+}
+
+std::pair<std::string, std::string> takeSentOriginal(const std::string& path) {
+    JNIEnv* e = env();
+    if (!e || !stagingClass || !stagingOriginId || !stagingReleaseId) return {};
+    jstring p = e->NewStringUTF(path.c_str());
+    auto origin = static_cast<jstring>(e->CallStaticObjectMethod(stagingClass, stagingOriginId, p));
+    std::string text = origin ? fromJava(e, origin) : std::string();
+    if (origin) e->DeleteLocalRef(origin);
+    if (e->ExceptionCheck()) e->ExceptionClear();
+    if (!text.empty()) e->CallStaticVoidMethod(stagingClass, stagingReleaseId, p);
+    if (e->ExceptionCheck()) e->ExceptionClear();
+    e->DeleteLocalRef(p);
+    auto newline = text.find('\n');
+    if (newline == std::string::npos) return {};
+    return {text.substr(0, newline), text.substr(newline + 1)};
+}
 void showInFolder(const std::string& path) { callWithPath(showInFolderId, path); }
 bool shareWithApps(const std::string& path) {
     JNIEnv* e = env();
@@ -489,6 +522,12 @@ extern "C" JNIEXPORT void JNICALL Java_com_plyg_airlink_MainActivity_nativeInit(
         openFileId = e->GetStaticMethodID(activityClass, "openFile", "(Ljava/lang/String;)V");
         showInFolderId = e->GetStaticMethodID(activityClass, "showInFolder", "(Ljava/lang/String;)V");
         shareWithAppsId = e->GetStaticMethodID(activityClass, "shareWithApps", "(Ljava/lang/String;)Z");
+        uriReadableId = e->GetStaticMethodID(activityClass, "uriReadable", "(Ljava/lang/String;)Z");
+        local = e->FindClass("com/plyg/airlink/Staging");
+        stagingClass = static_cast<jclass>(e->NewGlobalRef(local));
+        e->DeleteLocalRef(local);
+        stagingOriginId = e->GetStaticMethodID(stagingClass, "originOf", "(Ljava/lang/String;)Ljava/lang/String;");
+        stagingReleaseId = e->GetStaticMethodID(stagingClass, "release", "(Ljava/lang/String;)V");
         callsGranted = e->GetStaticMethodID(activityClass, "callsGranted", "()Z");
         callRequestPermissions = e->GetStaticMethodID(activityClass, "requestCallPermissions", "()V");
         screenControlOn = e->GetStaticMethodID(activityClass, "screenControlEnabled", "()Z");

@@ -228,7 +228,7 @@ struct App::Impl {
         for (const auto& f : parsed.array())
             list.push_back(FileRecord{.id = nextFileId++, .peerId = f["peer_id"].str(), .peerName = f["peer_name"].str(),
                                       .path = f["path"].str(), .size = f["size"].i64(), .time = f["time"].i64(),
-                                      .incoming = f["incoming"].boolean()});
+                                      .incoming = f["incoming"].boolean(), .displayName = f["name"].str()});
         fileHistory.set(std::move(list));
     }
     void saveFileHistory() {
@@ -239,7 +239,8 @@ struct App::Impl {
             if (out.size() > 1) out += ",\n";
             out += "{\"peer_id\":" + json::quote(f.peerId) + ",\"peer_name\":" + json::quote(f.peerName) +
                    ",\"path\":" + json::quote(f.path) + ",\"size\":" + std::to_string(f.size) +
-                   ",\"time\":" + std::to_string(f.time) + ",\"incoming\":" + (f.incoming ? "true" : "false") + "}";
+                   ",\"time\":" + std::to_string(f.time) + ",\"incoming\":" + (f.incoming ? "true" : "false") +
+                   (f.displayName.empty() ? std::string() : ",\"name\":" + json::quote(f.displayName)) + "}";
         }
         out += "]\n";
         auto file = std::filesystem::path(std::u8string(path.begin(), path.end()));
@@ -259,8 +260,14 @@ struct App::Impl {
                 std::error_code ec;
                 auto fs = std::filesystem::path(std::u8string(p.begin(), p.end()));
                 int64_t size = std::filesystem::is_regular_file(fs, ec) ? int64_t(std::filesystem::file_size(fs, ec)) : 0;
-                list.insert(list.begin(), FileRecord{.id = nextFileId++, .peerId = peerId, .peerName = name, .path = p,
-                                                     .size = size, .time = now, .incoming = incoming});
+                FileRecord record{.id = nextFileId++, .peerId = peerId, .peerName = name, .path = p, .size = size, .time = now,
+                                  .incoming = incoming};
+                // A copy made for sending (Android): the original is what the list keeps; the copy goes.
+                if (!incoming) {
+                    auto [uri, original] = platform::takeSentOriginal(p);
+                    if (!uri.empty()) record.path = uri, record.displayName = original;
+                }
+                list.insert(list.begin(), record);
             }
             if (list.size() > 500) list.resize(500);
         });

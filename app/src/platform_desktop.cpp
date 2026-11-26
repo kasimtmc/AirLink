@@ -91,6 +91,13 @@ void showInFolder(const std::string& path) {
 
 bool shareWithApps(const std::string&) { return false; }
 
+bool fileExists(const std::string& path) {
+    std::error_code ec;
+    return std::filesystem::exists(std::filesystem::path(std::u8string(path.begin(), path.end())), ec);
+}
+
+std::pair<std::string, std::string> takeSentOriginal(const std::string&) { return {}; }
+
 void openFolder(const std::string& path) {
     if (path.empty()) return;
     const auto utf8 = std::u8string(reinterpret_cast<const char8_t*>(path.data()), path.size());

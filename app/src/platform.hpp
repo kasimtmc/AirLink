@@ -135,6 +135,11 @@ std::string playerBluetoothStatus();
 // A file of the Files tab: opened with its app, shown in the file manager (selected where the
 // platform can), or handed to another app (Android's share sheet; desktops: false).
 void openFile(const std::string& path);
+// A Files-tab path (a file, or on Android a content:// URI) that is still there.
+bool fileExists(const std::string& path);
+// A sent file that was a copy made for sending (Android's shares and picks): its original
+// ("uri" and "name", empty if it wasn't one), and the copy deleted.
+std::pair<std::string, std::string> takeSentOriginal(const std::string& path);
 void showInFolder(const std::string& path);
 bool shareWithApps(const std::string& path);
 

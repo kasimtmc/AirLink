@@ -48,6 +48,7 @@ class AirLinkService : Service() {
         CallBridge.start(this)
         FlingDetector.resume(this)
         PhoneMedia.start(this)
+        Thread({ Staging.cleanOld(this) }, "airlink-staging-clean").start()
         pumper.post(pump)
     }
 

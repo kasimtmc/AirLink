@@ -96,7 +96,13 @@ struct FileRecord {
     int64_t size = 0;
     int64_t time = 0;  // ms since the epoch
     bool incoming = true;
-    std::string name() const { auto slash = path.find_last_of("/\\"); return slash == std::string::npos ? path : path.substr(slash + 1); }
+    std::string displayName;  // a content:// path's (Android: a file sent from another app)
+    std::string name() const {
+        if (!displayName.empty()) return displayName;
+        auto slash = path.find_last_of("/\\");
+        return slash == std::string::npos ? path : path.substr(slash + 1);
+    }
+    bool isUri() const { return path.starts_with("content://"); }
     bool operator==(const FileRecord&) const = default;
 };
 

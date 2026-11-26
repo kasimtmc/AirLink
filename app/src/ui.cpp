@@ -331,10 +331,7 @@ static std::string callTypeLabel(const std::string& type) {
     return "Arama";
 }
 
-static bool fileExists(const std::string& path) {
-    std::error_code ec;
-    return std::filesystem::exists(std::filesystem::path(std::u8string(path.begin(), path.end())), ec);
-}
+static bool fileExists(const std::string& path) { return airlink::platform::fileExists(path); }
 
 static void openFile(const std::string& path) { airlink::platform::openFile(path); }
 static void publishStatus(const std::string& status, const std::string& tip) { airlink::platform::publishStatus(status, tip); }
@@ -355,7 +352,7 @@ static std::string fileLine(const FileRecord& f, bool exists) {
     std::snprintf(when, sizeof when, "%d %s %02d:%02d", local.tm_mday, months[local.tm_mon], local.tm_hour, local.tm_min);
     std::string who = f.peerName.empty() ? "Bir cihaz" : f.peerName;
     std::string line = who + (f.incoming ? " cihazından" : " cihazına") + " · " + when;
-    if (!exists) return line + " · dosya artık yok";
+    if (!exists) return line + (f.isUri() ? " · dosyaya artık erişilemiyor" : " · dosya artık yok");
     return f.size > 0 ? line + " · " + humanSize(f.size) : line;
 }
 
@@ -1162,7 +1159,10 @@ fun FileRow(app: App, f: FileRecord, exists: Boolean) {
                      overflow = TextOverflow.Ellipsis)
             }
             IconButton(onClick = { openFile(f.path) }, enabled = exists) { Icon(AppIcons.OpenInNew, contentDescription = "Aç") }
-            IconButton(onClick = { showInFolder(f.path) }) { Icon(AppIcons.Folder, contentDescription = "Dosya yöneticisinde göster") }
+            // (a file sent from another app on the phone is that app's: no folder of AirLink's, not deleted here)
+            IconButton(onClick = { showInFolder(f.path) }, enabled = !f.isUri()) {
+                Icon(AppIcons.Folder, contentDescription = "Dosya yöneticisinde göster")
+            }
             Box {
                 IconButton(onClick = { shareMenu = true }, enabled = exists) { Icon(Icons.Filled.Share, contentDescription = "Paylaş") }
                 DropdownMenu(expanded = shareMenu, onDismissRequest = { shareMenu = false }) {
@@ -1187,7 +1187,9 @@ fun FileRow(app: App, f: FileRecord, exists: Boolean) {
                     }
                 }
             }
-            IconButton(onClick = { confirmDelete = true }, enabled = exists) { Icon(Icons.Filled.Delete, contentDescription = "Dosyayı sil") }
+            IconButton(onClick = { confirmDelete = true }, enabled = exists && !f.isUri()) {
+                Icon(Icons.Filled.Delete, contentDescription = "Dosyayı sil")
+            }
             IconButton(onClick = { app.forgetFileRecord(f.id) }) { Icon(Icons.Filled.Close, contentDescription = "Geçmişten kaldır") }
         }
     }
