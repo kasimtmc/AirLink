@@ -19,6 +19,10 @@ inline const ImageVector ContentPaste = materialIcon("Filled.ContentPaste", "M19
 inline const ImageVector Download = materialIcon("Filled.FileDownload", "M5,20h14v-2H5V20zM19,9h-4V3H9v6H5l7,7L19,9z");
 inline const ImageVector Upload = materialIcon("Filled.FileUpload", "M5,20h14v-2H5V20zM5,10h4v6h6v-6h4l-7,-7L5,10z");
 inline const ImageVector Error = materialIcon("Filled.Error", "M12,2C6.48,2 2,6.48 2,12s4.48,10 10,10 10,-4.48 10,-10S17.52,2 12,2zm1,15h-2v-2h2v2zm0,-4h-2V7h2v6z");
+inline const ImageVector Devices = materialIcon("Filled.Devices", "M4,6h18V4H4c-1.1,0 -2,0.9 -2,2v11H0v3h14v-3H4V6zm19,2h-6c-0.55,0 -1,0.45 -1,1v10c0,0.55 0.45,1 1,1h6c0.55,0 1,-0.45 1,-1V9c0,-0.55 -0.45,-1 -1,-1zm-1,9h-4v-7h4v7z");
+inline const ImageVector Sms = materialIcon("Filled.Sms", "M20,2H4c-1.1,0 -1.99,0.9 -1.99,2L2,22l4,-4h14c1.1,0 2,-0.9 2,-2V4c0,-1.1 -0.9,-2 -2,-2zM9,11H7V9h2v2zm4,0h-2V9h2v2zm4,0h-2V9h2v2z");
+inline const ImageVector Phone = materialIcon("Filled.Phone", "M6.62,10.79c1.44,2.83 3.76,5.14 6.59,6.59l2.2,-2.2c0.27,-0.27 0.67,-0.36 1.02,-0.24 1.12,0.37 2.33,0.57 3.57,0.57 0.55,0 1,0.45 1,1V20c0,0.55 -0.45,1 -1,1 -9.39,0 -17,-7.61 -17,-17 0,-0.55 0.45,-1 1,-1h3.5c0.55,0 1,0.45 1,1 0,1.25 0.2,2.45 0.57,3.57 0.11,0.35 0.03,0.74 -0.25,1.02l-2.2,2.2z");
+inline const ImageVector Apps = materialIcon("Filled.Apps", "M4,8h4V4H4v4zm6,12h4v-4h-4v4zm-6,0h4v-4H4v4zm0,-6h4v-4H4v4zm6,0h4v-4h-4v4zm6,-10v4h4V4h-4zm-6,4h4V4h-4v4zm6,6h4v-4h-4v4zm0,6h4v-4h-4v4z");
 // clang-format on
 
 inline const ImageVector& forPlatform(const std::string& platform) {

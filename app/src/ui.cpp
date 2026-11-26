@@ -390,6 +390,9 @@ fun AirLinkTray(app: App) {
     }
 }
 
+// Home's destinations.
+constexpr int TAB_DEVICES = 0, TAB_MESSAGES = 1, TAB_PHONE = 2, TAB_APPS = 3, TAB_SETTINGS = 4;
+
 @Kompozable
 fun Home() {
     val app = appState()
@@ -408,52 +411,69 @@ fun Home() {
         }
     }
 
-    Scaffold(
-        topBar = {
-            TopAppBar(
-                title = { Text("AirLink") },
-                actions = {
-                    if (app.transfers().any { !it.active() }) {
-                        TextButton(onClick = { app.clearFinishedTransfers() }) { Text("Temizle") }
-                    }
-                },
-            )
-        },
-        snackbarHost = { SnackbarHost(snackbar) },
-    ) { padding ->
-        // A computer also shows a paired phone's SMS, on a tab of its own.
-        val tabs = isDesktop() && app.ready()
-        Column(modifier = Modifier.fillMaxSize().padding(padding)) {
-            val call = app.activeCall()
-            if (call != null && isDesktop()) ActiveCallBar(app, call!!)
-            if (app.desktopViewer().isNotEmpty()) DesktopShareBar(app)
-            if (tabs) {
-                PrimaryTabRow(selectedTabIndex = tab) {
-                    Tab(selected = tab == 0, onClick = { tab = 0 }, text = { Text("Cihazlar") })
-                    Tab(selected = tab == 1, onClick = { tab = 1 }, text = { Text("Mesajlar") })
-                    Tab(selected = tab == 2, onClick = { tab = 2 }, text = { Text("Telefon") })
-                    Tab(selected = tab == 3, onClick = { tab = 3 }, text = { Text("Uygulamalar") })
-                }
+    // Destinations: a computer also has a paired phone's messages, calls and apps.
+    val desktopTabs = isDesktop() && app.ready()
+    val fullView = app.ready() && (app.desktopPeer().isNotEmpty() || app.screenPeer().isNotEmpty())
+    if (!desktopTabs && tab != TAB_SETTINGS && tab != TAB_DEVICES) tab = TAB_DEVICES
+    val navType = if (!app.ready() || fullView) NavigationSuiteType.None
+                  else NavigationSuiteScaffoldDefaults.navigationSuiteType(currentWindowAdaptiveInfo())
+
+    NavigationSuiteScaffold(
+        navigationItems = {
+            NavigationSuiteItem(selected = tab == TAB_DEVICES, onClick = { tab = TAB_DEVICES },
+                                icon = { Icon(AppIcons.Devices, contentDescription = null) }, label = { Text("Cihazlar") })
+            if (desktopTabs) {
+                NavigationSuiteItem(selected = tab == TAB_MESSAGES, onClick = { tab = TAB_MESSAGES },
+                                    icon = { Icon(AppIcons.Sms, contentDescription = null) }, label = { Text("Mesajlar") })
+                NavigationSuiteItem(selected = tab == TAB_PHONE, onClick = { tab = TAB_PHONE },
+                                    icon = { Icon(AppIcons.Phone, contentDescription = null) }, label = { Text("Telefon") })
+                NavigationSuiteItem(selected = tab == TAB_APPS, onClick = { tab = TAB_APPS },
+                                    icon = { Icon(AppIcons.Apps, contentDescription = null) }, label = { Text("Uygulamalar") })
             }
-            Box(modifier = Modifier.fillMaxSize()) {
-                if (app.ready() && app.desktopPeer().isNotEmpty()) {
-                    DesktopView(app)
-                } else if (app.ready() && app.screenPeer().isNotEmpty()) {
-                    ScreenView(app)
-                } else if (app.ready()) {
-                    if (tabs && tab == 1) MessagesScreen(app)
-                    else if (tabs && tab == 2) PhoneScreen(app)
-                    else if (tabs && tab == 3) AppsScreen(app)
-                    else DeviceList(app, clipboard)
-                } else if (app.sharingPaused()) {
-                    Column(modifier = Modifier.align(Alignment.Center), horizontalAlignment = Alignment.CenterHorizontally) {
-                        Text("Paylaşım duraklatıldı")
-                        TextButton(onClick = { app.setSharingPaused(false) }) { Text("Paylaşımı sürdür") }
+            NavigationSuiteItem(selected = tab == TAB_SETTINGS, onClick = { tab = TAB_SETTINGS },
+                                icon = { Icon(Icons.Filled.Settings, contentDescription = null) }, label = { Text("Ayarlar") })
+        },
+        navigationSuiteType = navType,
+        modifier = Modifier.fillMaxSize(),
+    ) {
+        Scaffold(
+            topBar = {
+                TopAppBar(
+                    title = { Text(if (tab == TAB_SETTINGS) "Ayarlar" else "AirLink") },
+                    actions = {
+                        if (tab == TAB_DEVICES && app.transfers().any { !it.active() }) {
+                            TextButton(onClick = { app.clearFinishedTransfers() }) { Text("Temizle") }
+                        }
+                    },
+                )
+            },
+            snackbarHost = { SnackbarHost(snackbar) },
+        ) { padding ->
+            Column(modifier = Modifier.fillMaxSize().padding(padding)) {
+                val call = app.activeCall()
+                if (call != null && isDesktop()) ActiveCallBar(app, call!!)
+                if (app.desktopViewer().isNotEmpty()) DesktopShareBar(app)
+                Box(modifier = Modifier.fillMaxSize()) {
+                    if (app.ready() && app.desktopPeer().isNotEmpty()) {
+                        DesktopView(app)
+                    } else if (app.ready() && app.screenPeer().isNotEmpty()) {
+                        ScreenView(app)
+                    } else if (app.ready()) {
+                        if (tab == TAB_MESSAGES) MessagesScreen(app)
+                        else if (tab == TAB_PHONE) PhoneScreen(app)
+                        else if (tab == TAB_APPS) AppsScreen(app)
+                        else if (tab == TAB_SETTINGS) SettingsScreen(app)
+                        else DeviceList(app, clipboard, onOpenSettings = { tab = TAB_SETTINGS })
+                    } else if (app.sharingPaused()) {
+                        Column(modifier = Modifier.align(Alignment.Center), horizontalAlignment = Alignment.CenterHorizontally) {
+                            Text("Paylaşım duraklatıldı")
+                            TextButton(onClick = { app.setSharingPaused(false) }) { Text("Paylaşımı sürdür") }
+                        }
+                    } else if (app.startError().isNotEmpty()) {
+                        Text("Başlatılamadı:\n${app.startError()}", modifier = Modifier.align(Alignment.Center).padding(24.dp))
+                    } else {
+                        CircularProgressIndicator(modifier = Modifier.align(Alignment.Center))
                     }
-                } else if (app.startError().isNotEmpty()) {
-                    Text("Başlatılamadı:\n${app.startError()}", modifier = Modifier.align(Alignment.Center).padding(24.dp))
-                } else {
-                    CircularProgressIndicator(modifier = Modifier.align(Alignment.Center))
                 }
             }
         }
@@ -572,7 +592,7 @@ fun ShareDialog(app: App) {
 }
 
 @Kompozable
-fun DeviceList(app: App, clipboard: ClipboardManager) {
+fun DeviceList(app: App, clipboard: ClipboardManager, onOpenSettings: () -> Unit) {
     val transfers = app.transfers()
     val paired = app.pairedPeers()
     val nearby = app.nearbyPeers()
@@ -587,31 +607,9 @@ fun DeviceList(app: App, clipboard: ClipboardManager) {
         contentPadding = PaddingValues(16.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        item { ThisDeviceCard(app.me()) }
-        if (needsBackgroundAutostartSettings()) {
-            item { BackgroundAutostartCard() }
-        }
-
-        if (app.canShareNotifications()) {
-            item { NotificationAccessCard(app) }
-        }
-        if (app.canShareSms()) {
-            item { SmsAccessCard(app) }
-        }
-        if (app.canShareCalls()) {
-            item { CallAccessCard(app) }
-        }
-        if (app.canShareScreen()) {
-            item { ScreenControlCard(app) }
-        }
-        if (!isDesktop() && app.canPlayMediaAudio() && paired.any { it.online && it.platform != "android" }) {
-            item { PhoneAudioCard(app) }
-        }
-        if (app.canFling()) {
-            item { FlingCard(app) }
-        }
-        if (app.canUseAdvancedMode()) {
-            item { AdvancedModeCard(app) }
+        val missing = missingPermissions(app)
+        if (missing > 0) {
+            item { MissingPermissionsBanner(missing, onOpenSettings) }
         }
 
         if (notifications.isNotEmpty()) {
@@ -693,6 +691,60 @@ fun DeviceList(app: App, clipboard: ClipboardManager) {
             confirmButton = { TextButton(onClick = { app.forget(forgetting); forgetting = "" }) { Text("Unut") } },
             dismissButton = { TextButton(onClick = { forgetting = "" }) { Text("Vazgeç") } },
         )
+    }
+}
+
+// Permissions this device still needs for what it can share (the phone's, mostly).
+@Kompozable
+fun missingPermissions(app: App): Int {
+    var n = 0
+    if (app.canShareNotifications() && !app.notificationAccess()) n++
+    if (app.canShareSms() && !app.smsAccess()) n++
+    if (app.canShareCalls() && !app.callAccess()) n++
+    if (app.canShareScreen() && !app.screenControl()) n++
+    return n
+}
+
+@Kompozable
+fun MissingPermissionsBanner(count: Int, onOpenSettings: () -> Unit) {
+    val cs = MaterialTheme.colorScheme
+    Card(colors = CardDefaults.cardColors(containerColor = cs.secondaryContainer), modifier = Modifier.fillMaxWidth()) {
+        Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+            Text(if (count == 1) "Bir izin eksik; bazı özellikler kapalı." else "$count izin eksik; bazı özellikler kapalı.",
+                 modifier = Modifier.weight(1f), color = cs.onSecondaryContainer)
+            TextButton(onClick = onOpenSettings) { Text("Ayarlar") }
+        }
+    }
+}
+
+// This device, its permissions and its features.
+@Kompozable
+fun SettingsScreen(app: App) {
+    val paired = app.pairedPeers()
+    val permissions = app.canShareNotifications() || app.canShareSms() || app.canShareCalls() || app.canShareScreen() ||
+                      needsBackgroundAutostartSettings()
+    val phoneAudio = !isDesktop() && app.canPlayMediaAudio() && paired.any { it.online && it.platform != "android" }
+    val features = phoneAudio || app.canFling() || app.canUseAdvancedMode()
+    LazyColumn(
+        modifier = Modifier.fillMaxSize(),
+        contentPadding = PaddingValues(16.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        item { ThisDeviceCard(app.me()) }
+        if (permissions) {
+            item { SectionTitle("İzinler") }
+            if (needsBackgroundAutostartSettings()) item { BackgroundAutostartCard() }
+            if (app.canShareNotifications()) item { NotificationAccessCard(app) }
+            if (app.canShareSms()) item { SmsAccessCard(app) }
+            if (app.canShareCalls()) item { CallAccessCard(app) }
+            if (app.canShareScreen()) item { ScreenControlCard(app) }
+        }
+        if (features) {
+            item { SectionTitle("Özellikler") }
+            if (phoneAudio) item { PhoneAudioCard(app) }
+            if (app.canFling()) item { FlingCard(app) }
+            if (app.canUseAdvancedMode()) item { AdvancedModeCard(app) }
+        }
     }
 }
 
