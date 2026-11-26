@@ -316,6 +316,8 @@ public:
     void requestSmsAccess() const;
     void searchContacts(const std::string& query) const;
     void answerCall() const;
+    // Answers and moves the call's audio to this computer once it is active (Bluetooth HFP).
+    void answerCallOnComputer() const;
     void rejectCall() const;
     void dismissCall() const;  // hides the alert; the phone goes on ringing
     void dial(const std::string& number) const;

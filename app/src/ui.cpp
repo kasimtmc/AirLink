@@ -343,6 +343,47 @@ static std::string callStateLabel(const ActiveCall& c) {
     return "Görüşmede";
 }
 
+// Up to two letters of a contact's name for its avatar; "" for a bare number (a person icon).
+static std::string initials(const std::string& title) {
+    std::string out;
+    bool start = true;
+    for (size_t i = 0; i < title.size() && out.size() < 8;) {
+        unsigned char c = static_cast<unsigned char>(title[i]);
+        size_t len = c < 0x80 ? 1 : (c >> 5) == 6 ? 2 : (c >> 4) == 14 ? 3 : 4;
+        if (c == ' ') { start = true; ++i; continue; }
+        if (start) {
+            if (out.empty() && (std::isdigit(c) || c == '+' || c == '(')) return {};
+            out += title.substr(i, len);
+            start = false;
+            if (std::count_if(out.begin(), out.end(), [](char ch) { return (static_cast<unsigned char>(ch) & 0xC0) != 0x80; }) == 2) break;
+        }
+        i += len;
+    }
+    // Upper case for ASCII and the Turkish letters a name starts with.
+    std::string upper;
+    for (size_t i = 0; i < out.size();) {
+        unsigned char c = static_cast<unsigned char>(out[i]);
+        if (c == 'i') { upper += "İ"; ++i; continue; }  // Turkish: i → İ
+        if (c < 0x80) { upper += char(std::toupper(c)); ++i; continue; }
+        size_t len = (c >> 5) == 6 ? 2 : (c >> 4) == 14 ? 3 : 4;
+        std::string ch = out.substr(i, len);
+        if (ch == "ç") ch = "Ç"; else if (ch == "ğ") ch = "Ğ"; else if (ch == "ı") ch = "I"; else if (ch == "ö") ch = "Ö";
+        else if (ch == "ş") ch = "Ş"; else if (ch == "ü") ch = "Ü";
+        upper += ch;
+        i += len;
+    }
+    return upper;
+}
+
+static std::vector<std::vector<std::string>> keypadRows() {
+    return {{"1", "2", "3"}, {"4", "5", "6"}, {"7", "8", "9"}, {"*", "0", "#"}};
+}
+
+static std::vector<std::string> quickReplies() {
+    return {"Şu an konuşamıyorum, sonra ararım.", "Toplantıdayım, birazdan dönerim.", "Yoldayım, sonra ararım.",
+            "Mesaj atar mısın?"};
+}
+
 static std::string spacedCode(const std::string& code) {
     return code.size() == 6 ? code.substr(0, 3) + " " + code.substr(3) : code;
 }
@@ -447,7 +488,10 @@ fun Home() {
 
     // Destinations: a computer also has a paired phone's messages, calls and apps.
     val desktopTabs = isDesktop() && app.ready()
-    val fullView = app.ready() && (app.desktopPeer().isNotEmpty() || app.screenPeer().isNotEmpty())
+    val activeCall = app.activeCall()
+    var minimizedCall by remember { mutableStateOf(0L) }
+    val callOpen = activeCall != null && isDesktop() && minimizedCall != activeCall!!.since
+    val fullView = app.ready() && (app.desktopPeer().isNotEmpty() || app.screenPeer().isNotEmpty() || callOpen)
     if (!desktopTabs && tab != TAB_SETTINGS && tab != TAB_DEVICES && tab != TAB_CLIPBOARD) tab = TAB_DEVICES
     val navType = if (!app.ready() || fullView) NavigationSuiteType.None
                   else NavigationSuiteScaffoldDefaults.navigationSuiteType(currentWindowAdaptiveInfo())
@@ -474,7 +518,7 @@ fun Home() {
     ) {
         Scaffold(
             topBar = {
-                TopAppBar(
+                if (!callOpen) TopAppBar(
                     title = { Text(tabTitle(tab)) },
                     actions = {
                         if (tab == TAB_DEVICES && app.transfers().any { !it.active() }) {
@@ -489,11 +533,12 @@ fun Home() {
             snackbarHost = { SnackbarHost(snackbar) },
         ) { padding ->
             Column(modifier = Modifier.fillMaxSize().padding(padding)) {
-                val call = app.activeCall()
-                if (call != null && isDesktop()) ActiveCallBar(app, call!!)
+                if (activeCall != null && isDesktop() && !callOpen) ActiveCallBar(app, activeCall!!, onOpen = { minimizedCall = 0L })
                 if (app.desktopViewer().isNotEmpty()) DesktopShareBar(app)
                 Box(modifier = Modifier.fillMaxSize()) {
-                    if (app.ready() && app.desktopPeer().isNotEmpty()) {
+                    if (callOpen) {
+                        CallScreen(app, activeCall!!, onMinimize = { minimizedCall = activeCall!!.since })
+                    } else if (app.ready() && app.desktopPeer().isNotEmpty()) {
                         DesktopView(app)
                     } else if (app.ready() && app.screenPeer().isNotEmpty()) {
                         ScreenView(app)
@@ -528,7 +573,7 @@ fun Home() {
 
 // A paired phone's call in progress: who, for how long, and its controls.
 @Kompozable
-fun ActiveCallBar(app: App, call: ActiveCall) {
+fun ActiveCallBar(app: App, call: ActiveCall, onOpen: () -> Unit) {
     val cs = MaterialTheme.colorScheme
     var now by remember { mutableStateOf(nowMs()) }
     LaunchedEffect(call.since) {
@@ -537,62 +582,265 @@ fun ActiveCallBar(app: App, call: ActiveCall) {
             delay(1000)
         }
     }
-    Card(modifier = Modifier.fillMaxWidth().padding(12.dp, 8.dp), colors = CardDefaults.cardColors(containerColor = cs.tertiaryContainer)) {
-        Column(modifier = Modifier.fillMaxWidth().padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(AppIcons.Smartphone, contentDescription = null, tint = cs.onTertiaryContainer)
-                Spacer(modifier = Modifier.width(12.dp))
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(call.title(), style = MaterialTheme.typography.titleMedium, color = cs.onTertiaryContainer)
-                    Text("${callStateLabel(call)} · ${elapsed(call.since, now)}", style = MaterialTheme.typography.bodySmall,
-                         color = cs.onTertiaryContainer)
-                }
-                Button(onClick = { app.callControl("call.hangup", "{}") },
-                       colors = ButtonDefaults.buttonColors(containerColor = cs.error, contentColor = cs.onError)) { Text("Kapat") }
+    Card(modifier = Modifier.fillMaxWidth().padding(12.dp, 8.dp).clickable(onClick = onOpen),
+         colors = CardDefaults.cardColors(containerColor = cs.tertiaryContainer)) {
+        Row(modifier = Modifier.fillMaxWidth().padding(12.dp, 8.dp), verticalAlignment = Alignment.CenterVertically) {
+            CallAvatar(call.title(), 40)
+            Spacer(modifier = Modifier.width(12.dp))
+            Column(modifier = Modifier.weight(1f)) {
+                Text(call.title(), style = MaterialTheme.typography.titleMedium, color = cs.onTertiaryContainer,
+                     maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text("${callStateLabel(call)} · ${elapsed(call.since, now)}", style = MaterialTheme.typography.bodySmall,
+                     color = cs.onTertiaryContainer)
             }
-            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                FilterChip(selected = call.muted, onClick = { app.callControl("call.mute", if (call.muted) "{\"on\":false}" else "{\"on\":true}") },
-                           label = { Text(if (call.muted) "Mikrofon kapalı" else "Mikrofon açık") })
-                if (call.fullControl && call.canHold) {
-                    FilterChip(selected = call.held, onClick = { app.callControl("call.hold", if (call.held) "{\"on\":false}" else "{\"on\":true}") },
-                               label = { Text(if (call.held) "Beklemede" else "Beklet") })
-                }
-                for (r in call.routes) {
-                    FilterChip(selected = call.route == r, onClick = { app.callControl("call.route", routeBody(r)) }, label = { Text(routeLabel(r)) })
-                }
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    TextButton(onClick = { app.callControl("call.volume", "{\"delta\":-1}") }) { Text("Ses −") }
-                    Text("${call.volume}/${call.volumeMax}", style = MaterialTheme.typography.labelMedium, color = cs.onTertiaryContainer)
-                    TextButton(onClick = { app.callControl("call.volume", "{\"delta\":1}") }) { Text("Ses +") }
-                }
+            IconButton(onClick = { app.callControl("call.mute", if (call.muted) "{\"on\":false}" else "{\"on\":true}") }) {
+                Icon(if (call.muted) AppIcons.MicOff else AppIcons.Mic, contentDescription = if (call.muted) "Mikrofonu aç" else "Sessize al",
+                     tint = cs.onTertiaryContainer)
             }
-            if (app.callAudioOn()) Text(app.callAudioStatus(), style = MaterialTheme.typography.bodySmall,
-                                        color = cs.onTertiaryContainer)
-            if (!call.fullControl) {
-                Text("Sınırlı kontrol: bekletme ve Bluetooth için telefonun AirLink'i arama yardımcısı olarak bağlaması gerekiyor.",
-                     style = MaterialTheme.typography.labelSmall, color = cs.onTertiaryContainer)
+            TextButton(onClick = onOpen) { Text("Aç") }
+            Box(modifier = Modifier.size(40.dp).background(cs.error, CircleShape).clickable(onClick = { app.callControl("call.hangup", "{}") }),
+                contentAlignment = Alignment.Center) {
+                Icon(AppIcons.CallEnd, contentDescription = "Kapat", tint = cs.onError, modifier = Modifier.size(20.dp))
             }
         }
     }
 }
 
+// A round control of the call screen, its label under it (as a phone's dialer has them).
+@Kompozable
+fun RoundAction(icon: ImageVector, label: String, selected: Boolean, enabled: Boolean, onClick: () -> Unit) {
+    val cs = MaterialTheme.colorScheme
+    val container = if (selected) cs.primary else cs.surfaceVariant
+    val content = if (!enabled) cs.onSurface.copy(alpha = 0.38f) else if (selected) cs.onPrimary else cs.onSurfaceVariant
+    Column(modifier = Modifier.width(96.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+        Box(modifier = (if (enabled) Modifier.clickable(onClick = onClick) else Modifier).size(64.dp)
+                           .background(if (enabled) container else cs.surfaceVariant.copy(alpha = 0.5f), CircleShape),
+            contentAlignment = Alignment.Center) {
+            Icon(icon, contentDescription = label, tint = content)
+        }
+        Spacer(modifier = Modifier.height(6.dp))
+        Text(label, style = MaterialTheme.typography.labelMedium, textAlign = TextAlign.Center,
+             color = if (enabled) cs.onSurface else cs.onSurface.copy(alpha = 0.38f), maxLines = 2)
+    }
+}
+
+@Kompozable
+fun CallAvatar(title: String, size: Int) {
+    val cs = MaterialTheme.colorScheme
+    val letters = initials(title)
+    Box(modifier = Modifier.size(size.dp).background(cs.primaryContainer, CircleShape), contentAlignment = Alignment.Center) {
+        if (letters.isEmpty()) Icon(Icons.Filled.Person, contentDescription = null, tint = cs.onPrimaryContainer,
+                                    modifier = Modifier.size((size / 2).dp))
+        else Text(letters, color = cs.onPrimaryContainer,
+                  style = if (size >= 80) MaterialTheme.typography.displaySmall else MaterialTheme.typography.titleMedium)
+    }
+}
+
+// The call in progress, as a phone's in-call screen: who, how long, the controls, hang up.
+@Kompozable
+fun CallScreen(app: App, call: ActiveCall, onMinimize: () -> Unit) {
+    val cs = MaterialTheme.colorScheme
+    var now by remember { mutableStateOf(nowMs()) }
+    var keypad by remember { mutableStateOf(false) }
+    var typed by remember { mutableStateOf("") }
+    var routes by remember { mutableStateOf(false) }
+    LaunchedEffect(call.since) {
+        while (true) {
+            now = nowMs()
+            delay(1000)
+        }
+    }
+    Column(modifier = Modifier.fillMaxSize().background(cs.surfaceContainer), horizontalAlignment = Alignment.CenterHorizontally) {
+        Row(modifier = Modifier.fillMaxWidth().padding(8.dp), verticalAlignment = Alignment.CenterVertically) {
+            IconButton(onClick = onMinimize) { Icon(Icons.Filled.KeyboardArrowDown, contentDescription = "Küçült") }
+            Text("Küçült", style = MaterialTheme.typography.labelLarge, modifier = Modifier.weight(1f))
+            Text(app.peerName(call.peerId), style = MaterialTheme.typography.labelLarge, color = cs.onSurfaceVariant,
+                 modifier = Modifier.padding(end = 12.dp))
+        }
+        Column(modifier = Modifier.weight(1f).widthIn(0.dp, 420.dp).padding(horizontal = 24.dp),
+               horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
+            CallAvatar(call.title(), 112)
+            Spacer(modifier = Modifier.height(20.dp))
+            Text(call.title(), style = MaterialTheme.typography.headlineMedium, textAlign = TextAlign.Center, maxLines = 2)
+            if (call.name.isNotEmpty() && call.number.isNotEmpty()) {
+                Text(call.number, style = MaterialTheme.typography.bodyLarge, color = cs.onSurfaceVariant)
+            }
+            Spacer(modifier = Modifier.height(8.dp))
+            Text(if (call.state == "dialing") "Aranıyor…" else "${callStateLabel(call)} · ${elapsed(call.since, now)}",
+                 style = MaterialTheme.typography.titleMedium, color = if (call.held) cs.tertiary else cs.primary)
+            Spacer(modifier = Modifier.height(4.dp))
+            Text(if (app.callAudioOn()) app.callAudioStatus() else "Ses: ${routeLabel(call.route)} (telefon)",
+                 style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant, textAlign = TextAlign.Center)
+            Spacer(modifier = Modifier.height(28.dp))
+            if (keypad) {
+                Text(if (typed.isEmpty()) " " else typed, style = MaterialTheme.typography.headlineSmall)
+                Spacer(modifier = Modifier.height(8.dp))
+                for (row in keypadRows()) {
+                    Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                        for (key in row) {
+                            Box(modifier = Modifier.clickable(onClick = {
+                                    typed = typed + key
+                                    app.callControl("call.dtmf", "{\"digit\":\"" + key + "\"}")
+                                }).size(64.dp).background(cs.surfaceVariant, CircleShape),
+                                contentAlignment = Alignment.Center) {
+                                Text(key, style = MaterialTheme.typography.headlineSmall)
+                            }
+                        }
+                    }
+                    Spacer(modifier = Modifier.height(12.dp))
+                }
+                TextButton(onClick = { keypad = false }) { Text("Tuş takımını gizle") }
+            } else {
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    RoundAction(if (call.muted) AppIcons.MicOff else AppIcons.Mic, if (call.muted) "Sessizde" else "Sessiz",
+                                call.muted, true, { app.callControl("call.mute", if (call.muted) "{\"on\":false}" else "{\"on\":true}") })
+                    RoundAction(AppIcons.Dialpad, "Tuş takımı", false, call.fullControl, { keypad = true })
+                    RoundAction(if (call.held) Icons.Filled.PlayArrow else Icons.Filled.Pause, if (call.held) "Sürdür" else "Beklet",
+                                call.held, call.fullControl && call.canHold,
+                                { app.callControl("call.hold", if (call.held) "{\"on\":false}" else "{\"on\":true}") })
+                }
+                Spacer(modifier = Modifier.height(16.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Box {
+                        RoundAction(if (call.route == "bluetooth") AppIcons.Bluetooth else AppIcons.VolumeUp,
+                                    routeLabel(call.route), call.route == "speaker", call.routes.size > 1, { routes = true })
+                        DropdownMenu(expanded = routes, onDismissRequest = { routes = false }) {
+                            for (r in call.routes) {
+                                DropdownMenuItem(text = { Text(routeLabel(r)) },
+                                                 onClick = {
+                                                     routes = false
+                                                     app.callControl("call.route", routeBody(r))
+                                                 },
+                                                 leadingIcon = { if (call.route == r) Icon(Icons.Filled.Check, contentDescription = null) })
+                            }
+                        }
+                    }
+                    RoundAction(AppIcons.Computer, if (app.callAudioOn()) "Bilgisayarda" else "Bilgisayardan konuş",
+                                app.callAudioOn(), app.canBridgeCallAudio(),
+                                { if (app.callAudioOn()) app.stopCallAudio() else app.startCallAudio() })
+                    RoundAction(AppIcons.Smartphone, "Telefona al", false, app.callAudioOn(), { app.stopCallAudio() })
+                }
+                Spacer(modifier = Modifier.height(16.dp))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    IconButton(onClick = { app.callControl("call.volume", "{\"delta\":-1}") }) {
+                        Icon(AppIcons.VolumeDown, contentDescription = "Sesi azalt")
+                    }
+                    LinearProgressIndicator(progress = { if (call.volumeMax > 0) call.volume.toFloat() / call.volumeMax else 0f },
+                                            modifier = Modifier.width(160.dp))
+                    IconButton(onClick = { app.callControl("call.volume", "{\"delta\":1}") }) {
+                        Icon(AppIcons.VolumeUp, contentDescription = "Sesi artır")
+                    }
+                }
+            }
+        }
+        Box(modifier = Modifier.clickable(onClick = { app.callControl("call.hangup", "{}") }).size(72.dp).background(cs.error, CircleShape),
+            contentAlignment = Alignment.Center) {
+            Icon(AppIcons.CallEnd, contentDescription = "Kapat", tint = cs.onError, modifier = Modifier.size(32.dp))
+        }
+        Spacer(modifier = Modifier.height(12.dp))
+        if (!call.fullControl) {
+            Text("Bekletme ve tuş takımı için telefonda AirLink'in arama yardımcısı olarak bağlanması gerekiyor.",
+                 style = MaterialTheme.typography.labelSmall, color = cs.onSurfaceVariant, textAlign = TextAlign.Center,
+                 modifier = Modifier.padding(horizontal = 24.dp))
+        }
+        Spacer(modifier = Modifier.height(20.dp))
+    }
+}
+
 // A paired phone rings: who, and answer (on the phone) or decline from here.
+// Previews (KOMPOZ_PREVIEW=CallScreenPreview): the call screen with a made-up call.
+@Preview(widthDp = 880, heightDp = 820)
+@Kompozable
+fun CallScreenPreview() {
+    MaterialTheme {
+        CallScreen(appState(), ActiveCall(peerId = "", number = "+90 555 123 45 67", name = "Ayşe Yılmaz", state = "active",
+                   canHold = true, route = "earpiece", routes = listOf("earpiece", "speaker", "bluetooth"), volume = 4, volumeMax = 7,
+                   since = nowMs() - 83000, fullControl = true), onMinimize = {})
+    }
+}
+
+@Preview(widthDp = 420, heightDp = 620)
+@Kompozable
+fun IncomingCallPreview() {
+    MaterialTheme {
+        Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            IncomingCallCard(appState(), IncomingCall(peerId = "", number = "+90 555 123 45 67", name = "Ayşe Yılmaz"))
+        }
+    }
+}
+
+// A paired phone rings: answer (here, or on the phone), decline, or decline with a message.
 @Kompozable
 fun IncomingCallDialog(app: App) {
     val c = app.incomingCall()
     if (c != null) {
-        val call = c!!
-        AlertDialog(
-            onDismissRequest = { app.dismissCall() },
-            icon = { Icon(AppIcons.Smartphone, contentDescription = null) },
-            title = { Text("${call.title()} arıyor") },
-            text = {
-                Text(if (call.name.isNotEmpty()) "${call.number}\n${app.peerName(call.peerId)} çalıyor" else "${app.peerName(call.peerId)} çalıyor")
-            },
-            confirmButton = { TextButton(onClick = { app.answerCall() }) { Text("Telefonda yanıtla") } },
-            dismissButton = { TextButton(onClick = { app.rejectCall() }) { Text("Reddet") } },
-        )
+        Dialog(onDismissRequest = { app.dismissCall() }) { IncomingCallCard(app, c!!) }
     }
+}
+
+@Kompozable
+fun IncomingCallCard(app: App, call: IncomingCall) {
+    val cs = MaterialTheme.colorScheme
+    var replies by remember { mutableStateOf(false) }
+            Card(modifier = Modifier.widthIn(0.dp, 380.dp)) {
+                Column(modifier = Modifier.fillMaxWidth().padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                    Text("Gelen arama · ${app.peerName(call.peerId)}", style = MaterialTheme.typography.labelLarge, color = cs.primary)
+                    Spacer(modifier = Modifier.height(20.dp))
+                    CallAvatar(call.title(), 96)
+                    Spacer(modifier = Modifier.height(16.dp))
+                    Text(call.title(), style = MaterialTheme.typography.headlineSmall, textAlign = TextAlign.Center, maxLines = 2)
+                    if (call.name.isNotEmpty() && call.number.isNotEmpty()) {
+                        Text(call.number, style = MaterialTheme.typography.bodyLarge, color = cs.onSurfaceVariant)
+                    }
+                    Spacer(modifier = Modifier.height(28.dp))
+                    if (replies) {
+                        for (text in quickReplies()) {
+                            OutlinedButton(onClick = {
+                                    app.rejectCall()
+                                    if (call.number.isNotEmpty()) app.sendSms(call.number, text)
+                                }, modifier = Modifier.fillMaxWidth().padding(vertical = 3.dp)) { Text(text) }
+                        }
+                        TextButton(onClick = { replies = false }) { Text("Geri") }
+                    } else {
+                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
+                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                Box(modifier = Modifier.clickable(onClick = { app.rejectCall() }).size(68.dp).background(cs.error, CircleShape),
+                                    contentAlignment = Alignment.Center) {
+                                    Icon(AppIcons.CallEnd, contentDescription = "Reddet", tint = cs.onError, modifier = Modifier.size(30.dp))
+                                }
+                                Spacer(modifier = Modifier.height(6.dp))
+                                Text("Reddet", style = MaterialTheme.typography.labelMedium)
+                            }
+                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                Box(modifier = Modifier.clickable(onClick = { app.answerCall() }).size(68.dp).background(Color(0xFF2E7D32), CircleShape),
+                                    contentAlignment = Alignment.Center) {
+                                    Icon(AppIcons.Phone, contentDescription = "Yanıtla", tint = Color.White, modifier = Modifier.size(30.dp))
+                                }
+                                Spacer(modifier = Modifier.height(6.dp))
+                                Text("Yanıtla", style = MaterialTheme.typography.labelMedium)
+                            }
+                        }
+                        Spacer(modifier = Modifier.height(20.dp))
+                        if (app.canBridgeCallAudio()) {
+                            FilledTonalButton(onClick = { app.answerCallOnComputer() }, modifier = Modifier.fillMaxWidth()) {
+                                Icon(AppIcons.Computer, contentDescription = null, modifier = Modifier.size(18.dp))
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text("Yanıtla, bilgisayardan konuş")
+                            }
+                        }
+                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                            if (call.number.isNotEmpty()) {
+                                TextButton(onClick = { replies = true }) {
+                                    Icon(AppIcons.Sms, contentDescription = null, modifier = Modifier.size(18.dp))
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Text("Mesajla reddet")
+                                }
+                            }
+                            TextButton(onClick = { app.dismissCall() }) { Text("Gizle") }
+                        }
+                    }
+                }
+            }
 }
 
 // Files handed to AirLink from outside (a file manager's "Send with AirLink", Android's share

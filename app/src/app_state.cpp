@@ -113,6 +113,7 @@ struct App::Impl {
     bool mediaAudioSupported = platform::canPlayMediaAudio();
     std::string callAudioPeer;
     std::string callAudioAutoPeer;
+    std::string callAudioOnAnswer;  // this call only: bridge its audio once it is answered
     bool callAudioAutoAttempted = false;
     MutableState<bool> phoneAudioAutoConnect = mutableStateOf(false);
     MutableState<bool> phoneCallAudioEnabled = mutableStateOf(false);
@@ -664,7 +665,7 @@ struct App::Impl {
         } else if (kind == "call.status") {
             std::string state = body["state"].str();
             if (state == "ended" || state == "ringing" || state.empty()) {
-                if (state == "ended") { activeCall.set(std::nullopt); callAudioAutoAttempted = false; }
+                if (state == "ended") { activeCall.set(std::nullopt); callAudioAutoAttempted = false; callAudioOnAnswer.clear(); }
                 return;
             }
             ActiveCall c{.peerId = peerId, .number = body["number"].str(), .name = body["name"].str(), .state = state,
@@ -676,7 +677,11 @@ struct App::Impl {
             if (c.since == 0) c.since = int64_t(std::time(nullptr)) * 1000;
             activeCall.set(c);
             incomingCall.set(std::nullopt);
-            if (state == "active" && callAudioAutoPeer == peerId &&
+            if (state == "active" && callAudioOnAnswer == peerId && callAudioSupported) {
+                callAudioOnAnswer.clear();
+                callAudioAutoAttempted = true;
+                App::get().startCallAudio();
+            } else if (state == "active" && callAudioAutoPeer == peerId &&
                 !callAudioAutoAttempted && callAudioSupported) {
                 callAudioAutoAttempted = true;
                 App::get().startCallAudio();
@@ -1203,6 +1208,11 @@ void App::loadMoreContacts() const {
 void App::answerCall() const {
     if (auto call = impl_->incomingCall.peek()) sendTo(call->peerId, "call.answer", "{}");
     impl_->incomingCall.set(std::nullopt);
+}
+
+void App::answerCallOnComputer() const {
+    if (auto c = impl_->incomingCall.peek()) impl_->callAudioOnAnswer = c->peerId;
+    answerCall();
 }
 
 void App::rejectCall() const {

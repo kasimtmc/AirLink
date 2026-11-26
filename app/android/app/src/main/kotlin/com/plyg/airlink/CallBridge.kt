@@ -149,6 +149,8 @@ object CallBridge {
             "call.mute" -> if (full) service?.mute(request.optBoolean("on")) else audio.isMicrophoneMute = request.optBoolean("on")
             "call.route" -> if (full) service?.route(request.optString("route"))
                 else setRoute(audio, request.optString("route"))
+            "call.dtmf" -> request.optString("digit").firstOrNull()?.takeIf { it in "0123456789*#" }
+                ?.let { if (full) service?.dtmf(it) }
             "call.volume" -> audio.adjustStreamVolume(AudioManager.STREAM_VOICE_CALL,
                 if (request.optInt("delta") > 0) AudioManager.ADJUST_RAISE else AudioManager.ADJUST_LOWER, 0)
             else -> return
@@ -192,7 +194,7 @@ object CallBridge {
     fun handle(context: Context, peerId: String, kind: String, request: JSONObject) {
         val telecom = context.getSystemService(TelecomManager::class.java)
         when (kind) {
-            "call.hangup", "call.hold", "call.mute", "call.route", "call.volume" ->
+            "call.hangup", "call.hold", "call.mute", "call.route", "call.volume", "call.dtmf" ->
                 main.post { control(context, kind, request) }
             "call.status_request" -> statusChanged()
             "calls.log_request" -> {

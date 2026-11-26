@@ -135,6 +135,7 @@ Yalnızca eşleşmiş cihazlar arasında gider. Tanımlı türler:
 | `call.hold` / `call.mute` | PC → telefon | `{ on }` (bekletme yalnızca tam denetimde) |
 | `call.route` | PC → telefon | `{ route }`: `earpiece`, `speaker`, `bluetooth`, `wired` |
 | `call.volume` | PC → telefon | `{ delta }`: pozitif artırır, diğerleri azaltır |
+| `call.dtmf` | PC → telefon | `{ digit }`: `0`–`9`, `*`, `#`; tuş tonu görüşmeye çalınır (yalnızca tam denetimde) |
 | `call.dial` | PC → telefon | `{ number }` → `call.dial_result { number, ok, error? }` (`no_number`, `no_permission`) |
 | `call.audio_share` | telefon → Linux PC | `{ on, once? }`; `on: true` Linux bilgisayarda yalnızca aktif görüşme sırasında HFP köprüsünü otomatik açar. `once: true` yalnızca sürmekte olan görüşmeye uygulanır. `on: false` otomatiği ve etkin köprüyü kapatır |
 | `screen.start` | PC → telefon | `{ quality, codec? }` (bkz. bölüm 10) → `screen.started { width, height }` veya `screen.stopped { reason }` |

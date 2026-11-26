@@ -93,6 +93,12 @@ class AirLinkInCallService : InCallService() {
     fun answer() { call?.answer(0) }
     fun hold(on: Boolean) { if (on) call?.hold() else call?.unhold() }
     fun mute(on: Boolean) { setMuted(on) }
+    /** A keypad key during the call (menus, PINs): its tone for a moment. */
+    fun dtmf(digit: Char) {
+        val current = call ?: return
+        current.playDtmfTone(digit)
+        android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({ current.stopDtmfTone() }, 180)
+    }
 
     fun route(name: String) {
         if (Build.VERSION.SDK_INT >= 34) {
