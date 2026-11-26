@@ -24,6 +24,14 @@ windows-sys = { version = "0.61", features = [
     "Win32_UI_Input_KeyboardAndMouse",
     "Win32_UI_WindowsAndMessaging",
 ] }
+# The phone's Bluetooth audio (A2DP sink, HFP hands-free), WinRT.
+windows = { version = "0.62", features = [
+    "ApplicationModel_Calls",
+    "Devices_Enumeration",
+    "Foundation_Collections",
+    "Media_Audio",
+    "Win32_System_Com",
+] }
 
 [dev-dependencies]
 tokio = { workspace = true }

@@ -608,7 +608,7 @@ struct App::Impl {
         } else if (kind == "screen.started") {
             if (peerId == screenPeer.peek()) screenStatus.set("live");
         } else if (kind == "player.audio") {
-#if defined(__linux__) && !defined(__ANDROID__)
+#if (defined(__linux__) || defined(_WIN32)) && !defined(__ANDROID__)
             if (peer["platform"].str() != "android") return;
             if (body["playing"].boolean()) {
                 if (!playerBluetoothPeer.empty() && playerBluetoothPeer != peerId &&
@@ -922,7 +922,7 @@ void App::pump() const {
             s.nextBluetoothRouteTick = s.ticks + 40;
         }
     }
-#if defined(__linux__) && !defined(__ANDROID__)
+#if (defined(__linux__) || defined(_WIN32)) && !defined(__ANDROID__)
     if (!s.playerBluetoothPeer.empty() &&
         std::chrono::steady_clock::now() >= s.playerBluetoothExpires) {
         s.playerBluetoothPeer.clear();
@@ -1456,9 +1456,9 @@ void App::setMediaAudioEnabled(bool on) const {
     if (on) {
         const auto& peers = impl_->peers.peek();
         if (std::none_of(peers.begin(), peers.end(), [&](const Peer& p) {
-                return p.id == peer && p.paired && p.online && p.platform == "linux";
+                return p.id == peer && p.paired && p.online && (p.platform == "linux" || p.platform == "windows");
             })) {
-            impl_->notices.push_back("Bluetooth oynatıcı sesi için çevrimiçi Linux bilgisayarı seçin");
+            impl_->notices.push_back("Bluetooth oynatıcı sesi için çevrimiçi Linux veya Windows bilgisayarı seçin");
             return;
         }
     }

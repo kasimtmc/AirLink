@@ -13,6 +13,9 @@ mod input;
 mod linux;
 #[cfg(windows)]
 mod windows;
+#[cfg(windows)]
+#[path = "bt_audio_windows.rs"]
+pub mod bt_audio;
 
 use std::path::PathBuf;
 use std::sync::{Arc, Condvar, Mutex};

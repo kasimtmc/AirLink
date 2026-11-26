@@ -143,6 +143,23 @@ uint64_t airlink_adb_shell_port(AirlinkNode* node, const char* dir, const char* 
 
 void airlink_free_string(char* s);
 
+#ifdef _WIN32
+/* Windows: the paired phone's Bluetooth audio. Phones are matched by their Bluetooth name
+ * (or the only paired one).
+ *   airlink_win_call_audio_*: the PC as the phone's HFP hands-free unit during a call; needs
+ *     the packaged install (restricted phoneLineTransportManagement capability). Phase:
+ *     0 off, 1 connecting, 2 waiting for the phone's Bluetooth route, 3 active, 4 error;
+ *     status_out (may be NULL) gets a message to free with airlink_free_string.
+ *   airlink_win_player_bluetooth: the PC as an A2DP sink for the phone while phone is
+ *     non-empty (NULL or "" closes it); its status is freed with airlink_free_string. */
+bool airlink_win_call_audio_supported(void);
+void airlink_win_call_audio_start(const char* phone);
+void airlink_win_call_audio_stop(void);
+int32_t airlink_win_call_audio_phase(char** status_out);
+void airlink_win_player_bluetooth(const char* phone);
+char* airlink_win_player_bluetooth_status(void);
+#endif
+
 #ifdef __cplusplus
 }
 #endif

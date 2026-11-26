@@ -78,7 +78,7 @@ Kod, commit geçmişi (`7581971` → `4fa0abc`) ve çalışma ağacı README'dek
 | 1 | Keşif, eşleştirme, QUIC/TLS, dosya, pano | mDNS keşfi, SAS eşleştirme, dosya/klasör, pano; ek olarak IP ile eşleştirme | `cargo test` (e2e loopback), Linux↔Android, WinBoat↔Linux, fiziksel Windows | — |
 | 2 | Bildirimler, SMS, rehber, aramalar | `notification.*`, `sms.*`, `contacts.search/list`, `calls.log`, `call.*` (yanıtla, reddet, kapat, beklet, sessiz, ses yolu, ses düzeyi, arama başlatma) | Xiaomi 14 Ultra'da kullanıcı doğruladı | Bluetooth ile arama sesinin bilgisayara gelmesi (Faz 4) |
 | 3 | Telefon ekranı ve uygulamaları bilgisayarda | `screen.*` (erişilebilirlikle dokunma), `apps.*` (kabuk yardımcısı, sanal ekran, ayrı pencere, klavye/teker), H.264 + JPEG dönüşü | Pencereler, girdi, yatay mod, canlı H.264 uygulama penceresi, ekran paylaşımı ve `kod:port` ile ADB eşleşmesi gerçek cihazda doğrulandı | — |
-| 4 | PC'yi telefondan kontrol, telefonu iterek aktarım, Bluetooth arama sesi | 4A/4B ve 4C Linux tamam | Ekran kontrolü, telefonu iterek aktarım ve Linux HFP görüşme sesi gerçek cihazda doğrulandı | Windows HFP |
+| 4 | PC'yi telefondan kontrol, telefonu iterek aktarım, Bluetooth arama sesi | 4A/4B ve 4C Linux tamam | Ekran kontrolü, telefonu iterek aktarım ve Linux HFP görüşme sesi gerçek cihazda doğrulandı | Windows HFP/A2DP fiziksel deneme |
 
 Planda olmayan ama yapılan işler: Flutter yerine Kompoz C++ arayüzü, Android uygulamasının Java'dan Kotlin'e taşınması ve `com.plyg.airlink` paket adı, Windows ANGLE paketi ve tanılama betiği, Kompoz `egl_window.cpp` düzeltmesi (kardeş depoda).
 
@@ -88,7 +88,7 @@ Kullanıcı canlı H.264 penceresi ve ekran paylaşımını, `kod:port` ile ilk 
 
 Çalışma ağacı `ffdbb52` ile commit'lendi. O tarihte PolyForm Strict 1.0.0 seçilmişti; 25 Kasım 2026 tarihli lisans değişikliği yukarıda kayıtlı.
 
-Açık işler: (1) Faz 4C Windows görüşme sesi, (2) Faz 5.
+Açık işler: (1) Faz 4C Windows görüşme ve oynatıcı sesinin fiziksel bilgisayarda denenmesi, (2) Faz 5.
 
 ## Faz 4 ve Faz 5 planı (24 Kasım 2026)
 
@@ -98,7 +98,7 @@ Sıra kullanıcı kararıyla: A → B → C, ardından son faz olarak arayüz iy
 |---|---|---|
 | 4A Bilgisayarı telefondan kontrol | Bilgisayar ekranı telefonda (H.264), dokunma fare, iki parmak kaydırma, tuşlar ve yazı; bilgisayarda onay ve "Durdur" çubuğu | Tamam; kullanıcı gerçek cihazda doğruladı |
 | 4B Telefonu iterek aktarım | Telefonu bilgisayara doğru itme ("fırlatarak gönder") | Gerçek cihazda kullanıcı tarafından doğrulandı |
-| 4C Bluetooth ile arama sesi | Bilgisayar telefonun kulaklığı gibi (HFP) | Linux gerçek görüşmede doğrulandı; Windows desteği bekliyor |
+| 4C Bluetooth ile arama sesi | Bilgisayar telefonun kulaklığı gibi (HFP) | Linux gerçek görüşmede doğrulandı; Windows HFP ve A2DP uygulandı, fiziksel denemesi bekliyor |
 | 5 Arayüz iyileştirmeleri | Görsel düzen, gezinme ve kullanılabilirlik | Başlanmadı |
 
 4A ayrıntıları:
@@ -112,12 +112,12 @@ Sıra kullanıcı kararıyla: A → B → C, ardından son faz olarak arayüz iy
 Kompoz’un Android Java kaynakları AirLink deposunun dışında, Kompoz deposunda tutuluyor.
 
 
-4C Linux uygulaması: `app/src/call_audio_linux.cpp` eşleşmiş Bluetooth telefonu bulur ve bağlar. Kullanıcı görüşmede “Bilgisayardan konuş” dediğinde Android'e `call.route=bluetooth` gönderilir; PipeWire/WirePlumber'ın açtığı HFP giriş/çıkışları `module-loopback` ile varsayılan bilgisayar hoparlörü ve mikrofonuna bağlanır. Görüşme bittiğinde ya da kullanıcı kapattığında modüller kaldırılır. Xiaomi 14 Ultra ile gerçek aramada kullanıcı gelen sesi, bilgisayar mikrofonunun karşı tarafa ulaşmasını, sesi telefona geri döndürmeyi ve görüşme sonrası temizliği doğruladı. Windows desteği henüz uygulanmadı. Ayrıntılar: `docs/hfp-audio.md`.
+4C Linux uygulaması: `app/src/call_audio_linux.cpp` eşleşmiş Bluetooth telefonu bulur ve bağlar. Kullanıcı görüşmede “Bilgisayardan konuş” dediğinde Android'e `call.route=bluetooth` gönderilir; PipeWire/WirePlumber'ın açtığı HFP giriş/çıkışları `module-loopback` ile varsayılan bilgisayar hoparlörü ve mikrofonuna bağlanır. Görüşme bittiğinde ya da kullanıcı kapattığında modüller kaldırılır. Xiaomi 14 Ultra ile gerçek aramada kullanıcı gelen sesi, bilgisayar mikrofonunun karşı tarafa ulaşmasını, sesi telefona geri döndürmeyi ve görüşme sonrası temizliği doğruladı. Windows: `PhoneLineTransportDevice` ile HFP ve `AudioPlaybackConnection` ile A2DP alıcısı (26 Kasım 2026) uygulandı. HFP paketli kurulum gerektiriyor. Çapraz derleme geçti; fiziksel deneme bekliyor. Ayrıntılar: `docs/hfp-audio.md`.
 
 4C ses ayırımı: Android'de gerektiğinde arama sesi seçilen Linux bilgisayara Bluetooth HFP ile gider.
 “Oynatıcı sesini aktar” seçili kaynaktaki MediaSession oynatma durumuna göre Linux A2DP
 profilini açıp kapatır. Oynatıcı sesine ekran paylaşımı onayı ve ses yakalama izni uygulanmaz.
-Algılama için mevcut Android bildirim erişimi kullanılır. Windows A2DP alıcısı henüz yok.
+Algılama için mevcut Android bildirim erişimi kullanılır. Windows A2DP alıcısı `AudioPlaybackConnection` ile eklendi (fiziksel deneme bekliyor).
 Xiaomi 14 Ultra ve Linux arasında Deezer ile uçtan uca doğrulandı. Oynatmada aptX HD
 A2DP ses girişi açıldı, duraklatınca profil kapandı ve oynatmaya devam edince tekrar
 bağlandı. Android ekran yakalama oturumu ve AirLink PCM çıkışı test boyunca kapalıydı.

@@ -44,7 +44,13 @@ def main() -> None:
                                ("LICENSE", "licenses/ANGLE.txt")):
             bundle.writestr("AirLink/" + target, angle.read(source))
         bundle.write(ROOT / "LICENSE", "AirLink/LICENSE.txt")
-        bundle.write(ROOT / "app/packaging/windows/diagnose.cmd", "AirLink/diagnose.cmd")
+        windows = ROOT / "app/packaging/windows"
+        for name in ("diagnose.cmd", "install-package.cmd", "uninstall-package.cmd", "diagnose-package.cmd"):
+            bundle.write(windows / name, "AirLink/" + name)
+        # The packaged install (call audio needs package identity): manifest and logos.
+        for file in sorted((windows / "appx").rglob("*")):
+            if file.is_file():
+                bundle.write(file, "AirLink/" + str(file.relative_to(windows / "appx")))
         bundle.write(ROOT / "docs/windows-test.md", "AirLink/TEST.md")
     with ZipFile(out) as bundle:
         if bad := bundle.testzip():

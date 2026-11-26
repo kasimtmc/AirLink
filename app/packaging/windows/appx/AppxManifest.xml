@@ -1,0 +1,53 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Packaged (sideloaded) AirLink: package identity for the restricted phone-line API that makes
+     this PC the phone's Bluetooth hands-free unit during calls. Registered from the unzipped
+     folder by install-package.cmd (Windows Developer Mode); no Store submission. -->
+<Package
+  xmlns="http://schemas.microsoft.com/appx/manifest/foundation/windows10"
+  xmlns:uap="http://schemas.microsoft.com/appx/manifest/uap/windows10"
+  xmlns:uap3="http://schemas.microsoft.com/appx/manifest/uap/windows10/3"
+  xmlns:desktop="http://schemas.microsoft.com/appx/manifest/desktop/windows10"
+  xmlns:desktop6="http://schemas.microsoft.com/appx/manifest/desktop/windows10/6"
+  xmlns:rescap="http://schemas.microsoft.com/appx/manifest/foundation/windows10/restrictedcapabilities"
+  IgnorableNamespaces="uap uap3 desktop desktop6 rescap">
+  <Identity Name="com.plyg.AirLink" Publisher="CN=AirLink" Version="0.1.0.0" ProcessorArchitecture="x64"/>
+  <Properties>
+    <DisplayName>AirLink</DisplayName>
+    <PublisherDisplayName>AirLink</PublisherDisplayName>
+    <Logo>Assets\StoreLogo.png</Logo>
+    <!-- Keep AppData and the registry shared with the unpackaged app (same pairings). -->
+    <desktop6:FileSystemWriteVirtualization>disabled</desktop6:FileSystemWriteVirtualization>
+    <desktop6:RegistryWriteVirtualization>disabled</desktop6:RegistryWriteVirtualization>
+  </Properties>
+  <Dependencies>
+    <TargetDeviceFamily Name="Windows.Desktop" MinVersion="10.0.19041.0" MaxVersionTested="10.0.26100.0"/>
+  </Dependencies>
+  <Resources>
+    <Resource Language="tr-tr"/>
+  </Resources>
+  <Applications>
+    <Application Id="AirLink" Executable="airlink.exe" EntryPoint="Windows.FullTrustApplication">
+      <uap:VisualElements DisplayName="AirLink" Description="AirLink"
+        Square150x150Logo="Assets\Square150x150Logo.png" Square44x44Logo="Assets\Square44x44Logo.png"
+        BackgroundColor="transparent"/>
+      <Extensions>
+        <!-- `airlink-pkg` in a console starts the packaged app with the caller's environment
+             (diagnose-package.cmd uses it for the log). -->
+        <uap3:Extension Category="windows.appExecutionAlias" Executable="airlink.exe" EntryPoint="Windows.FullTrustApplication">
+          <uap3:AppExecutionAlias>
+            <desktop:ExecutionAlias Alias="airlink-pkg.exe"/>
+          </uap3:AppExecutionAlias>
+        </uap3:Extension>
+      </Extensions>
+    </Application>
+  </Applications>
+  <Capabilities>
+    <Capability Name="internetClientServer"/>
+    <Capability Name="privateNetworkClientServer"/>
+    <uap:Capability Name="phoneCall"/>
+    <rescap:Capability Name="runFullTrust"/>
+    <rescap:Capability Name="phoneLineTransportManagement"/>
+    <rescap:Capability Name="unvirtualizedResources"/>
+    <DeviceCapability Name="bluetooth"/>
+  </Capabilities>
+</Package>

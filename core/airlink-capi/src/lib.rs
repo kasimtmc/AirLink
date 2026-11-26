@@ -926,3 +926,64 @@ pub unsafe extern "C" fn airlink_free_string(s: *mut c_char) {
         drop(unsafe { CString::from_raw(s) });
     }
 }
+
+// ---- Windows: the phone's Bluetooth audio (see airlink.h) ------------------------------------
+
+#[cfg(windows)]
+use airlink_desktop::bt_audio;
+
+/// Whether Windows has the phone-line transport API (HFP hands-free).
+#[cfg(windows)]
+#[unsafe(no_mangle)]
+pub extern "C" fn airlink_win_call_audio_supported() -> bool {
+    guard(false, bt_audio::call_supported)
+}
+
+/// Connects to `phone` as its hands-free unit for the current call.
+///
+/// # Safety
+/// `phone` is NULL or a valid NUL-terminated string.
+#[cfg(windows)]
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn airlink_win_call_audio_start(phone: *const c_char) {
+    let phone = unsafe { read_str(phone) }.unwrap_or_default();
+    guard((), || bt_audio::call_start(&phone))
+}
+
+#[cfg(windows)]
+#[unsafe(no_mangle)]
+pub extern "C" fn airlink_win_call_audio_stop() {
+    guard((), bt_audio::call_stop)
+}
+
+/// The phase (0 off, 1 connecting, 2 waiting for route, 3 active, 4 error); `status_out`
+/// (optional) gets the message, to release with airlink_free_string.
+///
+/// # Safety
+/// `status_out` is NULL or a valid pointer.
+#[cfg(windows)]
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn airlink_win_call_audio_phase(status_out: *mut *mut c_char) -> i32 {
+    let (phase, status) = guard((bt_audio::CallPhase::Error, String::new()), bt_audio::call_status);
+    if !status_out.is_null() {
+        unsafe { *status_out = to_c(status) };
+    }
+    phase as i32
+}
+
+/// Opens the phone's media stream here (A2DP sink) while `phone` is non-empty.
+///
+/// # Safety
+/// `phone` is NULL or a valid NUL-terminated string.
+#[cfg(windows)]
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn airlink_win_player_bluetooth(phone: *const c_char) {
+    let phone = unsafe { read_str(phone) }.unwrap_or_default();
+    guard((), || bt_audio::player_set_phone(&phone))
+}
+
+#[cfg(windows)]
+#[unsafe(no_mangle)]
+pub extern "C" fn airlink_win_player_bluetooth_status() -> *mut c_char {
+    to_c(guard(String::new(), bt_audio::player_status))
+}

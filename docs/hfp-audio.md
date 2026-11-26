@@ -17,9 +17,17 @@ Linux makinede Xiaomi 14 Ultra ile Bluetooth eşleşmesi ve bağlantısı görü
 Bu görüşme denemesi önceki masaüstü düğmesiyle yapıldı. Sonraki sürümde aynı HFP köprüsünü
 telefondaki anahtar başlatıyor; bu yeni başlatma yolu gerçek görüşmede ayrıca denenecek.
 
-PipeWire'ın `module-loopback` yükleme/kaldırması sessiz bir geçici uçla doğrulandı. Android APK, Linux uygulaması ve Windows çapraz derlemesi başarılıdır; Windows'ta görüşme sesi köprüsü henüz yoktur.
+PipeWire'ın `module-loopback` yükleme/kaldırması sessiz bir geçici uçla doğrulandı. Android APK, Linux uygulaması ve Windows çapraz derlemesi başarılıdır.
 
-Windows uygulaması için HFP Hands-Free ses yolu henüz uygulanmadı. [Microsoft'un Bluetooth Classic ses belgeleri](https://learn.microsoft.com/en-us/windows-hardware/drivers/bluetooth/bluetooth-classic-audio) Windows'un standart HFP ses uçlarının bağlı kulaklık/aksesuar için Audio Gateway rolünü tanımlar; telefonun Audio Gateway olduğu ters rol ayrıca araştırılmalıdır. WinBoat sanal makinesi gerçek Bluetooth donanımını geçirmiyorsa test fiziksel Windows makinede yapılacaktır.
+## Windows uygulaması
+
+Windows tarafı Rust çekirdeğinde (`core/airlink-desktop/src/bt_audio_windows.rs`), WinRT üzerinden çalışır. C++ katmanı `app/src/call_audio_windows.cpp`, C ABI'si `airlink_win_*` adıyla tanımlıdır.
+
+- **Arama sesi (HFP Hands-Free):** [`PhoneLineTransportDevice`](https://learn.microsoft.com/en-us/uwp/api/windows.applicationmodel.calls.phonelinetransportdevice) ile eşleşmiş telefon bulunur. Sonra `RequestAccessAsync`, `RegisterApp` ve `ConnectAsync` ile HFP hizmet bağlantısı kurulur. Linux'taki gibi bir döngü kurulmaz: Windows, `AudioRoutingStatus` değeri `CanRouteToLocalDevice` olduğunda SCO sesini kendisi yerel hoparlöre ve mikrofona verir (Phone Link'in kullandığı yol). Bu özellik bulunmayan eski sürümlerde, bağlantıdan 3 saniye sonra ses etkin sayılır. 40 saniye içinde ses yolu açılmazsa hata gösterilir. Kapatınca `UnregisterApp` çağrılır; böylece sonraki aramalar telefonda kalır.
+- API kısıtlı `phoneLineTransportManagement` yetkisini ister ve paket kimliği gerektirir. Bunun için Geliştirici Modu'nda klasörden kaydedilen bir paket kullanılır (`app/packaging/windows/appx/AppxManifest.xml`, `install-package.cmd`). Mağaza onayı gerekmez. Manifest AppData ve kayıt defteri sanallaştırmasını kapatır, böylece eşleşmeler paketsiz sürümle ortak kalır.
+- **Oynatıcı sesi (A2DP alıcısı):** [`AudioPlaybackConnection`](https://learn.microsoft.com/en-us/uwp/api/windows.media.audio.audioplaybackconnection) (Windows 10 2004+) seçili oynatıcı çaldığı sürece açık tutulur ve Windows varsayılan çıkıştan çalar. Paket kimliği gerekmez.
+- Bilinen riskler: Açık kaynak [MyPhone](https://github.com/BestOwl/MyPhone) projesi aynı API ile hizmet bağlantısı kurmuş ama SCO sesini aktaramamış. Bu proje sesi kendi sürücüsüyle almaya çalışıyordu; AirLink ise Windows'un yerel yönlendirmesine güveniyor. Bazı Windows 22H2 kurulumlarında `FromId` çağrısının boş döndüğü bildirilmiş. Phone Link aynı telefonda aramalar için açıksa bağlantıyı o tutabilir.
+- Doğrulama: Windows çapraz derlemesi geçti. Fiziksel Windows bilgisayarda henüz denenmedi. Deneme adımları `docs/windows-test.md` içinde.
 
 ## Diğer ses akışları
 

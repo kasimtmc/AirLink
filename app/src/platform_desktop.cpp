@@ -471,19 +471,8 @@ void setPauseScreenAudioDuringMusic(bool) {}
 void setScreenShareAudio(bool) {}
 void chooseMediaAudioPlayers() {}
 void setPlayerAudioTarget(const std::string&) {}
-#if defined(_WIN32)
-void setPlayerBluetoothPhone(const std::string&) {}
-std::string playerBluetoothStatus() { return {}; }
-#endif
 
 bool canUseAdvancedMode() { return false; }
-#if defined(_WIN32)
-bool canBridgeCallAudio() { return false; }
-void startCallAudio(const std::string&) {}
-void stopCallAudio() {}
-CallAudioPhase callAudioPhase() { return CallAudioPhase::Off; }
-std::string callAudioStatus() { return {}; }
-#endif
 bool canFling() { return false; }
 bool flingEnabled() { return false; }
 void setFlingEnabled(bool) {}

@@ -799,7 +799,7 @@ fun ScreenControlCard(app: App) {
 fun PhoneAudioCard(app: App) {
     val computers = app.pairedPeers().filter { it.online && it.platform != "android" }
     val target = if (app.mediaAudioTarget().isEmpty()) app.flingTarget() else app.mediaAudioTarget()
-    val linuxTarget = computers.any { it.id == target && it.platform == "linux" }
+    val bluetoothTarget = computers.any { it.id == target && (it.platform == "linux" || it.platform == "windows") }
     OutlinedCard(modifier = Modifier.fillMaxWidth()) {
         Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Text("Telefon sesini paylaş", style = MaterialTheme.typography.titleMedium)
@@ -818,7 +818,7 @@ fun PhoneAudioCard(app: App) {
                 Text("Arama sesi açıksa görüşme başladığında Bluetooth bağlantısı kurulur.",
                      style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
-            if (linuxTarget) {
+            if (bluetoothTarget) {
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text("Arama sesini paylaş", modifier = Modifier.weight(1f))
                     Switch(checked = app.callAudioOn(), onCheckedChange = { if (it) app.startCallAudio() else app.stopCallAudio() })
@@ -827,7 +827,7 @@ fun PhoneAudioCard(app: App) {
                     OutlinedButton(onClick = { app.shareCurrentCallAudio() }) { Text("Süren görüşmenin sesini aktar") }
                 }
             } else {
-                Text("Arama sesi paylaşımı şu anda Linux bilgisayarda kullanılabilir.",
+                Text("Arama sesi paylaşımı Linux ve Windows bilgisayarda kullanılabilir.",
                      style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -845,7 +845,7 @@ fun PhoneAudioCard(app: App) {
             }
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text("Oynatıcı sesini aktar", modifier = Modifier.weight(1f))
-                Switch(checked = app.mediaAudioEnabled(), enabled = linuxTarget,
+                Switch(checked = app.mediaAudioEnabled(), enabled = bluetoothTarget,
                        onCheckedChange = { app.setMediaAudioEnabled(it) })
             }
             if (app.mediaAudioEnabled()) {
@@ -856,7 +856,7 @@ fun PhoneAudioCard(app: App) {
                 }
             }
             OutlinedButton(onClick = { app.chooseMediaAudioPlayers() }) { Text("Oynatıcıları seç") }
-            Text("Seçili bir oynatıcı çalarken eşleşmiş Linux bilgisayara Bluetooth medya sesi gider.",
+            Text("Seçili bir oynatıcı çalarken eşleşmiş bilgisayara Bluetooth medya sesi gider.",
                  style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
     }
