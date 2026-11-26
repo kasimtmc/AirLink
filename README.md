@@ -77,7 +77,7 @@ To start AirLink when you log in, turn on **Oturum açılınca başlat** (Start 
 
 #### KDE Plasma panel widget
 
-On Plasma 6, `install.sh` also installs the AirLink panel widget (`app/packaging/linux/plasmoid`, id `dev.airlink.panel`) when `kpackagetool6` is available. It puts AirLink on the panel as an icon of its own: a click opens AirLink's tray panel under the icon (or starts AirLink), and the icon takes the tray icon's colors (blue starting, green connected, orange no devices, grey paused or not running, red error), read from `$XDG_RUNTIME_DIR/airlink.status`.
+On Plasma 6, `install.sh` also installs the AirLink panel widget (`app/packaging/linux/plasmoid`, id `dev.airlink.panel`) when `kpackagetool6` is available. It puts AirLink on the panel as an icon of its own: a click opens AirLink's tray panel under the icon (or starts AirLink), and the icon takes the tray icon's colors (blue starting, green connected, orange no devices, grey paused or not running, red error), read from `$XDG_RUNTIME_DIR/airlink.status` (for the Flatpak, `$XDG_RUNTIME_DIR/app/com.plyg.AirLink/airlink.status`).
 
 The widget runs the binary `install.sh` was given (default `app/build/airlink`); pass another path to point it elsewhere, and run `install.sh` again after moving the build:
 
@@ -91,7 +91,9 @@ Then right-click the panel, choose **Add Widgets…** and drag **AirLink** onto 
 systemctl --user restart plasma-plasmashell
 ```
 
-To package the widget as a `.plasmoid` file for another machine (the binary's path is filled in when it is packaged):
+Releases include the widget as `AirLink-<version>.plasmoid`, for the AppImage, the tar.gz and the Flatpak. It finds AirLink itself: the binary AirLink last started from (it records its own path, an AppImage's file included, in `~/.local/state/airlink/launcher`), then `airlink` on the `PATH`, then the Flatpak. Start AirLink once before the first click. The .deb installs the widget for all users, so it needs no `.plasmoid`.
+
+To package the widget for another machine with a fixed binary path instead (the path is filled in when it is packaged):
 
 ```bash
 widget=$(mktemp -d) && cp -r app/packaging/linux/plasmoid/. "$widget" && \

@@ -9,7 +9,7 @@ import org.kde.plasma.plasma5support as P5Support
 PlasmoidItem {
     id: root
     preferredRepresentation: compactRepresentation
-    // AirLink's state, as its tray icon shows it ($XDG_RUNTIME_DIR/airlink.status: the state, then
+    // AirLink's state, as its tray icon shows it (airlink.status: the state, then
     // the tooltip; no file: AirLink isn't running).
     property string state: "off"
     property string detail: "AirLink çalışmıyor · tıklayınca başlar"
@@ -20,6 +20,15 @@ PlasmoidItem {
     readonly property color stateColor: ({
         "connected": "#16A34A", "nodevices": "#D97706", "paused": "#6B7280", "error": "#DC2626", "starting": "#2563EB"
     })[state] ?? "#6B7280"
+
+    // install.sh writes the binary's path here; the released widget leaves it and runs
+    // contents/code/launch.sh, which finds AirLink itself (AppImage, .deb, tar.gz or Flatpak).
+    readonly property string bin: "@AIRLINK_BIN@"
+    function airlink(args) {
+        if (bin.indexOf("@") !== 0) return "'" + bin + "' " + args
+        const script = decodeURIComponent(Qt.resolvedUrl("../code/launch.sh").toString().replace("file://", ""))
+        return "sh '" + script + "' " + args
+    }
 
     toolTipMainText: "AirLink"
     toolTipSubText: detail
@@ -55,7 +64,7 @@ PlasmoidItem {
             onClicked: {
                 const at = area.mapToGlobal(area.width / 2, area.height / 2)
                 // (the comment makes each command new: the engine runs a source it already has only once)
-                launcher.run("'@AIRLINK_BIN@' --panel " + Math.round(at.x) + " " + Math.round(at.y) + " # " + Date.now())
+                launcher.run(root.airlink("--panel " + Math.round(at.x) + " " + Math.round(at.y)) + " # " + Date.now())
             }
         }
     }
@@ -81,7 +90,8 @@ PlasmoidItem {
     P5Support.DataSource {
         id: status
         engine: "executable"
-        connectedSources: ["cat \"$XDG_RUNTIME_DIR/airlink.status\" 2>/dev/null"]
+        // (a Flatpak's AirLink writes it in its app folder there)
+        connectedSources: ["cat \"$XDG_RUNTIME_DIR/airlink.status\" 2>/dev/null || cat \"$XDG_RUNTIME_DIR/app/com.plyg.AirLink/airlink.status\" 2>/dev/null"]
         interval: 1000
         onNewData: (source, data) => {
             const lines = (data["stdout"] || "").split("\n")

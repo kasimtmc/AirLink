@@ -50,7 +50,7 @@ void setShareHandler(std::function<void(std::vector<std::string>)> handler);
 std::optional<std::pair<int, int>> takePanelRequest();
 // What the tray icon shows (starting, connected, nodevices, paused, error), its tooltip and how many
 // times something was received (the widget blinks as it changes), for the Plasma panel widget:
-// $XDG_RUNTIME_DIR/airlink.status, gone as AirLink ends. Linux only.
+// $XDG_RUNTIME_DIR/airlink.status (in a Flatpak $XDG_RUNTIME_DIR/app/<id>/), gone as AirLink ends. Linux only.
 void publishStatus(const std::string& status, const std::string& tooltip, int received);
 
 // The core started: Android hooks its background notifications to it. `node` is an AirlinkNode*.

@@ -42,6 +42,7 @@ jobs:
             AirLink/dist/*.tar.gz
             AirLink/dist/*.deb
             AirLink/dist/*.AppImage
+            AirLink/dist/*.plasmoid
 
   flatpak:
     needs: linux

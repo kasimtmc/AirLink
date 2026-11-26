@@ -304,11 +304,48 @@ std::vector<std::string> filesFromArgs(int argc, char** argv) {
 
 namespace {
 
+// $XDG_RUNTIME_DIR, or inside a Flatpak its app folder there: the sandbox's own runtime folder is
+// new for every `flatpak run`, the app folder is shared by its instances and seen by the host.
+std::string runtimeDir() {
+    const char* runtime = std::getenv("XDG_RUNTIME_DIR");
+    if (!runtime || !*runtime) return {};
+    std::string dir = runtime;
+    if (const char* app = std::getenv("FLATPAK_ID"); app && *app) {
+        dir += std::string("/app/") + app;
+        std::error_code ec;
+        std::filesystem::create_directories(dir, ec);
+    }
+    return dir;
+}
+
 std::string socketPath() {
     if (const char* own = std::getenv("AIRLINK_SOCKET"); own && *own) return own;  // tests
-    const char* runtime = std::getenv("XDG_RUNTIME_DIR");
-    if (runtime && *runtime) return std::string(runtime) + "/airlink.sock";
+    if (std::string runtime = runtimeDir(); !runtime.empty()) return runtime + "/airlink.sock";
     return "/tmp/airlink-" + std::to_string(getuid()) + ".sock";
+}
+
+// What starts this AirLink from the host's side: an AppImage's own file (this binary is inside
+// its mount, a new folder each run), else this binary. Empty inside a Flatpak (`flatpak run`).
+std::string hostBinary() {
+    if (std::getenv("FLATPAK_ID")) return {};
+    if (const char* image = std::getenv("APPIMAGE"); image && *image) return image;
+    std::error_code ec;
+    auto exe = std::filesystem::read_symlink("/proc/self/exe", ec);
+    return ec ? std::string() : exe.string();
+}
+
+// The released panel widget starts AirLink with the binary named here
+// (~/.local/state/airlink/launcher); a Flatpak's widget finds it through flatpak itself.
+void recordLauncher() {
+    std::string bin = hostBinary();
+    if (bin.empty() || std::getenv("KOMPOZ_HEADLESS")) return;
+    const char* state = std::getenv("XDG_STATE_HOME");
+    const char* home = std::getenv("HOME");
+    std::filesystem::path dir = state && *state ? std::filesystem::path(state) : std::filesystem::path(home ? home : "") / ".local/state";
+    dir /= "airlink";
+    std::error_code ec;
+    std::filesystem::create_directories(dir, ec);
+    std::ofstream(dir / "launcher", std::ios::trunc) << bin << "\n";
 }
 
 sockaddr_un address(const std::string& path) {
@@ -392,6 +429,7 @@ void handleLaunch(int argc, char** argv) {
         std::exit(0);
     }
     serve();
+    recordLauncher();
     if (startAtLogin()) setStartAtLogin(true);  // (kept pointing at this binary)
     if (panel) deliverPanel(*panel);
     deliverShared(std::move(files));
@@ -578,9 +616,9 @@ void setStartAtLogin(bool on) {
     if (const char* app = std::getenv("FLATPAK_ID"); app && *app) {
         command = std::string("flatpak run ") + app;
     } else {
-        auto exe = std::filesystem::read_symlink("/proc/self/exe", ec);
-        if (ec) return log("autostart: cannot find this binary");
-        command = "\"" + exe.string() + "\"";
+        std::string exe = hostBinary();
+        if (exe.empty()) return log("autostart: cannot find this binary");
+        command = "\"" + exe + "\"";
     }
     std::filesystem::create_directories(file.parent_path(), ec);
     std::ofstream out(file, std::ios::trunc);
@@ -656,8 +694,8 @@ void setShareHandler(std::function<void(std::vector<std::string>)> handler) {
 #if defined(__linux__)
 namespace {
 std::string statusPath() {
-    const char* runtime = std::getenv("XDG_RUNTIME_DIR");
-    return runtime && *runtime ? std::string(runtime) + "/airlink.status" : std::string();
+    std::string runtime = runtimeDir();
+    return runtime.empty() ? std::string() : runtime + "/airlink.status";
 }
 }  // namespace
 

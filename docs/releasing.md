@@ -7,7 +7,7 @@ A version tag makes a draft pre-release with every file; I check it and publish 
 
 | Job | Runs on | Makes |
 |---|---|---|
-| `linux` | Ubuntu 24.04 | `AirLink-<v>-linux-x86_64.tar.gz`, `airlink_<v>_amd64.deb`, `AirLink-<v>-x86_64.AppImage` |
+| `linux` | Ubuntu 24.04 | `AirLink-<v>-linux-x86_64.tar.gz`, `airlink_<v>_amd64.deb`, `AirLink-<v>-x86_64.AppImage`, `AirLink-<v>.plasmoid` |
 | `flatpak` | freedesktop 25.08 container | `AirLink-<v>-x86_64.flatpak`, repacked from the tarball |
 | `windows` | Arch Linux container (MinGW GCC 14+) | `AirLink-<v>-windows-x64.zip` |
 | `windows-installer` | Ubuntu 24.04 (NSIS) | `AirLink-<v>-windows-x64-setup.exe` |

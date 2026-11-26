@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Packages a Linux release build as a tar.gz, a .deb and an AppImage, in dist/:
+# Packages a Linux release build as a tar.gz, a .deb, an AppImage and the KDE panel widget
+# (.plasmoid), in dist/:
 #   package-linux.sh [build dir]   (default app/build-release; build-linux.sh makes it)
 # The AppImage needs linuxdeploy (downloaded to dist/.tools when missing).
 set -euo pipefail
@@ -40,6 +41,21 @@ MimeType=application/octet-stream;
 DESKTOP
 }
 
+# The KDE panel widget, as a folder: `bin` is the binary it starts, empty for the released
+# widget (contents/code/launch.sh then finds AirLink).
+put_plasmoid() {  # dir [bin]
+    mkdir -p "$1"
+    cp -r "$linux/plasmoid/." "$1/"
+    sed -i "s|\"Version\": \"[^\"]*\"|\"Version\": \"$version\"|" "$1/metadata.json"
+    [[ -z "${2:-}" ]] || sed -i "s|@AIRLINK_BIN@|$2|" "$1/contents/ui/main.qml"
+}
+
+# ---- .plasmoid: the panel widget on its own, for any of the packages below ----------------
+put_plasmoid "$stage/plasmoid"
+rm -f "$dist/AirLink-$version.plasmoid"
+(cd "$stage/plasmoid" && python3 -m zipfile -c "$dist/AirLink-$version.plasmoid" metadata.json contents)
+echo "$dist/AirLink-$version.plasmoid"
+
 # ---- tar.gz: the binary, its files and install.sh (menus, file-manager entries, plasmoid) ----
 tarname="AirLink-$version-linux-x86_64"
 put_program "$stage/$tarname"
@@ -60,7 +76,7 @@ TXT
 tar -C "$stage" -czf "$dist/$tarname.tar.gz" "$tarname"
 echo "$dist/$tarname.tar.gz"
 
-# ---- .deb: /opt/airlink, a /usr/bin link, the menu entry and icon ----------------------------
+# ---- .deb: /opt/airlink, a /usr/bin link, the menu entry, icon and panel widget ------------
 deb="$stage/deb"
 put_program "$deb/opt/airlink"
 mkdir -p "$deb/usr/bin" "$deb/usr/share/applications" "$deb/usr/share/icons/hicolor/scalable/apps" "$deb/DEBIAN"
@@ -80,6 +96,7 @@ Name=AirLink ile gönder
 Icon=airlink
 Exec=/usr/bin/airlink --send %F
 DESKTOP
+put_plasmoid "$deb/usr/share/plasma/plasmoids/dev.airlink.panel" /usr/bin/airlink
 # The libraries it links: dpkg-shlibdeps reads them from the binary.
 mkdir -p "$stage/shlibs/debian"
 echo "Source: airlink" > "$stage/shlibs/debian/control"

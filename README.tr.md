@@ -77,7 +77,7 @@ Oturum açınca AirLink'in başlaması için Ayarlar'da **Oturum açılınca ba�
 
 #### KDE Plasma panel bileşeni
 
-Plasma 6'da `kpackagetool6` varsa `install.sh` AirLink panel bileşenini de kurar (`app/packaging/linux/plasmoid`, kimliği `dev.airlink.panel`). Bileşen AirLink'i panele kendi simgesi olarak ekler: tıklanınca AirLink'in tepsi paneli simgenin altında açılır (AirLink kapalıysa başlar). Simge tepsi simgesinin renklerini alır (başlatılıyor mavi, bağlı yeşil, cihaz yok turuncu, duraklatıldı ya da çalışmıyor gri, hata kırmızı); durumu `$XDG_RUNTIME_DIR/airlink.status` dosyasından okur.
+Plasma 6'da `kpackagetool6` varsa `install.sh` AirLink panel bileşenini de kurar (`app/packaging/linux/plasmoid`, kimliği `dev.airlink.panel`). Bileşen AirLink'i panele kendi simgesi olarak ekler: tıklanınca AirLink'in tepsi paneli simgenin altında açılır (AirLink kapalıysa başlar). Simge tepsi simgesinin renklerini alır (başlatılıyor mavi, bağlı yeşil, cihaz yok turuncu, duraklatıldı ya da çalışmıyor gri, hata kırmızı); durumu `$XDG_RUNTIME_DIR/airlink.status` dosyasından okur (Flatpak'ta `$XDG_RUNTIME_DIR/app/com.plyg.AirLink/airlink.status`).
 
 Bileşen, `install.sh`'e verilen programı çalıştırır (varsayılan `app/build/airlink`). Başka bir yol için onu verin; derlemeyi taşıdıktan sonra `install.sh`'i yeniden çalıştırın:
 
@@ -91,7 +91,9 @@ Ardından panele sağ tıklayıp **Bileşen Ekle…**'yi seçin ve **AirLink**'i
 systemctl --user restart plasma-plasmashell
 ```
 
-Bileşeni başka bir bilgisayar için `.plasmoid` dosyası olarak paketlemek için (programın yolu paketlerken yazılır):
+Sürümlerde bileşen AppImage, tar.gz ve Flatpak için `AirLink-<sürüm>.plasmoid` dosyası olarak gelir. Bu bileşen AirLink'i kendisi bulur: önce AirLink'in en son başlatıldığı dosya (AirLink kendi yolunu, AppImage'ın dosyası da dahil, `~/.local/state/airlink/launcher` dosyasına yazar), sonra `PATH`'teki `airlink`, sonra Flatpak. İlk tıklamadan önce AirLink'i bir kez başlatın. .deb bileşeni tüm kullanıcılar için kurar; onunla `.plasmoid` gerekmez.
+
+Bileşeni başka bir bilgisayar için programın yolu sabit olarak paketlemek için (yol paketlerken yazılır):
 
 ```bash
 widget=$(mktemp -d) && cp -r app/packaging/linux/plasmoid/. "$widget" && \
