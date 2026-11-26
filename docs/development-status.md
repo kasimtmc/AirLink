@@ -128,6 +128,7 @@ Xiaomi 14 Ultra ve Linux arasında Deezer ile uçtan uca doğrulandı. Oynatmada
 A2DP ses girişi açıldı, duraklatınca profil kapandı ve oynatmaya devam edince tekrar
 bağlandı. Android ekran yakalama oturumu ve AirLink PCM çıkışı test boyunca kapalıydı.
 Android APK, Linux ve Windows derlemeleri geçti. Güncel Android ve Linux sürümleri açıldı.
+26 Kasım 2026'da kart Ayarlar'a taşındıktan sonra yeniden denendi: ses bilgisayara geldi, duraklatınca durdu, yeniden çalınca geri geldi. Bağlantının ilk denemeleri telefon tarafından `Permission denied` ile reddedildi; AirLink'in 8 saniyelik yeniden denemesi bağlantıyı kurdu.
 
 “Ekran paylaşımı sesi” ayrı bir akıştır. Tam ekran ve tek uygulama paylaşımında Android'in
 izin verdiği medya sesi `screen_audio` ile gider. Bilgisayar ekranını paylaşırken Linux
