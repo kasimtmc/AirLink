@@ -298,6 +298,38 @@ static std::string firstLink(const std::string& text) {
     return text.substr(at, end - at);
 }
 
+// Files copied in a file manager (the clipboard's file:// items), as paths.
+static std::vector<std::string> copiedFiles(const Clipboard& clip) {
+    std::vector<std::string> out;
+    auto entry = clip.getClipEntry().value;
+    if (!entry) return out;
+    for (const auto& item : entry->items) {
+        if (!item.uri || !item.uri->starts_with("file://")) continue;
+        std::string path;
+        const std::string& u = *item.uri;
+        for (size_t i = 7; i < u.size(); ++i) {
+            if (u[i] == '%' && i + 2 < u.size() && std::isxdigit(static_cast<unsigned char>(u[i + 1])) &&
+                std::isxdigit(static_cast<unsigned char>(u[i + 2]))) {
+                path += char(std::stoi(u.substr(i + 1, 2), nullptr, 16));
+                i += 2;
+            } else path += u[i];
+        }
+#if defined(_WIN32)
+        if (path.size() > 2 && path[0] == '/' && path[2] == ':') path.erase(0, 1);  // file:///C:/…
+#endif
+        out.push_back(path);
+    }
+    return out;
+}
+
+static std::string callTypeLabel(const std::string& type) {
+    if (type == "incoming") return "Gelen";
+    if (type == "outgoing") return "Giden";
+    if (type == "missed") return "Cevapsız";
+    if (type == "rejected") return "Reddedildi";
+    return "Arama";
+}
+
 static std::string desktopRequestText() {
     std::string text = "Ekranınızı görecek, fare ve klavyeyi kullanabilecek. İstediğiniz zaman buradan durdurabilirsiniz.";
 #if defined(__linux__) && !defined(__ANDROID__)
@@ -427,7 +459,13 @@ fun AirLinkTray(app: App) {
     val tip = if (paused) "AirLink · paylaşım duraklatıldı" else if (status == TrayIconStatus.Error) "AirLink · işlem hatası"
               else if (status == TrayIconStatus.Starting) "AirLink · başlatılıyor"
               else if (online.isEmpty()) "AirLink · bağlı cihaz yok" else "AirLink · ${online.size} cihaz bağlı"
-    Tray(icon = icon, tooltip = tip, onAction = { setAppWindowVisible(true) }) {
+    // A click on the icon opens the panel there; a click while it is open closes it (the panel loses
+    // the focus first, then the click comes: one right after the panel closed is that click).
+    var panel by remember { mutableStateOf<WindowPopup?>(null) }
+    var panelClosedAt by remember { mutableStateOf(0L) }
+    Tray(icon = icon, tooltip = tip, onAction = { at ->
+            if (nowMs() - panelClosedAt > 400) panel = WindowPopup(anchor = at)
+        }) {
         Item("AirLink'i aç", onClick = { setAppWindowVisible(true) })
         val paired = app.pairedPeers()
         if (paired.isNotEmpty()) {
@@ -449,6 +487,26 @@ fun AirLinkTray(app: App) {
              onClick = { app.setSharingPaused(!paused && app.ready()) })
         Separator()
         Item("Çık", onClick = { exitApplication() })
+    }
+    // The Plasma panel widget's click (`airlink --panel X Y`): the panel at that point, as a tray click.
+    val request = app.panelRequest()
+    LaunchedEffect(request.serial) {
+        if (request.serial > 0 && nowMs() - panelClosedAt > 400) {
+            panel = WindowPopup(anchor = if (request.x == 0 && request.y == 0) null else IntOffset(request.x, request.y))
+        }
+    }
+    val open = panel
+    if (open != null) {
+        Window(onCloseRequest = {
+                   panel = null
+                   panelClosedAt = nowMs()
+               }, popup = open!!, title = "AirLink", state = rememberWindowState(size = DpSize(380.dp, 600.dp))) {
+            TrayPanel(app, onOpenApp = {
+                panel = null
+                panelClosedAt = nowMs()
+                setAppWindowVisible(true)
+            })
+        }
     }
 }
 
@@ -1252,6 +1310,272 @@ fun PhoneAudioCard(app: App) {
             OutlinedButton(onClick = { app.chooseMediaAudioPlayers() }) { Text("Oynatıcıları seç") }
             Text("Seçili bir oynatıcı çalarken eşleşmiş bilgisayara Bluetooth medya sesi gider.",
                  style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+    }
+}
+
+// ---- The tray panel (a click on the tray icon) -------------------------------------------------
+
+// What AirLink offers without its window: the devices and their quick actions, the phone's media,
+// messages, notifications, calls and contacts.
+@Kompozable
+fun TrayPanel(app: App, onOpenApp: () -> Unit) {
+    val cs = MaterialTheme.colorScheme
+    val clip = clipboard()
+    val text = clipboardManager()
+    val online = app.pairedPeers().filter { it.online }
+    val phone = online.any { it.platform == "android" }
+    var copied by remember { mutableStateOf(copiedFiles(clip)) }
+    var query by remember { mutableStateOf("") }
+    var replyThread by remember { mutableStateOf("") }
+    var replyText by remember { mutableStateOf("") }
+    LaunchedEffect(phone) {
+        if (phone) {
+            app.requestPhoneMedia()
+            app.requestSmsThreads()
+            app.requestCallLog()
+        }
+    }
+    LaunchedEffect(Unit) {
+        while (true) {
+            copied = copiedFiles(clip)
+            delay(1500)
+        }
+    }
+    LazyColumn(modifier = Modifier.fillMaxSize().background(cs.surfaceContainer), contentPadding = PaddingValues(12.dp),
+               verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        item {
+            Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text("AirLink", style = MaterialTheme.typography.titleMedium)
+                    Text(if (online.isEmpty()) "Bağlı cihaz yok" else "${online.size} cihaz bağlı",
+                         style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant)
+                }
+                TextButton(onClick = onOpenApp) { Text("AirLink'i aç") }
+            }
+        }
+        // Devices
+        if (online.isEmpty()) {
+            item {
+                Text("Eşleşmiş cihazlarınızdan biri çevrimiçi olunca burada görünür.", style = MaterialTheme.typography.bodySmall,
+                     color = cs.onSurfaceVariant, modifier = Modifier.padding(4.dp))
+            }
+        }
+        for (peer in online) {
+            item { TrayDevice(app, peer, copied, text) }
+        }
+        // Media
+        val media = app.phoneMedia()
+        if (media.active && phone) {
+            item { TrayMedia(app, media) }
+        }
+        // Messages
+        val threads = app.smsThreads()
+        if (phone && threads.isNotEmpty()) {
+            item { TraySection("Son mesajlar") }
+            items(threads.take(3)) { t ->
+                Column(modifier = Modifier.fillMaxWidth()) {
+                    Row(modifier = Modifier.fillMaxWidth().clickable(onClick = {
+                            replyThread = if (replyThread == t.address) "" else t.address
+                            replyText = ""
+                        }).padding(4.dp, 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                        CallAvatar(t.title(), 32)
+                        Spacer(modifier = Modifier.width(10.dp))
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(t.title(), style = MaterialTheme.typography.labelLarge, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            Text(t.snippet, style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant, maxLines = 1,
+                                 overflow = TextOverflow.Ellipsis)
+                        }
+                        Text(clockTime(t.date), style = MaterialTheme.typography.labelSmall, color = cs.onSurfaceVariant)
+                    }
+                    if (replyThread == t.address) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            OutlinedTextField(value = replyText, onValueChange = { replyText = it }, singleLine = true, label = "Yanıt",
+                                              modifier = Modifier.weight(1f))
+                            IconButton(onClick = {
+                                    app.sendSms(t.address, replyText)
+                                    replyThread = ""
+                                    replyText = ""
+                                }, enabled = replyText.isNotBlank()) { Icon(Icons.Filled.Send, contentDescription = "Gönder") }
+                        }
+                    }
+                }
+            }
+        }
+        // Notifications
+        val notifications = app.phoneNotifications()
+        if (notifications.isNotEmpty()) {
+            item { TraySection("Bildirimler") }
+            items(notifications.take(4)) { n ->
+                Row(modifier = Modifier.fillMaxWidth().padding(4.dp, 2.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("${n.app} · ${clockTime(n.time)}", style = MaterialTheme.typography.labelSmall, color = cs.primary)
+                        Text(if (n.title.isEmpty()) n.text else n.title, style = MaterialTheme.typography.labelLarge, maxLines = 1,
+                             overflow = TextOverflow.Ellipsis)
+                        if (n.title.isNotEmpty() && n.text.isNotEmpty()) {
+                            Text(n.text, style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant, maxLines = 2,
+                                 overflow = TextOverflow.Ellipsis)
+                        }
+                    }
+                    IconButton(onClick = { app.dismissPhoneNotification(n) }) { Icon(Icons.Filled.Close, contentDescription = "Kapat") }
+                }
+            }
+        }
+        // Calls
+        val calls = app.callLog()
+        if (phone && calls.isNotEmpty()) {
+            item { TraySection("Son çağrılar") }
+            items(calls.take(4)) { c ->
+                Row(modifier = Modifier.fillMaxWidth().padding(4.dp, 2.dp), verticalAlignment = Alignment.CenterVertically) {
+                    CallAvatar(c.title(), 32)
+                    Spacer(modifier = Modifier.width(10.dp))
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(c.title(), style = MaterialTheme.typography.labelLarge, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                             color = if (c.type == "missed") cs.error else cs.onSurface)
+                        Text("${callTypeLabel(c.type)} · ${clockTime(c.date)}", style = MaterialTheme.typography.bodySmall,
+                             color = cs.onSurfaceVariant)
+                    }
+                    IconButton(onClick = { app.dial(c.number) }) { Icon(AppIcons.Phone, contentDescription = "Ara") }
+                }
+            }
+        }
+        // Contacts
+        if (phone) {
+            item { TraySection("Kişiler") }
+            item {
+                OutlinedTextField(value = query, onValueChange = {
+                        query = it
+                        if (it.length >= 2) app.searchContacts(it)
+                    }, singleLine = true, label = "Kişi ya da numara ara", modifier = Modifier.fillMaxWidth())
+            }
+            if (query.length >= 2) {
+                items(app.contactResults().take(5)) { c ->
+                    Row(modifier = Modifier.fillMaxWidth().padding(4.dp, 2.dp), verticalAlignment = Alignment.CenterVertically) {
+                        CallAvatar(c.name, 32)
+                        Spacer(modifier = Modifier.width(10.dp))
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(c.name, style = MaterialTheme.typography.labelLarge, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            Text(if (c.label.isEmpty()) c.number else "${c.label} · ${c.number}", style = MaterialTheme.typography.bodySmall,
+                                 color = cs.onSurfaceVariant)
+                        }
+                        IconButton(onClick = { app.dial(c.number) }) { Icon(AppIcons.Phone, contentDescription = "Ara") }
+                        IconButton(onClick = { replyThread = c.number; replyText = "" }) { Icon(AppIcons.Sms, contentDescription = "Mesaj") }
+                    }
+                    if (replyThread == c.number) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            OutlinedTextField(value = replyText, onValueChange = { replyText = it }, singleLine = true, label = "Mesaj",
+                                              modifier = Modifier.weight(1f))
+                            IconButton(onClick = {
+                                    app.sendSms(c.number, replyText)
+                                    replyThread = ""
+                                    replyText = ""
+                                }, enabled = replyText.isNotBlank()) { Icon(Icons.Filled.Send, contentDescription = "Gönder") }
+                        }
+                    }
+                }
+                if (query.any { it.isDigit() }) {
+                    item {
+                        TextButton(onClick = { app.dial(query) }) { Text("$query numarasını ara") }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Preview(widthDp = 380, heightDp = 560)
+@Kompozable
+fun TrayPanelPreview() {
+    MaterialTheme { TrayPanel(appState(), onOpenApp = {}) }
+}
+
+@Kompozable
+fun TraySection(title: String) {
+    Text(title, style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary,
+         modifier = Modifier.padding(start = 4.dp, top = 10.dp, bottom = 2.dp))
+}
+
+// A connected device in the panel: its actions, and a place to drop files on.
+@Kompozable
+fun TrayDevice(app: App, peer: Peer, copied: List<String>, text: ClipboardManager) {
+    val cs = MaterialTheme.colorScheme
+    var dragging by remember { mutableStateOf(false) }
+    val drop = Modifier.dragAndDropTarget(
+        shouldStartDragAndDrop = { e -> carriesFiles(e) },
+        target = DragAndDropTarget(
+            onDrop = { e ->
+                dragging = false
+                app.sendDropped(peer.id, droppedFiles(e), droppedUris(e))
+                true
+            },
+            onEntered = { dragging = true },
+            onExited = { dragging = false },
+            onEnded = { dragging = false },
+        ),
+    )
+    Card(modifier = drop.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = if (dragging) cs.secondaryContainer else cs.surface)) {
+        Column(modifier = Modifier.fillMaxWidth().padding(12.dp, 8.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Box {
+                    Icon(AppIcons.forPlatform(peer.platform), contentDescription = null, modifier = Modifier.size(28.dp))
+                    Box(modifier = Modifier.align(Alignment.TopEnd)) { OnlineDot(true) }
+                }
+                Spacer(modifier = Modifier.width(12.dp))
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(peer.name, style = MaterialTheme.typography.titleSmall)
+                    Text(if (dragging) "Göndermek için bırakın" else "Dosyaları buraya sürükleyin",
+                         style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant)
+                }
+                if (peer.platform == "android") {
+                    IconButton(onClick = {
+                            app.startScreen(peer.id)
+                            setAppWindowVisible(true)
+                        }) { Icon(AppIcons.Smartphone, contentDescription = "Ekranı göster") }
+                }
+            }
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.padding(start = 40.dp)) {
+                AssistChip(onClick = { app.pickAndSend(peer.id) }, label = { Text("Dosya") },
+                           leadingIcon = { Icon(AppIcons.UploadFile, contentDescription = null, modifier = Modifier.size(16.dp)) })
+                AssistChip(onClick = { app.sendClipboard(peer.id, text.getText()) }, label = { Text("Pano") },
+                           leadingIcon = { Icon(AppIcons.ContentPaste, contentDescription = null, modifier = Modifier.size(16.dp)) })
+                if (copied.isNotEmpty()) {
+                    AssistChip(onClick = { app.sendFiles(peer.id, copied) },
+                               label = { Text(if (copied.size == 1) "Kopyalanan dosya" else "Kopyalanan ${copied.size} dosya") },
+                               leadingIcon = { Icon(AppIcons.Upload, contentDescription = null, modifier = Modifier.size(16.dp)) })
+                }
+            }
+        }
+    }
+}
+
+// What plays on the phone: its cover, title and the transport buttons.
+@Kompozable
+fun TrayMedia(app: App, media: PhoneMedia) {
+    val cs = MaterialTheme.colorScheme
+    Card(modifier = Modifier.fillMaxWidth()) {
+        Row(modifier = Modifier.fillMaxWidth().padding(10.dp), verticalAlignment = Alignment.CenterVertically) {
+            if (media.art.width > 0) {
+                Image(media.art, contentDescription = null, modifier = Modifier.size(56.dp).clip(RoundedCornerShape(8.dp)))
+            } else {
+                Box(modifier = Modifier.size(56.dp).background(cs.primaryContainer, RoundedCornerShape(8.dp)), contentAlignment = Alignment.Center) {
+                    Icon(AppIcons.VolumeUp, contentDescription = null, tint = cs.onPrimaryContainer)
+                }
+            }
+            Spacer(modifier = Modifier.width(12.dp))
+            Column(modifier = Modifier.weight(1f)) {
+                Text(media.title, style = MaterialTheme.typography.titleSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(if (media.artist.isEmpty()) media.app else "${media.artist} · ${media.app}", style = MaterialTheme.typography.bodySmall,
+                     color = cs.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            }
+            IconButton(onClick = { app.phoneMediaControl("previous") }, enabled = media.canPrevious) {
+                Icon(Icons.Filled.KeyboardArrowLeft, contentDescription = "Önceki")
+            }
+            IconButton(onClick = { app.phoneMediaControl("toggle") }) {
+                Icon(if (media.playing) Icons.Filled.Pause else Icons.Filled.PlayArrow, contentDescription = if (media.playing) "Duraklat" else "Çal")
+            }
+            IconButton(onClick = { app.phoneMediaControl("next") }, enabled = media.canNext) {
+                Icon(Icons.Filled.KeyboardArrowRight, contentDescription = "Sonraki")
+            }
         }
     }
 }

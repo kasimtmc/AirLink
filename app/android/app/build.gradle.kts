@@ -5,7 +5,8 @@ plugins {
 // AirLink on Android. The native code (app/CMakeLists.txt: Kompoz, the UI and the Rust core, built as
 // libmain.so), Kompoz's Java side and its bundled fonts come from outside this folder.
 val appDir: File = rootProject.file("..")                       // AirLink/app
-val kompozRoot: File = File(appDir, "../../kompoz").canonicalFile  // the Kompoz checkout next to AirLink
+// The Kompoz checkout next to AirLink, or another one (-PkompozDir=/path, e.g. a branch's worktree).
+val kompozRoot: File = ((findProperty("kompozDir") as String?)?.let(::File) ?: File(appDir, "../../kompoz")).canonicalFile
 
 android {
     namespace = "com.plyg.airlink"

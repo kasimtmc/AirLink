@@ -136,6 +136,9 @@ Yalnızca eşleşmiş cihazlar arasında gider. Tanımlı türler:
 | `call.route` | PC → telefon | `{ route }`: `earpiece`, `speaker`, `bluetooth`, `wired` |
 | `call.volume` | PC → telefon | `{ delta }`: pozitif artırır, diğerleri azaltır |
 | `call.dtmf` | PC → telefon | `{ digit }`: `0`–`9`, `*`, `#`; tuş tonu görüşmeye çalınır (yalnızca tam denetimde) |
+| `media.state_request` | PC → telefon | `{}` → `media.state` |
+| `media.state` | telefon → PC | `{ active, app, package, title, artist, album, playing, position, position_at, duration, can_next, can_previous, art }`; çalan medya değişince tüm bilgisayarlara gider. `position_at` ms (epoch), `art` 160 px JPEG (base64) |
+| `media.control` | PC → telefon | `{ action }`: `play`, `pause`, `toggle`, `next`, `previous` |
 | `call.dial` | PC → telefon | `{ number }` → `call.dial_result { number, ok, error? }` (`no_number`, `no_permission`) |
 | `call.audio_share` | telefon → Linux PC | `{ on, once? }`; `on: true` Linux bilgisayarda yalnızca aktif görüşme sırasında HFP köprüsünü otomatik açar. `once: true` yalnızca sürmekte olan görüşmeye uygulanır. `on: false` otomatiği ve etkin köprüyü kapatır |
 | `screen.start` | PC → telefon | `{ quality, codec? }` (bkz. bölüm 10) → `screen.started { width, height }` veya `screen.stopped { reason }` |

@@ -86,6 +86,18 @@ struct PhoneNotification {
     bool operator==(const PhoneNotification&) const = default;
 };
 
+// What plays on a paired phone (its media.state), for the tray panel.
+struct PhoneMedia {
+    std::string peerId;
+    bool active = false;
+    std::string app, title, artist, album;
+    bool playing = false;
+    int64_t position = 0, positionAt = 0, duration = 0;  // ms; positionAt: ms since the epoch
+    bool canNext = false, canPrevious = false;
+    kompoz::ImageBitmap art;
+    bool operator==(const PhoneMedia&) const = default;
+};
+
 // Text that went through the clipboard share, newest first (kept while AirLink runs).
 struct ClipboardItem {
     int64_t id = 0;
@@ -282,6 +294,12 @@ public:
     std::vector<std::string> takeNotices() const;
     std::vector<std::string> takeIncomingClipboard() const;
     std::vector<ClipboardItem> clipboardHistory() const;
+    PhoneMedia phoneMedia() const;
+    // The tray panel asked for from outside (the Plasma panel widget): a new serial each time.
+    struct PanelRequest { int serial = 0, x = 0, y = 0; bool operator==(const PanelRequest&) const = default; };
+    PanelRequest panelRequest() const;
+    void requestPhoneMedia() const;
+    void phoneMediaControl(const std::string& action) const;  // play, pause, toggle, next, previous
     // This device's clipboard as the UI reads it (about once a second): a change goes to the
     // trusted devices that are online.
     void syncClipboard(const std::string& text) const;

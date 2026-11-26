@@ -38,6 +38,9 @@ void handleLaunch(int argc, char** argv);
 // Files handed to the app from outside (a file manager's menu, Android's share sheet, the command
 // line). Files that came before a handler was set are given to it at once. May be called on any thread.
 void setShareHandler(std::function<void(std::vector<std::string>)> handler);
+// `airlink --panel X Y` (the Plasma panel widget's click, at that screen point): the tray panel
+// asked for there, taken once by the app's loop. Linux desktops only; none elsewhere.
+std::optional<std::pair<int, int>> takePanelRequest();
 
 // The core started: Android hooks its background notifications to it. `node` is an AirlinkNode*.
 void nodeStarted(void* node);

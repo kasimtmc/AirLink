@@ -207,6 +207,8 @@ struct App::Impl {
     std::vector<std::string> notices;
     std::vector<std::string> incomingClipboard;
     MutableState<std::vector<ClipboardItem>> clipboardHistory = mutableStateOf(std::vector<ClipboardItem>{});
+    MutableState<PhoneMedia> phoneMedia = mutableStateOf(PhoneMedia{});
+    MutableState<App::PanelRequest> panelRequest = mutableStateOf(App::PanelRequest{});
     std::string lastClipboard;   // this device's clipboard as last seen or set
     bool clipboardSeen = false;  // the first reading is the clipboard AirLink found, not a copy
     bool trusts(const std::string& peerId) const {
@@ -516,7 +518,8 @@ struct App::Impl {
     static bool isPhoneRequest(const std::string& kind) {
         static const char* const kinds[] = {"sms.threads_request", "sms.thread_request", "sms.send", "contacts.search", "contacts.list",
                                             "calls.log_request", "call.answer", "call.reject", "call.dial", "call.hangup",
-                                            "call.hold", "call.mute", "call.route", "call.volume", "call.status_request",
+                                            "call.hold", "call.mute", "call.route", "call.volume", "call.status_request", "call.dtmf",
+                                            "media.state_request", "media.control",
                                             "screen.start", "screen.stop", "screen.input",
                                             "apps.list", "apps.open", "apps.close", "apps.input"};
         return std::find(std::begin(kinds), std::end(kinds), kind) != std::end(kinds);
@@ -645,6 +648,16 @@ struct App::Impl {
                 playerBluetoothPeer.clear();
             }
 #endif
+        } else if (kind == "media.state") {
+            PhoneMedia m{.peerId = peerId, .active = body["active"].boolean(), .app = body["app"].str(), .title = body["title"].str(),
+                         .artist = body["artist"].str(), .album = body["album"].str(), .playing = body["playing"].boolean(),
+                         .position = body["position"].i64(), .positionAt = body["position_at"].i64(), .duration = body["duration"].i64(),
+                         .canNext = body["can_next"].boolean(), .canPrevious = body["can_previous"].boolean()};
+            std::string art = body["art"].str();
+            auto previous = phoneMedia.peek();
+            if (!art.empty()) m.art = kompoz::decodeToImageBitmap(base64(art));
+            else if (previous.peerId == peerId && previous.title == m.title && previous.artist == m.artist) m.art = previous.art;
+            phoneMedia.set(std::move(m));
         } else if (kind == "player.audio.status") {
 #if defined(__ANDROID__)
             if (peerId == mediaAudioPeer) App::get().setPlayerAudioStatus(body["status"].str());
@@ -911,6 +924,10 @@ App App::get() {
 
 void App::pump() const {
     Impl& s = *impl_;
+    if (auto at = platform::takePanelRequest()) {
+        int serial = s.panelRequest.peek().serial + 1;
+        s.panelRequest.set(PanelRequest{.serial = serial, .x = at->first, .y = at->second});
+    }
     if (!s.node) {
         if (!s.startAttempted && platform::config()) s.start();
         return;
@@ -1735,6 +1752,12 @@ void App::sendClipboard(const std::string& peerId, const std::string& text) cons
     impl_->rememberClipboard(peerId, text, false);
 }
 
+PhoneMedia App::phoneMedia() const { return impl_->phoneMedia.get(); }
+App::PanelRequest App::panelRequest() const { return impl_->panelRequest.get(); }
+void App::requestPhoneMedia() const { impl_->phoneAsk("media.state_request", "{}"); }
+void App::phoneMediaControl(const std::string& action) const {
+    impl_->phoneAsk("media.control", "{\"action\":" + json::quote(action) + "}");
+}
 std::vector<ClipboardItem> App::clipboardHistory() const { return impl_->clipboardHistory.get(); }
 void App::removeClipboardItem(int64_t id) const {
     impl_->clipboardHistory.update([&](std::vector<ClipboardItem>& list) {

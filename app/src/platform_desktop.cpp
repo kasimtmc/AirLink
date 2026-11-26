@@ -9,6 +9,7 @@
 #include <mutex>
 #include <string>
 #include <thread>
+#include <utility>
 
 #if defined(_WIN32)
 #ifndef NOMINMAX
@@ -166,6 +167,24 @@ std::mutex shareMutex;
 std::function<void(std::vector<std::string>)> shareHandler;
 std::vector<std::string> sharedEarly;  // before the handler was set
 
+// A panel widget's click (`airlink --panel X Y`), for takePanelRequest.
+std::optional<std::pair<int, int>> panelRequest;
+constexpr std::string_view kPanelLine = "\x1fpanel ";  // a line no file path starts with
+
+std::optional<std::pair<int, int>> panelArgs(int argc, char** argv) {
+    for (int i = 1; i < argc; ++i) {
+        if (std::string_view(argv[i]) != "--panel") continue;
+        if (i + 2 >= argc) return std::pair{0, 0};
+        return std::pair{std::atoi(argv[i + 1]), std::atoi(argv[i + 2])};
+    }
+    return std::nullopt;
+}
+
+void deliverPanel(std::pair<int, int> at) {
+    std::lock_guard lock(shareMutex);
+    panelRequest = at;
+}
+
 void deliverShared(std::vector<std::string> paths) {
     if (paths.empty()) return;
     std::function<void(std::vector<std::string>)> handler;
@@ -273,8 +292,14 @@ void serve() {
             close(client);
             std::vector<std::string> files;
             size_t start = 0;
-            for (size_t end; (end = data.find('\n', start)) != std::string::npos; start = end + 1)
-                if (end > start) files.push_back(data.substr(start, end - start));
+            for (size_t end; (end = data.find('\n', start)) != std::string::npos; start = end + 1) {
+                std::string line = data.substr(start, end - start);
+                if (line.starts_with(kPanelLine)) {
+                    int x = 0, y = 0;
+                    std::sscanf(line.c_str() + kPanelLine.size(), "%d %d", &x, &y);
+                    deliverPanel({x, y});
+                } else if (!line.empty()) files.push_back(line);
+            }
             deliverShared(std::move(files));
         }
     }).detach();
@@ -284,14 +309,18 @@ void serve() {
 
 void handleLaunch(int argc, char** argv) {
     std::vector<std::string> files = filesFromArgs(argc, argv);
+    auto panel = panelArgs(argc, argv);
     // Scripted (headless) runs stay apart from a real instance unless a test names a socket.
     if (std::getenv("KOMPOZ_HEADLESS") && !std::getenv("AIRLINK_SOCKET")) return deliverShared(std::move(files));
     // One instance: a second one would run the same device identity twice.
-    if (forward(files)) {
-        if (files.empty()) std::fprintf(stderr, "AirLink is already running.\n");
+    std::vector<std::string> lines = files;
+    if (panel) lines.push_back(std::string(kPanelLine) + std::to_string(panel->first) + " " + std::to_string(panel->second));
+    if (forward(lines)) {
+        if (lines.empty()) std::fprintf(stderr, "AirLink is already running.\n");
         std::exit(0);
     }
     serve();
+    if (panel) deliverPanel(*panel);
     deliverShared(std::move(files));
 }
 
@@ -447,6 +476,11 @@ void setShareHandler(std::function<void(std::vector<std::string>)> handler) {
         early.swap(sharedEarly);
     }
     if (!early.empty()) shareHandler(std::move(early));
+}
+
+std::optional<std::pair<int, int>> takePanelRequest() {
+    std::lock_guard lock(shareMutex);
+    return std::exchange(panelRequest, std::nullopt);
 }
 
 void nodeStarted(void*) {}

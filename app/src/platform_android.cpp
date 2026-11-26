@@ -112,6 +112,8 @@ void stageUris(const std::vector<std::string>& uris, std::function<void(std::vec
 
 void handleLaunch(int, char**) {}  // Android: shares come as intents (MainActivity)
 
+std::optional<std::pair<int, int>> takePanelRequest() { return std::nullopt; }
+
 void setShareHandler(std::function<void(std::vector<std::string>)> handler) {
     std::vector<std::string> early;
     {

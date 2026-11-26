@@ -1,0 +1,15 @@
+{
+    "KPlugin": {
+        "Id": "dev.airlink.panel",
+        "Name": "AirLink",
+        "Name[tr]": "AirLink",
+        "Description": "Your devices, the phone's media, messages, notifications and calls, from the panel",
+        "Description[tr]": "Cihazlarınız, telefonun medyası, mesajlar, bildirimler ve aramalar panelden",
+        "Icon": "airlink",
+        "Category": "System Information",
+        "Authors": [{ "Name": "Kasim" }],
+        "Version": "0.1"
+    },
+    "KPackageStructure": "Plasma/Applet",
+    "X-Plasma-API-Minimum-Version": "6.0"
+}

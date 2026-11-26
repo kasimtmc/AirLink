@@ -47,6 +47,7 @@ class AirLinkService : Service() {
         }
         CallBridge.start(this)
         FlingDetector.resume(this)
+        PhoneMedia.start(this)
         pumper.post(pump)
     }
 
