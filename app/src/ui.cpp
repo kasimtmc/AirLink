@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cctype>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -287,6 +288,16 @@ static std::vector<Transfer> recentTransfers(const std::vector<Transfer>& all, s
     return out;
 }
 
+// The first http(s) link in a text, or "".
+static std::string firstLink(const std::string& text) {
+    size_t at = text.find("https://");
+    if (at == std::string::npos) at = text.find("http://");
+    if (at == std::string::npos) return {};
+    size_t end = at;
+    while (end < text.size() && !std::isspace(static_cast<unsigned char>(text[end]))) ++end;
+    return text.substr(at, end - at);
+}
+
 static std::string desktopRequestText() {
     std::string text = "Ekranınızı görecek, fare ve klavyeyi kullanabilecek. İstediğiniz zaman buradan durdurabilirsiniz.";
 #if defined(__linux__) && !defined(__ANDROID__)
@@ -401,7 +412,7 @@ fun AirLinkTray(app: App) {
 }
 
 // Home's destinations.
-constexpr int TAB_DEVICES = 0, TAB_MESSAGES = 1, TAB_PHONE = 2, TAB_APPS = 3, TAB_SETTINGS = 4;
+constexpr int TAB_DEVICES = 0, TAB_MESSAGES = 1, TAB_PHONE = 2, TAB_APPS = 3, TAB_SETTINGS = 4, TAB_CLIPBOARD = 5;
 
 static std::string tabTitle(int tab) {
     switch (tab) {
@@ -409,6 +420,7 @@ static std::string tabTitle(int tab) {
         case TAB_PHONE: return "Telefon";
         case TAB_APPS: return "Uygulamalar";
         case TAB_SETTINGS: return "Ayarlar";
+        case TAB_CLIPBOARD: return "Pano";
         default: return "AirLink";
     }
 }
@@ -434,7 +446,7 @@ fun Home() {
     // Destinations: a computer also has a paired phone's messages, calls and apps.
     val desktopTabs = isDesktop() && app.ready()
     val fullView = app.ready() && (app.desktopPeer().isNotEmpty() || app.screenPeer().isNotEmpty())
-    if (!desktopTabs && tab != TAB_SETTINGS && tab != TAB_DEVICES) tab = TAB_DEVICES
+    if (!desktopTabs && tab != TAB_SETTINGS && tab != TAB_DEVICES && tab != TAB_CLIPBOARD) tab = TAB_DEVICES
     val navType = if (!app.ready() || fullView) NavigationSuiteType.None
                   else NavigationSuiteScaffoldDefaults.navigationSuiteType(currentWindowAdaptiveInfo())
 
@@ -442,6 +454,8 @@ fun Home() {
         navigationItems = {
             NavigationSuiteItem(selected = tab == TAB_DEVICES, onClick = { tab = TAB_DEVICES },
                                 icon = { Icon(AppIcons.Devices, contentDescription = null) }, label = { Text("Cihazlar") })
+            NavigationSuiteItem(selected = tab == TAB_CLIPBOARD, onClick = { tab = TAB_CLIPBOARD },
+                                icon = { Icon(AppIcons.ContentPaste, contentDescription = null) }, label = { Text("Pano") })
             if (desktopTabs) {
                 NavigationSuiteItem(selected = tab == TAB_MESSAGES, onClick = { tab = TAB_MESSAGES },
                                     icon = { Icon(AppIcons.Sms, contentDescription = null) }, label = { Text("Mesajlar") })
@@ -464,6 +478,9 @@ fun Home() {
                         if (tab == TAB_DEVICES && app.transfers().any { !it.active() }) {
                             TextButton(onClick = { app.clearFinishedTransfers() }) { Text("Temizle") }
                         }
+                        if (tab == TAB_CLIPBOARD && app.clipboardHistory().isNotEmpty()) {
+                            TextButton(onClick = { app.clearClipboardHistory() }) { Text("Temizle") }
+                        }
                     },
                 )
             },
@@ -483,6 +500,7 @@ fun Home() {
                         else if (tab == TAB_PHONE) PhoneScreen(app)
                         else if (tab == TAB_APPS) AppsScreen(app)
                         else if (tab == TAB_SETTINGS) SettingsScreen(app)
+                        else if (tab == TAB_CLIPBOARD) ClipboardScreen(app, clipboard)
                         else DeviceList(app, clipboard, onOpenSettings = { tab = TAB_SETTINGS })
                     } else if (app.sharingPaused()) {
                         Column(modifier = Modifier.align(Alignment.Center), horizontalAlignment = Alignment.CenterHorizontally) {
@@ -738,6 +756,46 @@ fun missingPermissions(app: App): Int {
     return n
 }
 
+// What went through the clipboard share: copy it again, open its link, or remove it.
+@Kompozable
+fun ClipboardScreen(app: App, clipboard: ClipboardManager) {
+    val items = app.clipboardHistory()
+    if (items.isEmpty()) {
+        EmptyState(AppIcons.ContentPaste, "Pano geçmişi boş",
+                   "Eşleşmiş cihazlarla paylaşılan metinler ve bağlantılar burada görünür.")
+        return
+    }
+    LazyColumn(
+        modifier = Modifier.fillMaxSize().wrapContentWidth().widthIn(0.dp, 760.dp),
+        contentPadding = PaddingValues(16.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        items(items) { item -> ClipboardRow(app, item, clipboard) }
+    }
+}
+
+@Kompozable
+fun ClipboardRow(app: App, item: ClipboardItem, clipboard: ClipboardManager) {
+    val cs = MaterialTheme.colorScheme
+    val links = uriHandler()
+    val link = firstLink(item.text)
+    val peer = app.peerName(item.peerId)
+    Card(modifier = Modifier.fillMaxWidth()) {
+        Column(modifier = Modifier.fillMaxWidth().padding(start = 16.dp, top = 12.dp, end = 8.dp, bottom = 4.dp)) {
+            Text(if (item.incoming) "$peer cihazından · ${clockTime(item.time)}" else "$peer cihazına · ${clockTime(item.time)}",
+                 style = MaterialTheme.typography.labelMedium, color = cs.primary)
+            Spacer(modifier = Modifier.height(4.dp))
+            Text(item.text, style = MaterialTheme.typography.bodyMedium, maxLines = 6, overflow = TextOverflow.Ellipsis,
+                 modifier = Modifier.padding(end = 8.dp))
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                if (link.isNotEmpty()) TextButton(onClick = { links.openUri(link) }) { Text("Bağlantıyı aç") }
+                TextButton(onClick = { clipboard.setText(item.text) }) { Text("Kopyala") }
+                TextButton(onClick = { app.removeClipboardItem(item.id) }) { Text("Sil") }
+            }
+        }
+    }
+}
+
 @Kompozable
 fun MissingPermissionsBanner(count: Int, onOpenSettings: () -> Unit) {
     val cs = MaterialTheme.colorScheme
@@ -951,17 +1009,30 @@ fun PhoneAudioCard(app: App) {
 @Kompozable
 fun FlingCard(app: App) {
     val target = app.flingTarget()
+    val cs = MaterialTheme.colorScheme
     OutlinedCard(modifier = Modifier.fillMaxWidth()) {
-        Row(modifier = Modifier.fillMaxWidth().padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
-            Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                Text("Fırlatarak gönder", style = MaterialTheme.typography.titleMedium)
-                Text("AirLink açıkken telefonu bilgisayara doğru kısa ve hızlı bir hareketle itin: paylaşılan dosyalar ya da kopyalanan metin gider.",
-                     style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                Text(if (target.isEmpty()) "Hedef: çevrimiçi bilgisayar yok" else "Hedef: ${app.peerName(target)}",
-                     style = MaterialTheme.typography.labelMedium)
+        Column(modifier = Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Text("Fırlatarak gönder", style = MaterialTheme.typography.titleMedium)
+                    Text("Telefonu bilgisayara doğru kısa ve hızlı bir hareketle itin. AirLink açıkken paylaşılan dosyalar ya da kopyalanan metin, başka bir uygulama açıkken o uygulamanın gösterdiği içerik gider: galerideki fotoğraf ya da video, galeri ve dosya yöneticisinde seçili dosyalar, çalan müzik.",
+                         style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant)
+                    Text(if (target.isEmpty()) "Hedef: çevrimiçi bilgisayar yok" else "Hedef: ${app.peerName(target)}",
+                         style = MaterialTheme.typography.labelMedium)
+                }
+                Spacer(modifier = Modifier.width(12.dp))
+                Switch(checked = app.flingEnabled(), onCheckedChange = { app.setFlingEnabled(it) })
             }
-            Spacer(modifier = Modifier.width(12.dp))
-            Switch(checked = app.flingEnabled(), onCheckedChange = { app.setFlingEnabled(it) })
+            if (app.flingEnabled() && !app.screenControl()) {
+                Text("Diğer uygulamalardan göndermek için Erişilebilirlik'te \"AirLink ekran kontrolü\" açık olmalı.",
+                     style = MaterialTheme.typography.bodySmall, color = cs.primary)
+                OutlinedButton(onClick = { app.openScreenControlSettings() }) { Text("Erişilebilirliği aç") }
+            }
+            if (app.flingEnabled() && !app.flingMediaAccess()) {
+                Text("Galerideki fotoğrafı doğrudan bulmak için fotoğraf, video ve müzik erişimi gerekir.",
+                     style = MaterialTheme.typography.bodySmall, color = cs.primary)
+                OutlinedButton(onClick = { app.requestFlingMediaAccess() }) { Text("Medya erişimi ver") }
+            }
         }
     }
 }

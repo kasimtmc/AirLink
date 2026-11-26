@@ -18,8 +18,9 @@ import kotlin.math.abs
  *
  * The phone is held facing the user, so the push is along the screen's normal, away from the
  * user: device -Z. Linear acceleration (gravity removed) shows a sharp -Z peak, then the stop's
- * +Z peak within a short time, while X and Y stay small. Listens only while AirLink is on screen:
- * Android lets only the foreground app read the clipboard, and it saves the battery.
+ * +Z peak within a short time, while X and Y stay small. Listens while AirLink's foreground
+ * service runs: with AirLink on screen it sends the shared files or the clipboard, with another
+ * app on screen what that app shows (ForegroundContent).
  */
 object FlingDetector : SensorEventListener {
     private const val PREFS = "airlink"
@@ -50,10 +51,11 @@ object FlingDetector : SensorEventListener {
         if (on) resume(context) else pause()
     }
 
-    /** The activity is on screen. */
+    /** AirLink's service runs (the detector keeps the application context). */
     @JvmStatic
     fun resume(context: Context) {
         if (listening || !enabled(context)) return
+        @Suppress("NAME_SHADOWING") val context = context.applicationContext
         val sensors = context.getSystemService(SensorManager::class.java) ?: return
         val sensor = sensors.getDefaultSensor(Sensor.TYPE_LINEAR_ACCELERATION) ?: return
         this.context = context
@@ -90,6 +92,11 @@ object FlingDetector : SensorEventListener {
     private fun flung() {
         val context = context ?: return
         vibrate(context)
+        if (!MainActivity.visible) {
+            // Another app on screen: what it shows (Android keeps the clipboard from the background).
+            if (MainActivity.nativeReady) ForegroundContent.fling(context)
+            return
+        }
         val text = try {
             context.getSystemService(ClipboardManager::class.java)?.primaryClip
                 ?.takeIf { it.itemCount > 0 }?.getItemAt(0)?.coerceToText(context)?.toString().orEmpty()

@@ -1,4 +1,4 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="accessibility_description">Ekranınızı eşleşmiş bir bilgisayarla paylaşırken, o bilgisayardan gelen dokunma ve kaydırmaları uygular. Ekrandaki içerikleri okumaz.</string>
+    <string name="accessibility_description">Ekranınızı eşleşmiş bir bilgisayarla paylaşırken o bilgisayardan gelen dokunma ve kaydırmaları uygular. Telefonu fırlattığınızda ön plandaki uygulamanın gösterdiği fotoğrafı, seçili dosyaları ya da çalan medyayı bulmak için yalnızca o an ekranı okur; okuduklarını saklamaz.</string>
 </resources>

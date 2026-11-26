@@ -476,6 +476,8 @@ bool canUseAdvancedMode() { return false; }
 bool canFling() { return false; }
 bool flingEnabled() { return false; }
 void setFlingEnabled(bool) {}
+bool flingMediaAccess() { return false; }
+void requestFlingMediaAccess() {}
 void startAdvancedSetup() {}
 void advancedSetupResult(bool, const std::string&) {}
 void helperStarted(bool, const std::string&) {}

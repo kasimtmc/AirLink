@@ -42,12 +42,10 @@ class MainActivity : KompozActivity() {
     override fun onResume() {
         super.onResume()
         visible = true
-        FlingDetector.resume(this)
     }
 
     override fun onPause() {
         visible = false
-        FlingDetector.pause()
         super.onPause()
     }
 
@@ -124,32 +122,9 @@ class MainActivity : KompozActivity() {
 
     private fun stage(uris: List<Uri>, share: Boolean) {
         Thread({
-            val paths = mutableListOf<String>()
-            val staging = File(File(cacheDir, "airlink_send"), System.nanoTime().toString())
-            for ((index, uri) in uris.withIndex()) {
-                val destination = File(File(staging, index.toString()), displayName(uri))
-                destination.parentFile?.mkdirs()
-                try {
-                    contentResolver.openInputStream(uri)?.use { input ->
-                        FileOutputStream(destination).use { output -> input.copyTo(output, 256 * 1024) }
-                        paths.add(destination.absolutePath)
-                    }
-                } catch (_: Exception) { destination.delete() }
-            }
-            runOnUiThread {
-                val result = paths.toTypedArray()
-                if (share) nativeShared(result) else nativeFilesPicked(result)
-            }
+            val result = Staging.copy(this, uris).toTypedArray()
+            runOnUiThread { if (share) nativeShared(result) else nativeFilesPicked(result) }
         }, "airlink-pick").start()
-    }
-
-    private fun displayName(uri: Uri): String {
-        try {
-            contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use { cursor ->
-                if (cursor.moveToFirst()) cursor.getString(0)?.takeIf { it.isNotEmpty() }?.let { return it.replace('/', '_') }
-            }
-        } catch (_: Exception) { }
-        return (uri.lastPathSegment ?: "file").replace('/', '_')
     }
 
     private fun cleanStaged(before: Long) {
@@ -237,6 +212,17 @@ class MainActivity : KompozActivity() {
                 ScreenShare.setScreenAudio(context, enabled)
             }
         }
+        private val FLING_MEDIA = if (Build.VERSION.SDK_INT >= 33)
+            arrayOf(Manifest.permission.READ_MEDIA_IMAGES, Manifest.permission.READ_MEDIA_VIDEO, Manifest.permission.READ_MEDIA_AUDIO)
+            else arrayOf(Manifest.permission.READ_EXTERNAL_STORAGE)
+        /** Fling from a gallery finds the photo on screen in MediaStore. */
+        @JvmStatic fun flingMediaGranted(): Boolean {
+            val context = AirLinkService.appContext ?: currentActivity ?: return false
+            return FLING_MEDIA.all { context.checkSelfPermission(it) == PackageManager.PERMISSION_GRANTED }
+        }
+        @JvmStatic fun requestFlingMedia() {
+            currentActivity?.let { activity -> activity.runOnUiThread { activity.requestPermissions(FLING_MEDIA, 3) } }
+        }
         @JvmStatic fun chooseMediaAudioPlayers() {
             currentActivity?.let { activity -> activity.runOnUiThread { PlayerBluetoothAudio.choosePlayers(activity) } }
         }
@@ -266,6 +252,8 @@ class MainActivity : KompozActivity() {
         @JvmStatic private external fun nativeInit(activity: MainActivity?, filesDir: String, downloadDir: String, deviceName: String)
         @JvmStatic private external fun nativeDetachActivity(activity: MainActivity)
         @JvmStatic private external fun nativeFilesPicked(paths: Array<String>)
+        /** Files shared with AirLink (from ShareReceiverActivity): the share dialog offers them. */
+        @JvmStatic fun shareStaged(paths: Array<String>) = nativeShared(paths)
         @JvmStatic private external fun nativeShared(paths: Array<String>)
         @JvmStatic private external fun nativePump()
         @JvmStatic private external fun nativeAdbPair(code: String)

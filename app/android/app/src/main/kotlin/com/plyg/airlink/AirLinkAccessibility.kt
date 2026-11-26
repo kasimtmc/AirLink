@@ -8,7 +8,10 @@ import android.provider.Settings
 import android.view.accessibility.AccessibilityEvent
 import org.json.JSONObject
 
-/** Carries out a paired computer's gestures while the phone is sharing its screen. */
+/**
+ * Carries out a paired computer's gestures while the phone is sharing its screen, and, when the
+ * user flings the phone, finds what the app on screen shows (ForegroundContent).
+ */
 class AirLinkAccessibility : AccessibilityService() {
     override fun onServiceConnected() {
         instance = this
@@ -29,6 +32,10 @@ class AirLinkAccessibility : AccessibilityService() {
 
         @JvmStatic
         fun enabled(): Boolean = instance != null
+
+        /** For ForegroundContent: reading the screen when the user flings. */
+        @JvmStatic
+        fun service(): AccessibilityService? = instance
 
         @JvmStatic
         fun openSettings() {

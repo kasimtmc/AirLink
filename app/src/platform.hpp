@@ -87,6 +87,9 @@ void openBackgroundAutostartSettings();
 bool canFling();      // the phone has a linear acceleration sensor
 bool flingEnabled();
 void setFlingEnabled(bool on);
+// Fling from another app: reading the photos, videos and songs (to find what is on screen).
+bool flingMediaAccess();
+void requestFlingMediaAccess();
 
 
 // ---- Advanced mode (Android): the phone's own wireless debugging ----------------------------

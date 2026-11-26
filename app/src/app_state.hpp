@@ -85,6 +85,16 @@ struct PhoneNotification {
     bool operator==(const PhoneNotification&) const = default;
 };
 
+// Text that went through the clipboard share, newest first (kept while AirLink runs).
+struct ClipboardItem {
+    int64_t id = 0;
+    std::string peerId;
+    std::string text;
+    int64_t time = 0;  // ms since the epoch
+    bool incoming = true;
+    bool operator==(const ClipboardItem&) const = default;
+};
+
 // A phone's SMS conversation, as the computer shows it.
 struct SmsThread {
     int64_t threadId = 0;
@@ -247,6 +257,8 @@ public:
     // ---- Fling to send (phase 4B, a phone): push the phone toward a computer ----
     bool canFling() const;
     bool flingEnabled() const;
+    bool flingMediaAccess() const;
+    void requestFlingMediaAccess() const;
     std::string flingTarget() const;  // the computer a fling goes to (empty: none online)
 
     // ---- Advanced mode (this phone's own wireless debugging) ----
@@ -268,6 +280,9 @@ public:
     // Messages for a snackbar, and clipboard texts from other devices, since the last call.
     std::vector<std::string> takeNotices() const;
     std::vector<std::string> takeIncomingClipboard() const;
+    std::vector<ClipboardItem> clipboardHistory() const;
+    void removeClipboardItem(int64_t id) const;
+    void clearClipboardHistory() const;
 
     // ---- Actions ----
     void pair(const std::string& peerId) const;
@@ -340,6 +355,11 @@ public:
     void setFlingEnabled(bool on) const;
     // A fling happened: files waiting to be shared go to flingTarget(), else the clipboard's text.
     bool fling(const std::string& clipboardText) const;
+    // Fling from the background (phase 4B+): what was found on screen goes to the fling target.
+    // Each returns the message the phone shows ("" when there was nothing to do).
+    std::string flingPendingShare() const;
+    std::string flingFiles(const std::vector<std::string>& paths) const;
+    std::string flingText(const std::string& text) const;
     void startAdvancedSetup() const;
     void advancedPair(const std::string& code) const;  // the code typed into the setup notification
     void advancedTest() const;                         // runs `id` over wireless debugging

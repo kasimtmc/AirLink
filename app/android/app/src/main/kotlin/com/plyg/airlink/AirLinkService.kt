@@ -46,6 +46,7 @@ class AirLinkService : Service() {
             }
         }
         CallBridge.start(this)
+        FlingDetector.resume(this)
         pumper.post(pump)
     }
 
@@ -72,6 +73,7 @@ class AirLinkService : Service() {
         if (self === this) self = null
         pumper.removeCallbacks(pump)
         CallBridge.stop(this)
+        FlingDetector.pause()
         multicastLock?.release()
         wifiLock?.release()
         super.onDestroy()

@@ -141,6 +141,7 @@ struct App::Impl {
     MutableState<std::optional<DesktopRequest>> desktopRequest = mutableStateOf(std::optional<DesktopRequest>{});
     MutableState<std::string> desktopViewer = mutableStateOf(std::string());
     MutableState<bool> flingOn = mutableStateOf(false);
+    MutableState<bool> flingMedia = mutableStateOf(false);
     std::string lastComputer;  // the computer last sent to or controlled: a fling's target
     MutableState<bool> advancedReady = mutableStateOf(false);
     MutableState<std::string> advancedStatus = mutableStateOf(std::string());
@@ -204,6 +205,17 @@ struct App::Impl {
 
     std::vector<std::string> notices;
     std::vector<std::string> incomingClipboard;
+    MutableState<std::vector<ClipboardItem>> clipboardHistory = mutableStateOf(std::vector<ClipboardItem>{});
+    int64_t nextClipboardId = 1;
+    void rememberClipboard(const std::string& peerId, const std::string& text, bool incoming) {
+        int64_t now = std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::system_clock::now().time_since_epoch()).count();
+        clipboardHistory.update([&](std::vector<ClipboardItem>& list) {
+            list.insert(list.begin(), ClipboardItem{.id = nextClipboardId++, .peerId = peerId, .text = text,
+                                                    .time = now, .incoming = incoming});
+            if (list.size() > 100) list.resize(100);
+        });
+    }
     std::map<uint64_t, OpKind> ops;
     int ticks = 0;
 
@@ -237,6 +249,7 @@ struct App::Impl {
 #endif
         }
         flingOn.set(platform::flingEnabled());
+        flingMedia.set(platform::flingMediaAccess());
         std::string json = "{";
         auto field = [&](const char* key, const std::string& value) {
             if (value.empty()) return;
@@ -425,6 +438,7 @@ struct App::Impl {
             handleAppMessage(e["peer"], e["kind"].str(), e["body"]);
         } else if (kind == "clipboard_received") {
             incomingClipboard.push_back(e["text"].str());
+            rememberClipboard(e["peer"]["id"].str(), e["text"].str(), true);
             notices.push_back(e["peer"]["name"].str() + " panosunu paylaştı");
         } else if (kind == "pairing_code") {
             ops.erase(e["op"].u64());
@@ -908,6 +922,7 @@ void App::pump() const {
         s.smsAccess.set(platform::smsAccessGranted());
         s.callAccess.set(platform::callAccessGranted());
         s.screenControl.set(platform::screenControlEnabled());
+        s.flingMedia.set(platform::flingMediaAccess());
     }
     if (!s.callAudioPeer.empty()) {
         auto call = s.activeCall.peek();
@@ -1267,6 +1282,8 @@ void App::endDesktopShare() const {
 
 bool App::canFling() const { return platform::canFling(); }
 bool App::flingEnabled() const { return impl_->flingOn.get(); }
+bool App::flingMediaAccess() const { return impl_->flingMedia.get(); }
+void App::requestFlingMediaAccess() const { platform::requestFlingMediaAccess(); }
 
 std::string App::flingTarget() const {
     impl_->peers.get();  // subscribes: the target changes as devices come and go
@@ -1297,6 +1314,31 @@ bool App::fling(const std::string& clipboardText) const {
         impl_->notices.push_back("Gönderilecek bir şey yok: dosya paylaşın ya da metin kopyalayın");
         return false;
     }
+}
+
+std::string App::flingPendingShare() const {
+    auto files = impl_->share.peek();
+    if (files.empty()) return {};
+    impl_->share.set({});
+    return flingFiles(files);
+}
+
+std::string App::flingFiles(const std::vector<std::string>& paths) const {
+    std::string target = impl_->flingTarget();
+    if (target.empty()) return "Fırlatma için çevrimiçi bir bilgisayar yok";
+    if (paths.empty()) return "Gönderilecek dosya okunamadı";
+    sendFiles(target, paths);
+    std::string message = std::to_string(paths.size()) + " dosya " + impl_->peerNameOf(target) + " cihazına fırlatıldı";
+    impl_->notices.push_back(message);
+    return message;
+}
+
+std::string App::flingText(const std::string& text) const {
+    std::string target = impl_->flingTarget();
+    if (target.empty()) return "Fırlatma için çevrimiçi bir bilgisayar yok";
+    if (text.empty()) return {};
+    sendClipboard(target, text);
+    return "Metin " + impl_->peerNameOf(target) + " cihazının panosuna gönderildi";
 }
 
 bool App::canUseAdvancedMode() const { return platform::canUseAdvancedMode(); }
@@ -1649,7 +1691,16 @@ void App::sendClipboard(const std::string& peerId, const std::string& text) cons
         return;
     }
     impl_->track(airlink_send_clipboard(impl_->node, peerId.c_str(), text.c_str()), OpKind::SendClipboard);
+    impl_->rememberClipboard(peerId, text, false);
 }
+
+std::vector<ClipboardItem> App::clipboardHistory() const { return impl_->clipboardHistory.get(); }
+void App::removeClipboardItem(int64_t id) const {
+    impl_->clipboardHistory.update([&](std::vector<ClipboardItem>& list) {
+        std::erase_if(list, [&](const ClipboardItem& item) { return item.id == id; });
+    });
+}
+void App::clearClipboardHistory() const { impl_->clipboardHistory.set({}); }
 
 void App::forget(const std::string& peerId) const {
     airlink_forget(impl_->node, peerId.c_str());

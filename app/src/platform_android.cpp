@@ -33,6 +33,7 @@ jmethodID callsGranted = nullptr, callRequestPermissions = nullptr;
 jmethodID screenControlOn = nullptr, screenControlSettings = nullptr;
 jmethodID backgroundAutostartNeeded = nullptr, backgroundAutostartSettings = nullptr;
 jmethodID flingAvailableId = nullptr, flingEnabledId = nullptr, setFlingEnabledId = nullptr;
+jmethodID flingMediaGrantedId = nullptr, requestFlingMediaId = nullptr;
 jclass adbPairingClass = nullptr;
 jmethodID adbStart = nullptr, adbDone = nullptr;
 jclass appStreamsClass = nullptr;
@@ -288,6 +289,19 @@ bool flingEnabled() {
     return on;
 }
 
+bool flingMediaAccess() {
+    JNIEnv* e = env();
+    if (!e || !activityClass || !flingMediaGrantedId) return false;
+    bool on = e->CallStaticBooleanMethod(activityClass, flingMediaGrantedId);
+    if (e->ExceptionCheck()) e->ExceptionClear(), on = false;
+    return on;
+}
+void requestFlingMediaAccess() {
+    JNIEnv* e = env();
+    if (!e || !activityClass || !requestFlingMediaId) return;
+    e->CallStaticVoidMethod(activityClass, requestFlingMediaId);
+    if (e->ExceptionCheck()) e->ExceptionClear();
+}
 void setFlingEnabled(bool on) {
     JNIEnv* e = env();
     if (!e || !activityClass || !setFlingEnabledId) return;
@@ -443,6 +457,8 @@ extern "C" JNIEXPORT void JNICALL Java_com_plyg_airlink_MainActivity_nativeInit(
         flingAvailableId = e->GetStaticMethodID(activityClass, "flingAvailable", "()Z");
         flingEnabledId = e->GetStaticMethodID(activityClass, "flingEnabled", "()Z");
         setFlingEnabledId = e->GetStaticMethodID(activityClass, "setFlingEnabled", "(Z)V");
+        flingMediaGrantedId = e->GetStaticMethodID(activityClass, "flingMediaGranted", "()Z");
+        requestFlingMediaId = e->GetStaticMethodID(activityClass, "requestFlingMedia", "()V");
         callsGranted = e->GetStaticMethodID(activityClass, "callsGranted", "()Z");
         callRequestPermissions = e->GetStaticMethodID(activityClass, "requestCallPermissions", "()V");
         screenControlOn = e->GetStaticMethodID(activityClass, "screenControlEnabled", "()Z");
@@ -587,4 +603,15 @@ extern "C" JNIEXPORT void JNICALL Java_com_plyg_airlink_MainActivity_nativeFiles
 
 extern "C" JNIEXPORT void JNICALL Java_com_plyg_airlink_FlingDetector_nativeFlung(JNIEnv* e, jclass, jstring clipboardText) {
     airlink::App::get().fling(fromJava(e, clipboardText));  // on the main thread (the sensor's)
+}
+
+// Background fling (ForegroundContent): on the main thread; each returns the message to show.
+extern "C" JNIEXPORT jstring JNICALL Java_com_plyg_airlink_ForegroundContent_nativeFlingPendingShare(JNIEnv* e, jclass) {
+    return e->NewStringUTF(airlink::App::get().flingPendingShare().c_str());
+}
+extern "C" JNIEXPORT jstring JNICALL Java_com_plyg_airlink_ForegroundContent_nativeFlingFiles(JNIEnv* e, jclass, jobjectArray paths) {
+    return e->NewStringUTF(airlink::App::get().flingFiles(pathsOf(e, paths)).c_str());
+}
+extern "C" JNIEXPORT jstring JNICALL Java_com_plyg_airlink_ForegroundContent_nativeFlingText(JNIEnv* e, jclass, jstring text) {
+    return e->NewStringUTF(airlink::App::get().flingText(fromJava(e, text)).c_str());
 }
