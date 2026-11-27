@@ -16,6 +16,7 @@
   <launchable type="desktop-id">com.plyg.AirLink.desktop</launchable>
   <content_rating type="oars-1.1"/>
   <releases>
+    <release version="0.3.0" date="2026-11-27"/>
     <release version="0.2.0" date="2026-11-26"/>
   </releases>
 </component>

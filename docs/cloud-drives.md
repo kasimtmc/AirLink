@@ -77,12 +77,20 @@ A new app is in *development* status, which allows up to 500 users. Above that, 
    - **Data access:** add the scope `https://www.googleapis.com/auth/drive`.
 3. Under **Clients → Create client**, choose *Desktop app*. Its ID and secret are `AIRLINK_GDRIVE_CLIENT_ID` and `AIRLINK_GDRIVE_CLIENT_SECRET`.
 
-Google's limits for an unverified app:
+AirLink's own Google registration is published ("In production") but not verified, because the full-Drive scope is restricted:
 
-- **Restricted scope:** the full-Drive scope is restricted.
-- **In testing:** only its test users (up to 100) can sign in, and their sign-ins expire after 7 days, so AirLink asks them to connect again.
-- **In production but unverified:** Google shows a warning screen, and at most 100 users can sign in.
-- **For everyone:** Google's verification and a yearly CASA security assessment are needed.
+- **Who can connect:** anyone with a Google account, after a "Google hasn't verified this app" screen (**Continue**, under **Advanced** if needed).
+- **How many:** at most 100 users in all, until Google verifies the app.
+- **Sign-ins:** they don't expire. That 7-day limit applies only to apps in testing.
+- **Verification:** for more users and no warning screen, Google needs a homepage and privacy policy on a verified domain, a demo video, its review, and a yearly CASA security assessment from an approved lab.
+
+The release builds take AirLink's Google ID from the repository variable `AIRLINK_GDRIVE_CLIENT_ID` and its secret from the secret `AIRLINK_GDRIVE_CLIENT_SECRET`. They are kept out of the repository, which GitHub's secret scanning would flag.
+
+### Opening to more users
+
+- **Dropbox:** a new app is in *development* status, which allows 500 users. Before that, choose **Apply for production** in the App Console. Dropbox's review is free.
+- **OneDrive:** anyone with a personal Microsoft account can already connect. Work and school accounts may need their organization's approval while the publisher isn't verified. Microsoft's publisher verification needs a Cloud Partner Program account.
+- **Google Drive:** see above.
 
 ## Limits
 
