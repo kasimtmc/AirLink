@@ -4,7 +4,7 @@
 
 Linux, Windows ve Android cihazlarınız arasında, kendi ağınızda, hesap ve bulut olmadan kesintisiz bağlantı:
 
-- **Dosyalar**: eşleşmiş cihazlar arasında dosya ve klasör gönderin. Sürükle bırak, Android'de paylaşım menüsü ya da Explorer, Dolphin veya GNOME Dosyalar'daki sağ tık menüsü kullanılabilir.
+- **Dosyalar**: eşleşmiş cihazlar arasında dosya ve klasör gönderin. Sürükle bırak, Android'de paylaşım menüsü ya da Explorer, Dolphin veya GNOME Dosyalar'daki sağ tık menüsü kullanılabilir. Bir aktarım iki taraftan da iptal edilebilir.
 - **Pano**: başka bir cihazın panosuna metin gönderin.
 - **Bildirimler**: telefonunuzun bildirimleri bilgisayarda görünür ve oradan yanıtlanabilir.
 - **SMS**: konuşmaları bilgisayarda okuyun, yeni mesaj yazın ve alıcıyı kişilerinizden seçin.
@@ -14,6 +14,8 @@ Linux, Windows ve Android cihazlarınız arasında, kendi ağınızda, hesap ve 
 - **Ekran**: telefonun ekranı bilgisayarda, dokunma ve kaydırma ile.
 - **Bulut sürücüleri** (Linux ve Windows): OneDrive, Dropbox ve Google Drive hesaplarının her biri kendi sekmesinde açılır. Gezinip arayabilir, indirip yükleyebilir, klasör oluşturabilir, yeniden adlandırıp silebilir ve bir dosyayı doğrudan eşleşmiş bir cihaza gönderebilirsiniz. Bkz. [bulut sürücüleri](docs/cloud-drives.md).
 - **Telefon uygulamaları bilgisayarda** (gelişmiş mod): telefonun uygulama listesinden herhangi bir uygulamayı seçip bilgisayarda kendi penceresinde açın. Fare ve klavyeyle kullanabilir, küçültebilir ve kapatabilirsiniz. Telefonun kendi ekranı başka bir şey gösterirken de çalışmaya devam eder.
+
+Uygulama Türkçe ve İngilizcedir: sistemin dilini izler ya da Ayarlar'da seçilen dili kullanır.
 
 Cihazlar birbirini mDNS ile bulur. İki cihazı, iki ekranda da görünen 6 haneli kodu karşılaştırarak bir kez eşleştirirsiniz. Sonrasında tüm trafik karşılıklı TLS ile QUIC üzerinden gider.
 

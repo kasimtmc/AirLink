@@ -88,8 +88,8 @@ object ScreenShare {
             .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         val builder = if (Build.VERSION.SDK_INT >= 26) Notification.Builder(context, "requests") else Notification.Builder(context)
         val notification = builder.setSmallIcon(R.drawable.ic_stat_airlink)
-            .setContentTitle("Bilgisayar ekranınızı görmek istiyor")
-            .setContentText("Başlatmak için dokunun")
+            .setContentTitle(Texts.tr("Bilgisayar ekranınızı görmek istiyor"))
+            .setContentText(Texts.tr("Başlatmak için dokunun"))
             .setContentIntent(PendingIntent.getActivity(context, NOTIFICATION, open, PendingIntent.FLAG_IMMUTABLE))
             .setAutoCancel(true).build()
         context.getSystemService(NotificationManager::class.java)?.notify(NOTIFICATION, notification)
@@ -223,8 +223,8 @@ object ScreenShare {
                     .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                 val builder = if (Build.VERSION.SDK_INT >= 26) Notification.Builder(context, "requests") else Notification.Builder(context)
                 context.getSystemService(NotificationManager::class.java)?.notify(AUDIO_NOTIFICATION,
-                    builder.setSmallIcon(R.drawable.ic_stat_airlink).setContentTitle("Medya sesini paylaş")
-                        .setContentText("Ses izni vermek için dokunun")
+                    builder.setSmallIcon(R.drawable.ic_stat_airlink).setContentTitle(Texts.tr("Medya sesini paylaş"))
+                        .setContentText(Texts.tr("Ses izni vermek için dokunun"))
                         .setContentIntent(PendingIntent.getActivity(context, AUDIO_NOTIFICATION, open,
                             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)).setAutoCancel(true).build())
             }, 300)

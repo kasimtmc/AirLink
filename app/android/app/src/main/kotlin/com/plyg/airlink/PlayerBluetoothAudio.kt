@@ -38,12 +38,12 @@ object PlayerBluetoothAudio {
         val saved = prefs.getStringSet("packages", emptySet()).orEmpty()
         val selected = BooleanArray(apps.size) { apps[it].activityInfo.packageName in saved }
         AlertDialog.Builder(activity)
-            .setTitle("Ekran paylaşımı olmadan ses gönderebilen oynatıcılar")
+            .setTitle(Texts.tr("Ekran paylaşımı olmadan ses gönderebilen oynatıcılar"))
             .setMultiChoiceItems(Array(apps.size) { apps[it].loadLabel(manager) }, selected) { _, i, on ->
                 selected[i] = on
             }
-            .setNegativeButton("Vazgeç", null)
-            .setPositiveButton("Kaydet") { _, _ ->
+            .setNegativeButton(Texts.tr("Vazgeç"), null)
+            .setPositiveButton(Texts.tr("Kaydet")) { _, _ ->
                 prefs.edit().putStringSet("packages", apps.indices.filter { selected[it] }
                     .map { apps[it].activityInfo.packageName }.toSet()).apply()
             }.show()
@@ -131,11 +131,11 @@ object PlayerBluetoothAudio {
         }
         if (!matches || !playing) {
             val status = when {
-                screenAudioActive && !matches -> "Ses ekran paylaşımı üzerinden aktarılıyor"
-                !hasAccess -> "Oynatmayı algılamak için AirLink bildirim erişimi gerekiyor"
-                noPlayersSelected -> "Oynatıcıları seç menüsünden bir uygulama seçin"
-                matches -> "Bluetooth medya bağlantısı bekleniyor"
-                else -> "Seçili oynatıcıların oynatması bekleniyor"
+                screenAudioActive && !matches -> Texts.tr("Ses ekran paylaşımı üzerinden aktarılıyor")
+                !hasAccess -> Texts.tr("Oynatmayı algılamak için AirLink bildirim erişimi gerekiyor")
+                noPlayersSelected -> Texts.tr("Oynatıcıları seç menüsünden bir uygulama seçin")
+                matches -> Texts.tr("Bluetooth medya bağlantısı bekleniyor")
+                else -> Texts.tr("Seçili oynatıcıların oynatması bekleniyor")
             }
             if (status != lastStatus) {
                 lastStatus = status

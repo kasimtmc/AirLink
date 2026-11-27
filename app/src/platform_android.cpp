@@ -345,6 +345,25 @@ void callWithPath(jmethodID method, const std::string& path) {
 void openFile(const std::string& path) { callWithPath(openFileId, path); }
 void openUrl(const std::string& url) { callWithPath(openFileId, url); }
 
+std::string systemLanguage() {
+    // java.util.Locale.getDefault().getLanguage(): "tr", "en"…
+    JNIEnv* e = env();
+    if (!e) return {};
+    std::string language;
+    jclass locale = e->FindClass("java/util/Locale");
+    jmethodID getDefault = locale ? e->GetStaticMethodID(locale, "getDefault", "()Ljava/util/Locale;") : nullptr;
+    jmethodID getLanguage = locale ? e->GetMethodID(locale, "getLanguage", "()Ljava/lang/String;") : nullptr;
+    if (getDefault && getLanguage) {
+        jobject current = e->CallStaticObjectMethod(locale, getDefault);
+        if (current) {
+            auto code = static_cast<jstring>(e->CallObjectMethod(current, getLanguage));
+            if (code) language = fromJava(e, code);
+        }
+    }
+    if (e->ExceptionCheck()) e->ExceptionClear();
+    return language;
+}
+
 void setAppForeground(bool) {}  // (Android: MainActivity knows)
 
 bool clipboardMarkedSensitive() {
@@ -376,6 +395,8 @@ void passwordAnswered() {
     if (method) e->CallStaticVoidMethod(activityClass, method);
     if (e->ExceptionCheck()) e->ExceptionClear();
 }  // (the app's dialog asks: Android reads the clipboard only in front)
+
+std::vector<std::pair<std::string, std::string>> takeTrayNotifications() { return {}; }
 
 void notifyReceived(const std::string& from, const std::vector<std::string>& files, const std::string& text, bool secret) {
     JNIEnv* e = env();

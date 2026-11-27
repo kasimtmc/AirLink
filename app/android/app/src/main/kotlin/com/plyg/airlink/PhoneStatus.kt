@@ -140,7 +140,7 @@ object PhoneStatus {
     private fun notify(ctx: Context) {
         val notifications = ctx.getSystemService(NotificationManager::class.java) ?: return
         notifications.createNotificationChannel(
-            NotificationChannel(CHANNEL_FIND, "Telefonumu bul", NotificationManager.IMPORTANCE_HIGH).apply {
+            NotificationChannel(CHANNEL_FIND, Texts.tr("Telefonumu bul"), NotificationManager.IMPORTANCE_HIGH).apply {
                 setSound(null, null)  // (the ring is its own)
             },
         )
@@ -149,13 +149,13 @@ object PhoneStatus {
         )
         val notification = Notification.Builder(ctx, CHANNEL_FIND)
             .setSmallIcon(R.drawable.ic_stat_airlink)
-            .setContentTitle("Telefonunuz aranıyor")
-            .setContentText("Bir bilgisayardan çaldırıldı")
+            .setContentTitle(Texts.tr("Telefonunuz aranıyor"))
+            .setContentText(Texts.tr("Bir bilgisayardan çaldırıldı"))
             .setCategory(Notification.CATEGORY_ALARM)
             .setOngoing(true)
             .setContentIntent(stop)
             .setDeleteIntent(stop)
-            .addAction(Notification.Action.Builder(null, "Buldum", stop).build())
+            .addAction(Notification.Action.Builder(null, Texts.tr("Buldum"), stop).build())
             .build()
         try {
             notifications.notify(FIND_ID, notification)

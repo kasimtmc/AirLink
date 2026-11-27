@@ -26,7 +26,7 @@ class ShareReceiverActivity : Activity() {
         if (uris.isEmpty()) {
             val text = intent.getStringExtra(Intent.EXTRA_TEXT).orEmpty()
             if (text.isNotEmpty()) ForegroundContent.sendText(this, text)
-            else ForegroundContent.report(this, "Paylaşılan içerik okunamadı")
+            else ForegroundContent.report(this, Texts.tr("Paylaşılan içerik okunamadı"))
             finish()
             return
         }

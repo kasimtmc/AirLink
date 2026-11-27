@@ -29,6 +29,7 @@ class AirLinkService : Service() {
 
     override fun onCreate() {
         super.onCreate()
+        Texts.init(this)
         if (!ScreenShare.active()) ScreenShare.restoreMusicOutput(this)
         self = this
         appContext = applicationContext
@@ -91,11 +92,11 @@ class AirLinkService : Service() {
         )
         return builder(this, CHANNEL_STATUS)
             .setSmallIcon(R.drawable.ic_stat_airlink)
-            .setContentTitle("AirLink hazır")
-            .setContentText("Cihazlarınız dosya ve pano gönderebilir")
+            .setContentTitle(Texts.tr("AirLink hazır"))
+            .setContentText(Texts.tr("Cihazlarınız dosya ve pano gönderebilir"))
             .setContentIntent(openApp(this, 0))
             .setOngoing(true)
-            .addAction(Notification.Action.Builder(null, "Durdur", stop).build())
+            .addAction(Notification.Action.Builder(null, Texts.tr("Durdur"), stop).build())
             .build()
     }
 
@@ -158,20 +159,20 @@ class AirLinkService : Service() {
                 val acceptLabel = when (kind) {
                     "pairing_request" -> {
                         val code = event.getString("code")
-                        builder.setContentTitle("$peer eşleşmek istiyor")
-                            .setContentText("Kod: ${code.take(3)} ${code.drop(3)} — diğer cihazdakiyle aynıysa onaylayın")
-                        "Kodlar aynı"
+                        builder.setContentTitle(Texts.trf("{} eşleşmek istiyor", peer))
+                            .setContentText(Texts.trf("Kod: {} {} — diğer cihazdakiyle aynıysa onaylayın", code.take(3), code.drop(3)))
+                        Texts.tr("Kodlar aynı")
                     }
                     "file_offer" -> {
                         val files = event.getJSONArray("files")
                         val first = files.getJSONObject(0).getString("path")
-                        builder.setContentTitle("$peer dosya göndermek istiyor")
-                            .setContentText(if (files.length() == 1) first else "${files.length()} dosya, $first ve diğerleri")
-                        "Kabul et"
+                        builder.setContentTitle(Texts.trf("{} dosya göndermek istiyor", peer))
+                            .setContentText(if (files.length() == 1) first else Texts.trf("{} dosya, {} ve diğerleri", files.length(), first))
+                        Texts.tr("Kabul et")
                     }
                     else -> return
                 }
-                builder.addAction(Notification.Action.Builder(null, "Reddet", answer(context, id, false)).build())
+                builder.addAction(Notification.Action.Builder(null, Texts.tr("Reddet"), answer(context, id, false)).build())
                 builder.addAction(Notification.Action.Builder(null, acceptLabel, answer(context, id, true)).build())
                 notifications.notify(notificationId, builder.build())
             } catch (_: Exception) {
@@ -205,12 +206,12 @@ class AirLinkService : Service() {
             if (Build.VERSION.SDK_INT < 26) return
             val notifications = context.getSystemService(NotificationManager::class.java) ?: return
             notifications.createNotificationChannel(
-                NotificationChannel(CHANNEL_STATUS, "AirLink durumu", NotificationManager.IMPORTANCE_MIN).apply {
+                NotificationChannel(CHANNEL_STATUS, Texts.tr("AirLink durumu"), NotificationManager.IMPORTANCE_MIN).apply {
                     setShowBadge(false)
                 },
             )
             notifications.createNotificationChannel(
-                NotificationChannel(CHANNEL_REQUESTS, "Eşleşme ve dosya istekleri", NotificationManager.IMPORTANCE_HIGH),
+                NotificationChannel(CHANNEL_REQUESTS, Texts.tr("Eşleşme ve dosya istekleri"), NotificationManager.IMPORTANCE_HIGH),
             )
         }
     }

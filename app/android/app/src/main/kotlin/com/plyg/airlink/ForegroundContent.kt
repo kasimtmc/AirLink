@@ -93,8 +93,8 @@ object ForegroundContent {
 
     private fun mediaOrNothing(context: Context, noAccessibility: Boolean = false) {
         if (sendPlaying(context)) return
-        report(context, if (noAccessibility) "Ekrandaki içeriği bulmak için Erişilebilirlik'te AirLink'i açın"
-                        else "Gönderilecek içerik bulunamadı")
+        report(context, if (noAccessibility) Texts.tr("Ekrandaki içeriği bulmak için Erişilebilirlik'te AirLink'i açın")
+                        else Texts.tr("Gönderilecek içerik bulunamadı"))
     }
 
     @JvmStatic
@@ -168,7 +168,7 @@ object ForegroundContent {
                 SystemClock.elapsedRealtime() - started > SHARE_WAIT_MS -> {
                     automatedShareAt = 0L
                     if (inSheet) service.performGlobalAction(AccessibilityService.GLOBAL_ACTION_BACK)
-                    report(service, "Paylaşım menüsünde AirLink bulunamadı; menüde AirLink'i sabitleyin")
+                    report(service, Texts.tr("Paylaşım menüsünde AirLink bulunamadı; menüde AirLink'i sabitleyin"))
                 }
                 inSheet && scrolls < 8 -> {
                     val list = nodes(root!!).firstOrNull { it.isScrollable && it.isVisibleToUser }

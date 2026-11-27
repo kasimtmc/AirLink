@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="share_label">AirLink ile gönder</string>
+    <string name="accessibility_label">AirLink ekran kontrolü</string>
+    <string name="accessibility_description">Ekranınızı eşleşmiş bir bilgisayarla paylaşırken o bilgisayardan gelen dokunma ve kaydırmaları uygular. Telefonu fırlattığınızda ön plandaki uygulamanın gösterdiği fotoğrafı, seçili dosyaları ya da çalan medyayı bulmak için yalnızca o an ekranı okur; okuduklarını saklamaz.</string>
+</resources>

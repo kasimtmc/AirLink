@@ -1,4 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="accessibility_description">Ekranınızı eşleşmiş bir bilgisayarla paylaşırken o bilgisayardan gelen dokunma ve kaydırmaları uygular. Telefonu fırlattığınızda ön plandaki uygulamanın gösterdiği fotoğrafı, seçili dosyaları ya da çalan medyayı bulmak için yalnızca o an ekranı okur; okuduklarını saklamaz.</string>
+    <!-- English; values-tr has the Turkish. These are the texts Android itself shows (the manifest's), so they follow the system's language. -->
+    <string name="share_label">Send with AirLink</string>
+    <string name="accessibility_label">AirLink screen control</string>
+    <string name="accessibility_description">While you share your screen with a paired computer, it carries out the taps and swipes coming from that computer. When you fling the phone, it reads the screen only at that moment, to find the photo, the selected files or the playing media the app in front shows; it doesn\'t keep what it reads.</string>
 </resources>

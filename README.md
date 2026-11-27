@@ -4,7 +4,7 @@
 
 A seamless link between your Linux, Windows and Android devices, on your own network, with no account and no cloud:
 
-- **Files**: send files and folders between any paired devices. Use drag and drop, the share sheet on Android, or the right-click menu in Explorer, Dolphin or GNOME Files.
+- **Files**: send files and folders between any paired devices. Use drag and drop, the share sheet on Android, or the right-click menu in Explorer, Dolphin or GNOME Files. A transfer can be cancelled from either side.
 - **Clipboard**: send text to another device's clipboard.
 - **Notifications**: your phone's notifications appear on the computer, and you can reply to them from there.
 - **SMS**: read conversations on the computer, write new messages and pick recipients from your contacts.
@@ -14,6 +14,8 @@ A seamless link between your Linux, Windows and Android devices, on your own net
 - **Screen**: the phone's screen on the computer, with touch and swipe.
 - **Cloud drives** (Linux and Windows): OneDrive, Dropbox and Google Drive accounts, each in its own tab. You can browse and search, download and upload, make folders, rename and delete, and send a file straight to a paired device. See [cloud drives](docs/cloud-drives.md).
 - **Phone apps on the computer** (advanced mode): pick any app from the phone's app list and open it in its own window on the computer. You can use it with mouse and keyboard, minimize it and close it. It keeps running while the phone's own screen does something else.
+
+The app is in English and Turkish: it follows the system's language, or the one chosen in Settings.
 
 Devices find each other with mDNS. You pair two devices once by comparing a 6-digit code shown on both screens. After that, all traffic goes over QUIC with mutual TLS.
 

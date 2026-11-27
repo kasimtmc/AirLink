@@ -16,6 +16,7 @@
 #include <mutex>
 
 #include "cloud_state.hpp"
+#include "i18n.hpp"
 #include "json.hpp"
 #include "platform.hpp"
 
@@ -34,9 +35,11 @@ std::string takeString(char* s) {
 }
 
 std::string cleanError(std::string e) {
-    if (e.find("declined") != std::string::npos) return "Karşı taraf reddetti";
-    if (e.find("offline") != std::string::npos) return "Cihaz çevrimdışı";
-    if (e.find("not paired") != std::string::npos) return "Cihaz eşleşmemiş";
+    if (e == "cancelled") return tr("İptal edildi");
+    if (e == "cancelled by the other device") return tr("Karşı cihaz iptal etti");
+    if (e.find("declined") != std::string::npos) return tr("Karşı taraf reddetti");
+    if (e.find("offline") != std::string::npos) return tr("Cihaz çevrimdışı");
+    if (e.find("not paired") != std::string::npos) return tr("Cihaz eşleşmemiş");
     return e;
 }
 
@@ -368,6 +371,7 @@ struct App::Impl {
                           .port = int(info["port"].i64()),
                           .downloadDir = info["download_dir"].str(),
                           .dataDir = info["data_dir"].str()});
+        loadLanguageSetting(settingPath("language"));
         loadFileHistory();
         Drives::get().attach(node, me.peek().downloadDir, me.peek().dataDir);
         if (auto path = settingPath("password-privacy"); !path.empty()) {
@@ -436,7 +440,7 @@ struct App::Impl {
                 })) {
                 App::get().setMediaAudioEnabled(false);
             } else {
-                mediaAudioMessage.set("Bilgisayarın bağlanması bekleniyor");
+                mediaAudioMessage.set(tr("Bilgisayarın bağlanması bekleniyor"));
             }
         }
         if (!phoneCallAudioPeer.empty() && !online(phoneCallAudioPeer)) {
@@ -493,10 +497,10 @@ struct App::Impl {
             bool open = std::any_of(prompts.peek().begin(), prompts.peek().end(),
                                     [&](const Prompt& p) { return p.requestId == id; });
             removePrompt(id);
-            if (open) notices.push_back("İstek karşı taraftan iptal edildi");
+            if (open) notices.push_back(tr("İstek karşı taraftan iptal edildi"));
         } else if (kind == "pairing_completed") {
             refreshPeers();
-            if (e["success"].boolean()) notices.push_back(e["peer"]["name"].str() + " ile eşleşildi");
+            if (e["success"].boolean()) notices.push_back(trf("{} ile eşleşildi", e["peer"]["name"].str()));
         } else if (kind == "transfer_pending") {
             updateTransfer(e["transfer_id"].str(), e["peer_id"].str(), false, [&](Transfer& t) {
                 t.waiting = true;
@@ -519,7 +523,7 @@ struct App::Impl {
                 t.done = t.total;
                 t.fileCount = int(files.size());
             });
-            notices.push_back(std::to_string(files.size()) + (incoming ? " dosya alındı" : " dosya gönderildi"));
+            notices.push_back(incoming ? trf("{} dosya alındı", files.size()) : trf("{} dosya gönderildi", files.size()));
             recordFiles(e["peer_id"].str(), files, incoming);
             if (incoming) {
                 platform::filesReceived(files);
@@ -544,7 +548,7 @@ struct App::Impl {
         } else if (kind == "desktop_started") {
             desktopViewer.set(e["peer_id"].str());
             updateDesktopAudio();
-            notices.push_back("Ekran " + peerNameOf(e["peer_id"].str()) + " ile paylaşılıyor");
+            notices.push_back(trf("Ekran {} ile paylaşılıyor", peerNameOf(e["peer_id"].str())));
         } else if (kind == "desktop_stopped") {
             if (desktopViewer.peek() == e["peer_id"].str()) {
                 desktopViewer.set({});
@@ -552,7 +556,7 @@ struct App::Impl {
                 stopDesktopAudio();
             }
             std::string error = e["error"].str();
-            if (!error.empty()) notices.push_back("Ekran paylaşılamadı: " + error);
+            if (!error.empty()) notices.push_back(trf("Ekran paylaşılamadı: {}", error));
         } else if (kind == "app_message") {
             handleAppMessage(e["peer"], e["kind"].str(), e["body"]);
         } else if (kind == "clipboard_received") {
@@ -560,7 +564,7 @@ struct App::Impl {
             incomingClipboard.push_back(e["text"].str());
             if (secret) lastClipboardSensitive = true;
             rememberClipboard(e["peer"]["id"].str(), e["text"].str(), true, secret);
-            notices.push_back(e["peer"]["name"].str() + (secret ? " bir şifre gönderdi" : " panosunu paylaştı"));
+            notices.push_back(secret ? trf("{} bir şifre gönderdi", e["peer"]["name"].str()) : trf("{} panosunu paylaştı", e["peer"]["name"].str()));
             platform::notifyReceived(e["peer"]["name"].str(), {}, e["text"].str(), secret);
             receivedCount.set(receivedCount.peek() + 1);
         } else if (kind == "pairing_code") {
@@ -577,32 +581,32 @@ struct App::Impl {
             std::string err = cleanError(e["error"].str());
             switch (what) {
                 case OpKind::StartPairing:
-                    if (!ok) notices.push_back("Eşleşme başlatılamadı: " + err);
+                    if (!ok) notices.push_back(trf("Eşleşme başlatılamadı: {}", err));
                     break;
                 case OpKind::ConfirmPairing:
                     outgoing.set(std::nullopt);
-                    if (!ok) notices.push_back("Eşleşme başarısız: " + err);
-                    else if (!e["value"].boolean()) notices.push_back("Eşleşme reddedildi");
+                    if (!ok) notices.push_back(trf("Eşleşme başarısız: {}", err));
+                    else if (!e["value"].boolean()) notices.push_back(tr("Eşleşme reddedildi"));
                     refreshPeers();
                     break;
                 case OpKind::SendFiles:
                     break;  // shown by the transfer's own events
                 case OpKind::SendClipboard:
-                    notices.push_back(ok ? "Pano gönderildi" : "Pano gönderilemedi: " + err);
+                    notices.push_back(ok ? tr("Pano gönderildi") : trf("Pano gönderilemedi: {}", err));
                     break;
                 case OpKind::ScreenStart:
                     if (!ok) {
                         closeScreen();
-                        notices.push_back("Ekran açılamadı: " + err);
+                        notices.push_back(trf("Ekran açılamadı: {}", err));
                     }
                     break;
                 case OpKind::AdbPair:
                     if (ok) {
-                        advancedStatus.set("Eşleşildi, kabuk yetkisi deneniyor…");
+                        advancedStatus.set(tr("Eşleşildi, kabuk yetkisi deneniyor…"));
                         auto port = parseAdbPort(advancedPort.peek());
                         track(airlink_adb_shell_port(node, adbDir().c_str(), "id", port.value_or(0)), OpKind::AdbTest);
                     } else {
-                        advancedStatus.set("Eşleşme olmadı: " + err);
+                        advancedStatus.set(trf("Eşleşme olmadı: {}", err));
                         platform::advancedSetupResult(false, err);
                     }
                     break;
@@ -610,9 +614,9 @@ struct App::Impl {
                     std::string out = e["value"].str();
                     bool shell = ok && out.find("uid=2000") != std::string::npos;
                     advancedReady.set(shell);
-                    advancedStatus.set(shell ? "Hazır: kabuk yetkisiyle çalışıyor (" + out.substr(0, out.find(' ')) + ")"
-                                             : ok ? "Beklenmeyen yanıt: " + out : "Bağlanılamadı: " + err);
-                    platform::advancedSetupResult(shell, shell ? "Gelişmiş mod hazır" : (ok ? out : err));
+                    advancedStatus.set(shell ? trf("Hazır: kabuk yetkisiyle çalışıyor ({})", out.substr(0, out.find(' ')))
+                                             : ok ? trf("Beklenmeyen yanıt: {}", out) : trf("Bağlanılamadı: {}", err));
+                    platform::advancedSetupResult(shell, shell ? tr("Gelişmiş mod hazır") : (ok ? out : err));
                     break;
                 }
                 case OpKind::AdbHelper:
@@ -621,7 +625,7 @@ struct App::Impl {
                 case OpKind::DesktopShare:
                     break;  // shown by desktop_started / desktop_stopped
                 case OpKind::SendReply:
-                    notices.push_back(ok ? "Yanıt gönderildi" : "Yanıt gönderilemedi: " + err);
+                    notices.push_back(ok ? tr("Yanıt gönderildi") : trf("Yanıt gönderilemedi: {}", err));
                     break;
             }
         }
@@ -677,7 +681,7 @@ struct App::Impl {
                 App::get().answerDesktop(true);  // a trusted device: no question
             } else {
                 desktopRequest.set(DesktopRequest{.peerId = peerId, .peerName = peer["name"].str(), .options = body.dump()});
-                platform::showDesktopNotification(peer["name"].str() + " bu bilgisayarı kontrol etmek istiyor", "AirLink'te onaylayın");
+                platform::showDesktopNotification(trf("{} bu bilgisayarı kontrol etmek istiyor", peer["name"].str()), tr("AirLink'te onaylayın"));
             }
         } else if (kind == "desktop.stop") {
             if (auto r = desktopRequest.peek(); r && r->peerId == peerId) desktopRequest.set(std::nullopt);
@@ -711,7 +715,7 @@ struct App::Impl {
             smsMessages.set(std::move(list));
             smsLoading.set(false);
         } else if (kind == "sms.sent") {
-            if (!body["ok"].boolean()) notices.push_back("SMS gönderilemedi: " + body["error"].str());
+            if (!body["ok"].boolean()) notices.push_back(trf("SMS gönderilemedi: {}", body["error"].str()));
             smsRefreshAt = ticks + 30;  // ~1.5 s: the phone records it in the conversation meanwhile
         } else if (kind == "sms.received") {
             auto open = smsOpen.peek();
@@ -744,7 +748,7 @@ struct App::Impl {
             else if (ev == "closed") removeWindow(session);
             else if (ev == "error") {
                 std::string message = body["message"].str();
-                notices.push_back(message.empty() ? "Uygulama açılamadı" : message);
+                notices.push_back(message.empty() ? tr("Uygulama açılamadı") : message);
                 removeWindow(session);
             }
         } else if (kind == "screen.started") {
@@ -792,14 +796,14 @@ struct App::Impl {
             if (peerId != screenPeer.peek() && !locallyClosed) return;
             screenStopPeer.clear();
             std::string why = body["reason"].str();
-            if (why == "declined") notices.push_back("Ekran paylaşımı telefonda reddedildi");
-            else if (why == "user") notices.push_back("Ekran paylaşımı telefonda durduruldu");
-            else if (why == "busy") notices.push_back("Telefon başka bir paylaşım isteğiyle meşgul");
+            if (why == "declined") notices.push_back(tr("Ekran paylaşımı telefonda reddedildi"));
+            else if (why == "user") notices.push_back(tr("Ekran paylaşımı telefonda durduruldu"));
+            else if (why == "busy") notices.push_back(tr("Telefon başka bir paylaşım isteğiyle meşgul"));
             closeScreen();
         } else if (kind == "call.ringing") {
             IncomingCall call{.peerId = peerId, .number = body["number"].str(), .name = body["name"].str()};
             incomingCall.set(call);
-            platform::showDesktopNotification("📞 " + call.title() + " arıyor", peer["name"].str());
+            platform::showDesktopNotification("📞 " + trf("{} arıyor", call.title()), peer["name"].str());
         } else if (kind == "call.status") {
             std::string state = body["state"].str();
             if (state == "ended" || state == "ringing" || state.empty()) {
@@ -867,11 +871,11 @@ struct App::Impl {
         } else if (kind == "calls.error") {
             callLogLoading.set(false);
             callLogHasMore.set(false);
-            callsError.set(body["error"].str() == "no_permission" ? "Telefonda AirLink'e arama izinleri verilmemiş. Telefondaki AirLink'ten izin verin."
+            callsError.set(body["error"].str() == "no_permission" ? tr("Telefonda AirLink'e arama izinleri verilmemiş. Telefondaki AirLink'ten izin verin.")
                                                                   : body["error"].str());
         } else if (kind == "call.dial_result") {
-            if (body["ok"].boolean()) notices.push_back(body["number"].str() + " telefondan aranıyor");
-            else notices.push_back(body["error"].str() == "no_permission" ? "Telefonda arama izni yok" : "Aranamadı");
+            if (body["ok"].boolean()) notices.push_back(trf("{} telefondan aranıyor", body["number"].str()));
+            else notices.push_back(body["error"].str() == "no_permission" ? tr("Telefonda arama izni yok") : tr("Aranamadı"));
         } else if (kind == "contacts.results") {
             if (body["query"].str() != contactQuery) return;
             std::vector<ContactMatch> list;
@@ -883,7 +887,7 @@ struct App::Impl {
                 int(body["offset"].i64()) != phoneContactsOffset) return;
             phoneContactsLoading.set(false);
             if (body["error"].str() == "no_permission") {
-                phoneContactsError.set("Telefonda AirLink'e rehber izni verilmemiş.");
+                phoneContactsError.set(tr("Telefonda AirLink'e rehber izni verilmemiş."));
                 phoneContactsHasMore.set(false);
                 return;
             }
@@ -896,7 +900,7 @@ struct App::Impl {
             phoneContactsHasMore.set(body["has_more"].boolean());
         } else if (kind == "sms.error") {
             smsLoading.set(false);
-            smsError.set(body["error"].str() == "no_permission" ? "Telefonda AirLink'e SMS izni verilmemiş. Telefondaki AirLink'ten izin verin."
+            smsError.set(body["error"].str() == "no_permission" ? tr("Telefonda AirLink'e SMS izni verilmemiş. Telefondaki AirLink'ten izin verin.")
                                                                : body["error"].str());
         }
     }
@@ -947,12 +951,12 @@ struct App::Impl {
     }
 
     static std::string stopReason(const std::string& why) {
-        if (why == "declined") return "Bilgisayarda reddedildi";
-        if (why == "user") return "Bilgisayarda durduruldu";
-        if (why == "replaced") return "Başka bir cihaz bilgisayarı kontrol etmeye başladı";
-        if (why == "unsupported") return "Bu bilgisayar ekranını paylaşamıyor";
-        if (why == "failed") return "Ekran paylaşılamadı";
-        return "Bilgisayar ekranı kapandı";
+        if (why == "declined") return tr("Bilgisayarda reddedildi");
+        if (why == "user") return tr("Bilgisayarda durduruldu");
+        if (why == "replaced") return tr("Başka bir cihaz bilgisayarı kontrol etmeye başladı");
+        if (why == "unsupported") return tr("Bu bilgisayar ekranını paylaşamıyor");
+        if (why == "failed") return tr("Ekran paylaşılamadı");
+        return tr("Bilgisayar ekranı kapandı");
     }
 
     void closeScreen() {
@@ -1105,7 +1109,7 @@ void App::pump() const {
     platform::setPlayerBluetoothPhone(playerCanConnect ? s.playerBluetoothName : std::string());
     if (s.playerBluetoothPeer.empty()) s.playerBluetoothReportedStatus.clear();
     else {
-        auto status = playerCanConnect ? platform::playerBluetoothStatus() : "Görüşme bitince medya devam edecek";
+        auto status = playerCanConnect ? platform::playerBluetoothStatus() : tr("Görüşme bitince medya devam edecek");
         if (status != s.playerBluetoothReportedStatus) {
             s.playerBluetoothReportedStatus = status;
             sendTo(s.playerBluetoothPeer, "player.audio.status", "{\"status\":" + json::quote(status) + "}");
@@ -1182,7 +1186,7 @@ void App::pump() const {
     if (!s.desktopAudioRecipient.empty()) {
         if (platform::desktopAudioCaptureFailed()) {
             setScreenShareAudio(false);
-            s.notices.push_back("Bilgisayarın ses çıkışı yakalanamadı");
+            s.notices.push_back(tr("Bilgisayarın ses çıkışı yakalanamadı"));
         } else if (auto pcm = platform::takeDesktopAudio(); !pcm.empty()) {
             sendMedia(s.desktopAudioRecipient, "desktop_audio", pcm);
         }
@@ -1398,7 +1402,7 @@ void App::setPauseScreenAudioDuringMusic(bool on) const {
 
 void App::screenShareAudioFailed() const {
     impl_->screenShareAudio.set(false);
-    impl_->notices.push_back("Ekran paylaşımı için medya sesi alınamadı");
+    impl_->notices.push_back(tr("Ekran paylaşımı için medya sesi alınamadı"));
 }
 
 void App::setScreenShareAudio(bool on) const {
@@ -1463,20 +1467,20 @@ void App::setFlingEnabled(bool on) const {
 bool App::fling(const std::string& clipboardText) const {
     std::string target = impl_->flingTarget();
     if (target.empty()) {
-        impl_->notices.push_back("Fırlatma için çevrimiçi bir bilgisayar yok");
+        impl_->notices.push_back(tr("Fırlatma için çevrimiçi bir bilgisayar yok"));
         return false;
     }
     std::string name = impl_->peerNameOf(target);
     if (auto files = impl_->share.peek(); !files.empty()) {
         impl_->share.set({});
         sendFiles(target, files);
-        impl_->notices.push_back(std::to_string(files.size()) + " dosya " + name + " cihazına fırlatıldı");
+        impl_->notices.push_back(trf("{} dosya {} cihazına fırlatıldı", files.size(), name));
         return true;
     } else if (!clipboardText.empty()) {
         sendClipboard(target, clipboardText);
         return true;
     } else {
-        impl_->notices.push_back("Gönderilecek bir şey yok: dosya paylaşın ya da metin kopyalayın");
+        impl_->notices.push_back(tr("Gönderilecek bir şey yok: dosya paylaşın ya da metin kopyalayın"));
         return false;
     }
 }
@@ -1490,20 +1494,20 @@ std::string App::flingPendingShare() const {
 
 std::string App::flingFiles(const std::vector<std::string>& paths) const {
     std::string target = impl_->flingTarget();
-    if (target.empty()) return "Fırlatma için çevrimiçi bir bilgisayar yok";
-    if (paths.empty()) return "Gönderilecek dosya okunamadı";
+    if (target.empty()) return tr("Fırlatma için çevrimiçi bir bilgisayar yok");
+    if (paths.empty()) return tr("Gönderilecek dosya okunamadı");
     sendFiles(target, paths);
-    std::string message = std::to_string(paths.size()) + " dosya " + impl_->peerNameOf(target) + " cihazına fırlatıldı";
+    std::string message = trf("{} dosya {} cihazına fırlatıldı", paths.size(), impl_->peerNameOf(target));
     impl_->notices.push_back(message);
     return message;
 }
 
 std::string App::flingText(const std::string& text) const {
     std::string target = impl_->flingTarget();
-    if (target.empty()) return "Fırlatma için çevrimiçi bir bilgisayar yok";
+    if (target.empty()) return tr("Fırlatma için çevrimiçi bir bilgisayar yok");
     if (text.empty()) return {};
     sendClipboard(target, text);
-    return "Metin " + impl_->peerNameOf(target) + " cihazının panosuna gönderildi";
+    return trf("Metin {} cihazının panosuna gönderildi", impl_->peerNameOf(target));
 }
 
 bool App::canUseAdvancedMode() const { return platform::canUseAdvancedMode(); }
@@ -1528,7 +1532,7 @@ void App::setAdvancedPort(const std::string& port) const {
 }
 
 void App::startAdvancedSetup() const {
-    impl_->advancedStatus.set("Bildirimdeki alana eşleme kodunu yazın…");
+    impl_->advancedStatus.set(tr("Bildirimdeki alana eşleme kodunu yazın…"));
     platform::startAdvancedSetup();
 }
 
@@ -1539,17 +1543,17 @@ void App::advancedPair(const std::string& code) const {
     std::string portText = colon == std::string::npos ? std::string() : code.substr(colon + 1);
     auto port = parseAdbPort(portText);
     if (!port || (colon != std::string::npos && *port == 0)) {
-        impl_->advancedStatus.set("Eşleme portu 1–65535 arasında olmalı");
-        return platform::advancedSetupResult(false, "Eşleme portu geçersiz");
+        impl_->advancedStatus.set(tr("Eşleme portu 1–65535 arasında olmalı"));
+        return platform::advancedSetupResult(false, tr("Eşleme portu geçersiz"));
     }
-    impl_->advancedStatus.set("Eşleniyor…");
+    impl_->advancedStatus.set(tr("Eşleniyor…"));
     impl_->track(airlink_adb_pair_port(impl_->node, impl_->adbDir().c_str(), pairingCode.c_str(), *port), OpKind::AdbPair);
 }
 
 void App::startHelper(const std::string& command) const {
     if (!impl_->node) return platform::helperStarted(false, "not started");
     auto port = parseAdbPort(impl_->advancedPort.peek());
-    if (!port) return platform::helperStarted(false, "Kablosuz hata ayıklama portu geçersiz");
+    if (!port) return platform::helperStarted(false, tr("Kablosuz hata ayıklama portu geçersiz"));
     impl_->track(airlink_adb_shell_port(impl_->node, impl_->adbDir().c_str(), command.c_str(), *port), OpKind::AdbHelper);
 }
 
@@ -1601,8 +1605,8 @@ void App::appInput(int session, const std::string& bodyJson) const {
 void App::advancedTest() const {
     if (!impl_->node) return;
     auto port = parseAdbPort(impl_->advancedPort.peek());
-    if (!port) return impl_->advancedStatus.set("Kablosuz hata ayıklama portu 1–65535 arasında olmalı");
-    impl_->advancedStatus.set("Kablosuz hata ayıklamaya bağlanılıyor…");
+    if (!port) return impl_->advancedStatus.set(tr("Kablosuz hata ayıklama portu 1–65535 arasında olmalı"));
+    impl_->advancedStatus.set(tr("Kablosuz hata ayıklamaya bağlanılıyor…"));
     impl_->track(airlink_adb_shell_port(impl_->node, impl_->adbDir().c_str(), "id", *port), OpKind::AdbTest);
 }
 
@@ -1665,13 +1669,13 @@ void App::setMediaAudioEnabled(bool on) const {
         if (std::none_of(peers.begin(), peers.end(), [&](const Peer& p) {
                 return p.id == peer && p.paired && p.online && (p.platform == "linux" || p.platform == "windows");
             })) {
-            impl_->notices.push_back("Bluetooth oynatıcı sesi için çevrimiçi Linux veya Windows bilgisayarı seçin");
+            impl_->notices.push_back(tr("Bluetooth oynatıcı sesi için çevrimiçi Linux veya Windows bilgisayarı seçin"));
             return;
         }
     }
     impl_->mediaAudioEnabled.set(on);
     impl_->mediaAudioPeer = on ? peer : std::string();
-    impl_->mediaAudioMessage.set(on ? "Seçili oynatıcıların oynatması bekleniyor" : "");
+    impl_->mediaAudioMessage.set(on ? tr("Seçili oynatıcıların oynatması bekleniyor") : "");
     platform::setPlayerAudioTarget(impl_->mediaAudioPeer);
 #else
     (void)on;
@@ -1740,7 +1744,7 @@ void App::startCallAudio() const {
     impl_->callAudioPeer = call->peerId;
     impl_->nextBluetoothRouteTick = impl_->ticks;
     platform::startCallAudio(impl_->peerNameOf(call->peerId));
-    impl_->callAudioMessage.set("Bluetooth telefona bağlanıyor");
+    impl_->callAudioMessage.set(tr("Bluetooth telefona bağlanıyor"));
 }
 
 void App::stopCallAudio() const {
@@ -1887,7 +1891,7 @@ void App::sendDropped(const std::string& peerId, const std::vector<std::string>&
                       const std::vector<std::string>& uris) const {
     if (!paths.empty()) return sendFiles(peerId, paths);
     if (uris.empty()) {
-        impl_->notices.push_back("Bırakılan öğede dosya yok");
+        impl_->notices.push_back(tr("Bırakılan öğede dosya yok"));
         return;
     }
     std::weak_ptr<Impl> weak = impl_;
@@ -1910,7 +1914,7 @@ void App::sendFiles(const std::string& peerId, const std::vector<std::string>& p
 void App::sendClipboard(const std::string& peerId, const std::string& text) const {
     impl_->noteComputer(peerId);
     if (text.empty()) {
-        impl_->notices.push_back("Pano boş");
+        impl_->notices.push_back(tr("Pano boş"));
         return;
     }
     // Sent by hand: a password goes, marked so.
@@ -1978,6 +1982,10 @@ void App::forget(const std::string& peerId) const {
     impl_->refreshPeers();
 }
 
+void App::cancelTransfer(const std::string& transferId) const {
+    if (!airlink_cancel_transfer(impl_->node, transferId.c_str())) impl_->notices.push_back(tr("Aktarım zaten bitmiş"));
+}
+
 void App::clearFinishedTransfers() const {
     impl_->transfers.update([](std::vector<Transfer>& list) { std::erase_if(list, [](const Transfer& t) { return !t.active(); }); });
 }
@@ -2006,7 +2014,7 @@ void App::setSharingPaused(bool paused) const {
         s.sharingPaused.set(true);
         s.transfers.update([](std::vector<Transfer>& list) {
             for (Transfer& t : list)
-                if (t.active()) t.error = "Paylaşım duraklatıldı";
+                if (t.active()) t.error = tr("Paylaşım duraklatıldı");
         });
         s.prompts.set({});
         s.outgoing.set(std::nullopt);

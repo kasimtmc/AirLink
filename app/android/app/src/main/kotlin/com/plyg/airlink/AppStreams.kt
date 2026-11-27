@@ -152,7 +152,7 @@ object AppStreams {
         worker.execute {
             if (!ok) {
                 starting = false
-                failAll("Gelişmiş moda bağlanılamadı: $message")
+                failAll(Texts.trf("Gelişmiş moda bağlanılamadı: {}", message))
                 return@execute
             }
             for (attempt in 0 until 40) {
@@ -173,7 +173,7 @@ object AppStreams {
             starting = false
             val output = helperOut
             if (helper == null || output == null) {
-                failAll("Yardımcı başlamadı (/data/local/tmp/airlink-helper.log)")
+                failAll(Texts.tr("Yardımcı başlamadı (/data/local/tmp/airlink-helper.log)"))
                 return@execute
             }
             synchronized(waiting) {

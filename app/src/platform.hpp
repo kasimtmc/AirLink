@@ -71,6 +71,8 @@ void notificationAction(const std::string& kind, const std::string& key, const s
 // Files (saved paths) or clipboard text that came from `from` while AirLink isn't in front: a
 // notification of this device's (files: open, show in folder; Android also scans them for the
 // gallery and, the app being away, puts the text on the clipboard itself).
+// Notifications for the tray icon to show (Windows: notifyReceived's), since the last call.
+std::vector<std::pair<std::string, std::string>> takeTrayNotifications();
 void notifyReceived(const std::string& from, const std::vector<std::string>& files, const std::string& text,
                     bool secret = false);  // a password: not shown, kept off clipboard histories
 // A copied password waits for the user's yes before going to trusted devices (password privacy):
@@ -163,6 +165,8 @@ std::string playerBluetoothStatus();
 // A file of the Files tab: opened with its app, shown in the file manager (selected where the
 // platform can), or handed to another app (Android's share sheet; desktops: false).
 void openFile(const std::string& path);
+// The system's language as a code ("tr", "en", "tr-TR"…; empty: unknown), for the UI's default.
+std::string systemLanguage();
 // A web page in the default browser (a cloud drive's sign-in).
 void openUrl(const std::string& url);
 // A Files-tab path (a file, or on Android a content:// URI) that is still there.

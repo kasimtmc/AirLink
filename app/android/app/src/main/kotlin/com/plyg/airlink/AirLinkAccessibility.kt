@@ -14,6 +14,7 @@ import org.json.JSONObject
  */
 class AirLinkAccessibility : AccessibilityService() {
     override fun onServiceConnected() {
+        Texts.init(this)
         instance = this
     }
 

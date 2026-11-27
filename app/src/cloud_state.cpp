@@ -9,6 +9,7 @@
 #include <mutex>
 
 #include "app_state.hpp"
+#include "i18n.hpp"
 #include "json.hpp"
 #include "platform.hpp"
 
@@ -49,7 +50,7 @@ CloudAccount accountFrom(const json::Value& v) {
 // The core's messages, as people read them.
 std::string clean(const std::string& error) {
     if (error.find("error sending request") != std::string::npos || error.find("dns error") != std::string::npos)
-        return "Bağlanılamadı: internet bağlantısını denetleyin";
+        return tr("Bağlanılamadı: internet bağlantısını denetleyin");
     return error;
 }
 
@@ -93,7 +94,7 @@ struct Drives::Impl {
 
     void track(uint64_t op, Op what) {
         if (op) ops[op] = std::move(what);
-        else notice("Bulut sürücüsü işlemi başlatılamadı");
+        else notice(tr("Bulut sürücüsü işlemi başlatılamadı"));
     }
 
     void edit(const std::string& account, const std::function<void(CloudView&)>& change) {
@@ -137,9 +138,9 @@ struct Drives::Impl {
     }
 
     void startDownload(const std::string& account, const CloudEntry& entry, const std::string& dir, const std::string& sendTo) {
-        if (entry.folder) return notice("Klasörler indirilemiyor; içindeki dosyaları seçin");
+        if (entry.folder) return notice(tr("Klasörler indirilemiyor; içindeki dosyaları seçin"));
         uint64_t op = airlink_cloud_download(node, account.c_str(), entry.json.c_str(), dir.c_str());
-        if (!op) return notice("İndirme başlatılamadı");
+        if (!op) return notice(tr("İndirme başlatılamadı"));
         ops[op] = Op{Kind::Download, account, {}};
         jobs.update([&](std::vector<CloudJob>& all) {
             all.insert(all.begin(), CloudJob{.op = op, .accountId = account, .name = entry.name, .sendTo = sendTo, .total = entry.size});
@@ -156,15 +157,15 @@ struct Drives::Impl {
                 if (ok) {
                     loadState();
                     CloudAccount a = accountFrom(value);
-                    notice(providerTitle(a.provider) + " bağlandı: " + (a.email.empty() ? a.name : a.email));
+                    notice(trf("{} bağlandı: {}", providerTitle(a.provider), a.email.empty() ? a.name : a.email));
                 } else if (err != "cancelled") {
-                    notice("Bağlanılamadı: " + err);
+                    notice(trf("Bağlanılamadı: {}", err));
                 }
                 break;
             case Kind::Disconnect:
                 loadState();
                 views.update([&](std::map<std::string, CloudView>& all) { all.erase(what.account); });
-                if (!ok) notice("Hesap kaldırılamadı: " + err);
+                if (!ok) notice(trf("Hesap kaldırılamadı: {}", err));
                 break;
             case Kind::List:
             case Kind::Search:
@@ -190,13 +191,13 @@ struct Drives::Impl {
                         j.path = path;
                         j.done = std::max(j.done, j.total);
                     } else {
-                        j.error = err == "cancelled" ? "İptal edildi" : err;
+                        j.error = err == "cancelled" ? tr("İptal edildi") : err;
                     }
                     sendTo = j.sendTo;
                 });
                 if (ok && !sendTo.empty()) App::get().sendFiles(sendTo, {path});
-                else if (ok) notice("İndirildi: " + std::filesystem::path(std::u8string(path.begin(), path.end())).filename().string());
-                else if (err != "cancelled") notice("İndirilemedi: " + err);
+                else if (ok) notice(trf("İndirildi: {}", std::filesystem::path(std::u8string(path.begin(), path.end())).filename().string()));
+                else if (err != "cancelled") notice(trf("İndirilemedi: {}", err));
                 break;
             }
             case Kind::Upload:
@@ -205,22 +206,21 @@ struct Drives::Impl {
                         j.finished = true;
                         j.done = std::max(j.done, j.total);
                     } else {
-                        j.error = err == "cancelled" ? "İptal edildi" : err;
+                        j.error = err == "cancelled" ? tr("İptal edildi") : err;
                     }
                 });
-                if (!ok && err != "cancelled") notice("Yüklenemedi: " + err);
+                if (!ok && err != "cancelled") notice(trf("Yüklenemedi: {}", err));
                 if (ok && openFolder(what.account) == what.folder && !searching(what.account)) list(what.account);
                 break;
             case Kind::CreateFolder:
             case Kind::Rename:
             case Kind::Delete:
                 if (!ok) {
-                    const char* verb = what.kind == Kind::CreateFolder ? "Klasör oluşturulamadı: "
-                                       : what.kind == Kind::Rename      ? "Yeniden adlandırılamadı: "
-                                                                        : "Silinemedi: ";
-                    notice(verb + err);
+                    notice(what.kind == Kind::CreateFolder ? trf("Klasör oluşturulamadı: {}", err)
+                           : what.kind == Kind::Rename     ? trf("Yeniden adlandırılamadı: {}", err)
+                                                           : trf("Silinemedi: {}", err));
                 } else if (what.kind == Kind::Delete) {
-                    notice("Çöp kutusuna taşındı");
+                    notice(tr("Çöp kutusuna taşındı"));
                 }
                 if (openFolder(what.account) == what.folder && !searching(what.account)) list(what.account);
                 break;
@@ -307,7 +307,7 @@ void Drives::connect(const std::string& provider) const {
     if (!s.node) return;
     if (s.connectOp) airlink_cloud_cancel(s.node, s.connectOp);
     s.connectOp = airlink_cloud_connect(s.node, provider.c_str());
-    if (!s.connectOp) return s.notice("Giriş başlatılamadı");
+    if (!s.connectOp) return s.notice(tr("Giriş başlatılamadı"));
     s.ops[s.connectOp] = Op{Kind::Connect, {}, {}};
     s.connecting.set(provider);
 }
@@ -394,18 +394,22 @@ void Drives::upload(const std::string& accountId, const std::vector<std::string>
     for (const std::string& path : paths) {
         std::error_code ec;
         std::filesystem::path p(std::u8string(path.begin(), path.end()));
-        if (std::filesystem::is_directory(p, ec)) {
-            s.notice("Klasörler henüz yüklenemiyor: " + p.filename().string());
-            continue;
-        }
         uint64_t op = airlink_cloud_upload(s.node, accountId.c_str(), folder.c_str(), path.c_str());
         if (!op) {
-            s.notice("Yükleme başlatılamadı");
+            s.notice(tr("Yükleme başlatılamadı"));
             continue;
         }
         s.ops[op] = Op{Kind::Upload, accountId, folder};
         auto name = p.filename().u8string();
-        int64_t size = int64_t(std::filesystem::file_size(p, ec));
+        // (a folder: all its files, as the core counts its progress)
+        int64_t size = 0;
+        if (std::filesystem::is_directory(p, ec)) {
+            for (auto it = std::filesystem::recursive_directory_iterator(p, ec); !ec && it != std::filesystem::recursive_directory_iterator(); it.increment(ec))
+                if (it->is_regular_file(ec) && !it->is_symlink(ec)) size += int64_t(it->file_size(ec));
+            ec.clear();
+        } else {
+            size = int64_t(std::filesystem::file_size(p, ec));
+        }
         s.jobs.update([&](std::vector<CloudJob>& all) {
             all.insert(all.begin(), CloudJob{.op = op, .accountId = accountId, .name = std::string(name.begin(), name.end()),
                                              .upload = true, .total = ec ? 0 : size});

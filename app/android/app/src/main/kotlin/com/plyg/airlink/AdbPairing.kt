@@ -21,8 +21,8 @@ object AdbPairing {
         val context = AirLinkService.appContext ?: return
         post(
             context,
-            "Eşleme kodunu buraya yazın",
-            "Kablosuz hata ayıklama > Eşleme koduyla cihaz eşle. Kodu girin; bağlantı bulunamazsa kod:eşleme_portu yazın.",
+            Texts.tr("Eşleme kodunu buraya yazın"),
+            Texts.tr("Kablosuz hata ayıklama > Eşleme koduyla cihaz eşle. Kodu girin; bağlantı bulunamazsa kod:eşleme_portu yazın."),
             true,
         )
         MainActivity.current()?.let { activity ->
@@ -39,9 +39,9 @@ object AdbPairing {
     fun done(ok: Boolean, message: String) {
         val context = AirLinkService.appContext ?: return
         if (ok) {
-            post(context, "Gelişmiş mod hazır", "AirLink artık telefon ekranını uygulama uygulama bilgisayara açabilir.", false)
+            post(context, Texts.tr("Gelişmiş mod hazır"), Texts.tr("AirLink artık telefon ekranını uygulama uygulama bilgisayara açabilir."), false)
         } else {
-            post(context, "Eşleşme olmadı", "$message — kodu yeniden girin.", true)
+            post(context, Texts.tr("Eşleşme olmadı"), Texts.trf("{} — kodu yeniden girin.", message), true)
         }
     }
 
@@ -53,11 +53,11 @@ object AdbPairing {
             .setStyle(Notification.BigTextStyle().bigText(text))
             .setOnlyAlertOnce(true)
         if (askCode) {
-            val input = RemoteInput.Builder(KEY_CODE).setLabel("6 haneli kod veya kod:port").build()
+            val input = RemoteInput.Builder(KEY_CODE).setLabel(Texts.tr("6 haneli kod veya kod:port")).build()
             val flags = PendingIntent.FLAG_UPDATE_CURRENT or
                 (if (Build.VERSION.SDK_INT >= 31) PendingIntent.FLAG_MUTABLE else 0)
             val reply = PendingIntent.getBroadcast(context, NOTIFICATION, Intent(context, Receiver::class.java), flags)
-            builder.addAction(Notification.Action.Builder(null, "Kodu gir", reply).addRemoteInput(input).build())
+            builder.addAction(Notification.Action.Builder(null, Texts.tr("Kodu gir"), reply).addRemoteInput(input).build())
         } else {
             builder.setAutoCancel(true)
         }
@@ -68,7 +68,7 @@ object AdbPairing {
     class Receiver : BroadcastReceiver() {
         override fun onReceive(context: Context, intent: Intent) {
             val code = RemoteInput.getResultsFromIntent(intent)?.getCharSequence(KEY_CODE)?.toString()?.trim() ?: return
-            post(context, "Eşleniyor…", "Kablosuz hata ayıklama ile eşleşiliyor.", false)
+            post(context, Texts.tr("Eşleniyor…"), Texts.tr("Kablosuz hata ayıklama ile eşleşiliyor."), false)
             if (MainActivity.nativeReady) MainActivity.adbPair(code)
         }
     }

@@ -17,6 +17,7 @@ import java.io.FileOutputStream
 /** Android lifecycle, file picking and share intents around the native Kompoz UI. */
 class MainActivity : KompozActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
+        Texts.init(this)
         AirLinkService.appContext = applicationContext
         super.onCreate(savedInstanceState)
         currentActivity = this
@@ -273,14 +274,14 @@ class MainActivity : KompozActivity() {
         @JvmStatic fun openFile(path: String) {
             val activity = currentActivity ?: return
             val uri = contentUri(path) ?: return activity.runOnUiThread {
-                android.widget.Toast.makeText(activity, "Dosya bulunamadı", android.widget.Toast.LENGTH_SHORT).show()
+                android.widget.Toast.makeText(activity, Texts.tr("Dosya bulunamadı"), android.widget.Toast.LENGTH_SHORT).show()
             }
             activity.runOnUiThread {
                 try {
                     activity.startActivity(Intent(Intent.ACTION_VIEW).setDataAndType(uri, mimeOf(path))
                         .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION))
                 } catch (_: Exception) {
-                    android.widget.Toast.makeText(activity, "Bu dosyayı açacak uygulama yok", android.widget.Toast.LENGTH_SHORT).show()
+                    android.widget.Toast.makeText(activity, Texts.tr("Bu dosyayı açacak uygulama yok"), android.widget.Toast.LENGTH_SHORT).show()
                 }
             }
         }
@@ -316,14 +317,14 @@ class MainActivity : KompozActivity() {
                 try {
                     context.getSystemService(android.content.ClipboardManager::class.java)?.setPrimaryClip(clipOf(text, secret))
                 } catch (_: Exception) { }
-                if (secret) postReceived(context, "$from bir şifre gönderdi", "Panoya kondu (gizli)", null, null)
-                else postReceived(context, "$from panosunu paylaştı", text, null, null)
+                if (secret) postReceived(context, Texts.trf("{} bir şifre gönderdi", from), Texts.tr("Panoya kondu (gizli)"), null, null)
+                else postReceived(context, Texts.trf("{} panosunu paylaştı", from), text, null, null)
                 return
             }
             val first = files[0]
             MediaScannerConnection.scanFile(context, files, null) { path, uri ->
                 if (path != first || visible) return@scanFile
-                val title = if (files.size == 1) "$from bir dosya gönderdi" else "$from ${files.size} dosya gönderdi"
+                val title = if (files.size == 1) Texts.trf("{} bir dosya gönderdi", from) else Texts.trf("{} {} dosya gönderdi", from, files.size)
                 val name = first.substringAfterLast('/')
                 val body = if (files.size == 1) name else "$name ve ${files.size - 1} dosya daha"
                 postReceived(context, title, body, uri, mimeOf(first))
@@ -352,7 +353,7 @@ class MainActivity : KompozActivity() {
             val notifications = context.getSystemService(android.app.NotificationManager::class.java) ?: return
             if (Build.VERSION.SDK_INT >= 26 && notifications.getNotificationChannel(CHANNEL_RECEIVED) == null) {
                 notifications.createNotificationChannel(android.app.NotificationChannel(
-                    CHANNEL_RECEIVED, "Gelen dosyalar ve pano", android.app.NotificationManager.IMPORTANCE_DEFAULT))
+                    CHANNEL_RECEIVED, Texts.tr("Gelen dosyalar ve pano"), android.app.NotificationManager.IMPORTANCE_DEFAULT))
             }
             val id = receivedId++
             val flags = android.app.PendingIntent.FLAG_IMMUTABLE or android.app.PendingIntent.FLAG_UPDATE_CURRENT
@@ -370,11 +371,11 @@ class MainActivity : KompozActivity() {
             if (file != null) {
                 val view = Intent(Intent.ACTION_VIEW).setDataAndType(file, type)
                     .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK)
-                builder.addAction(android.app.Notification.Action.Builder(null, "Aç",
+                builder.addAction(android.app.Notification.Action.Builder(null, Texts.tr("Aç"),
                     android.app.PendingIntent.getActivity(context, id * 2, view, flags)).build())
                 val send = Intent.createChooser(Intent(Intent.ACTION_SEND).setType(type).putExtra(Intent.EXTRA_STREAM, file)
                     .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION), null).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                builder.addAction(android.app.Notification.Action.Builder(null, "Paylaş",
+                builder.addAction(android.app.Notification.Action.Builder(null, Texts.tr("Paylaş"),
                     android.app.PendingIntent.getActivity(context, id * 2 + 1, send, flags)).build())
             }
             notifications.notify(id, builder.build())
@@ -401,7 +402,7 @@ class MainActivity : KompozActivity() {
             val notifications = context.getSystemService(android.app.NotificationManager::class.java) ?: return
             if (Build.VERSION.SDK_INT >= 26 && notifications.getNotificationChannel(CHANNEL_RECEIVED) == null) {
                 notifications.createNotificationChannel(android.app.NotificationChannel(
-                    CHANNEL_RECEIVED, "Gelen dosyalar ve pano", android.app.NotificationManager.IMPORTANCE_DEFAULT))
+                    CHANNEL_RECEIVED, Texts.tr("Gelen dosyalar ve pano"), android.app.NotificationManager.IMPORTANCE_DEFAULT))
             }
             fun answer(send: Boolean) = android.app.PendingIntent.getBroadcast(context, if (send) 4901 else 4902,
                 Intent(context, PromptReceiver::class.java).putExtra(PromptReceiver.EXTRA_PASSWORD, send),
@@ -410,11 +411,11 @@ class MainActivity : KompozActivity() {
             val builder = (if (Build.VERSION.SDK_INT >= 26) android.app.Notification.Builder(context, CHANNEL_RECEIVED)
                            else android.app.Notification.Builder(context))
                 .setSmallIcon(R.drawable.ic_stat_airlink)
-                .setContentTitle("Panoda şifre var")
-                .setContentText("Güvenilir cihazlarınıza gönderilsin mi?")
+                .setContentTitle(Texts.tr("Panoda şifre var"))
+                .setContentText(Texts.tr("Güvenilir cihazlarınıza gönderilsin mi?"))
                 .setAutoCancel(true)
-                .addAction(android.app.Notification.Action.Builder(null, "Gönderme", answer(false)).build())
-                .addAction(android.app.Notification.Action.Builder(null, "Gönder", answer(true)).build())
+                .addAction(android.app.Notification.Action.Builder(null, Texts.tr("Gönderme"), answer(false)).build())
+                .addAction(android.app.Notification.Action.Builder(null, Texts.tr("Gönder"), answer(true)).build())
             notifications.notify(PASSWORD_NOTIFICATION, builder.build())
         }
 

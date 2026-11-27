@@ -80,7 +80,9 @@ endif()
 target_link_libraries(airlink_core INTERFACE Threads::Threads ${AIRLINK_RUST_SYSLIBS})
 
 # ---- The app ---------------------------------------------------------------------------------
-set(AIRLINK_SOURCES src/app_state.cpp src/cloud_state.cpp src/ui.cpp)
+set(AIRLINK_SOURCES src/app_state.cpp src/cloud_state.cpp src/i18n.cpp src/ui.cpp src/ui_calls.cpp src/ui_cloud.cpp
+                    src/ui_devices.cpp src/ui_files.cpp src/ui_messages.cpp src/ui_screen.cpp
+                    src/ui_settings.cpp src/ui_tray_panel.cpp)
 if(ANDROID)
     add_library(main SHARED ${AIRLINK_SOURCES} src/platform_android.cpp)
     set(AIRLINK_TARGET main)

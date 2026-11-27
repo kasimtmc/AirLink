@@ -368,6 +368,7 @@ public:
     void sendClipboard(const std::string& peerId, const std::string& text) const;
     void forget(const std::string& peerId) const;
     void clearFinishedTransfers() const;
+    void cancelTransfer(const std::string& transferId) const;  // either way; both sides see it end
     void setSharingPaused(bool paused) const;
     void shareTo(const std::string& peerId) const;
     void cancelShare() const;

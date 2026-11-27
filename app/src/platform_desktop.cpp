@@ -2,6 +2,8 @@
 
 #include "platform.hpp"
 
+#include "i18n.hpp"
+
 #include <cstdio>
 #include <cstdlib>
 #include <atomic>
@@ -59,6 +61,17 @@ void spawn(std::vector<std::string> argv) {
 }  // namespace
 
 void openUrl(const std::string& url) { openFile(url); }
+
+std::string systemLanguage() {
+#if defined(_WIN32)
+    // (a primary language id: LANG_TURKISH is 0x1F)
+    return PRIMARYLANGID(GetUserDefaultUILanguage()) == LANG_TURKISH ? "tr" : "en";
+#else
+    for (const char* name : {"LANGUAGE", "LC_ALL", "LC_MESSAGES", "LANG"})
+        if (const char* v = std::getenv(name); v && *v && std::string_view(v) != "C" && std::string_view(v) != "POSIX") return v;
+    return {};
+#endif
+}
 
 void openFile(const std::string& path) {
     if (path.empty()) return;
@@ -137,17 +150,18 @@ bool have(const char* program) {
 std::vector<std::string> runPicker() {
     // KDE's own dialog on KDE, GTK's elsewhere. (The XDG portal's FileChooser would serve
     // sandboxed builds too; this is enough for the desktop build.)
-    const char* cmd = nullptr;
+    std::string cmd;
     const char* desktop = std::getenv("XDG_CURRENT_DESKTOP");
     bool kde = desktop && std::string(desktop).find("KDE") != std::string::npos;
+    std::string title = tr("AirLink: dosya gönder");  // (no quote in it: it goes in '…' below)
     if ((kde || !have("zenity")) && have("kdialog"))
-        cmd = "kdialog --title 'AirLink: dosya gönder' --getopenfilename --multiple --separate-output \"$HOME\" 2>/dev/null";
+        cmd = "kdialog --title '" + title + "' --getopenfilename --multiple --separate-output \"$HOME\" 2>/dev/null";
     else if (have("zenity"))
-        cmd = "zenity --file-selection --multiple --separator='\n' --title='AirLink: dosya gönder' 2>/dev/null";
-    if (!cmd) return {};
+        cmd = "zenity --file-selection --multiple --separator='\n' --title='" + title + "' 2>/dev/null";
+    if (cmd.empty()) return {};
 
     std::vector<std::string> paths;
-    FILE* pipe = popen(cmd, "r");
+    FILE* pipe = popen(cmd.c_str(), "r");
     if (!pipe) return paths;
     std::string line;
     char buf[4096];
@@ -186,7 +200,9 @@ std::string toUtf8(const wchar_t* w) {
 
 void pickFiles(std::function<void(std::vector<std::string>)> done) {
     // The system's file dialog, on a thread of its own (COM's single-threaded apartment).
-    std::thread([done = std::move(done)] {
+    std::string titleText = tr("AirLink: dosya gönder");
+    std::wstring title = std::filesystem::path(std::u8string(titleText.begin(), titleText.end())).wstring();
+    std::thread([done = std::move(done), title] {
         std::vector<std::string> paths;
         if (SUCCEEDED(CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE))) {
             IFileOpenDialog* dialog = nullptr;
@@ -194,7 +210,7 @@ void pickFiles(std::function<void(std::vector<std::string>)> done) {
                 DWORD options = 0;
                 dialog->GetOptions(&options);
                 dialog->SetOptions(options | FOS_ALLOWMULTISELECT | FOS_FORCEFILESYSTEM);
-                dialog->SetTitle(L"AirLink: dosya gönder");
+                dialog->SetTitle(title.c_str());
                 IShellItemArray* items = nullptr;
                 if (SUCCEEDED(dialog->Show(nullptr)) && SUCCEEDED(dialog->GetResults(&items))) {
                     DWORD count = 0;
@@ -516,12 +532,14 @@ std::wstring sendToShortcut() {
 // Per user (HKCU, the user's own Send To folder): no administrator needed. Kept up to date with
 // where this .exe is, every start.
 void registerShell() {
+    std::string labelText = tr("AirLink ile gönder");
+    std::wstring label = std::filesystem::path(std::u8string(labelText.begin(), labelText.end())).wstring();
     wchar_t exe[MAX_PATH];
     if (!GetModuleFileNameW(nullptr, exe, MAX_PATH)) return;
     std::wstring command = L"\"" + std::wstring(exe) + L"\" --send \"%1\"";
     for (const wchar_t* type : {L"*", L"Directory"}) {
         std::wstring key = std::wstring(L"Software\\Classes\\") + type + L"\\shell\\AirLink";
-        setRegistryString(HKEY_CURRENT_USER, key, nullptr, L"AirLink ile gönder");
+        setRegistryString(HKEY_CURRENT_USER, key, nullptr, label);
         setRegistryString(HKEY_CURRENT_USER, key, L"Icon", std::wstring(exe) + L",0");
         setRegistryString(HKEY_CURRENT_USER, key + L"\\command", nullptr, command);
     }
@@ -532,7 +550,7 @@ void registerShell() {
     if (SUCCEEDED(CoCreateInstance(CLSID_ShellLink, nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&shell)))) {
         shell->SetPath(exe);
         shell->SetArguments(L"--send");
-        shell->SetDescription(L"AirLink ile gönder");
+        shell->SetDescription(label.c_str());
         IPersistFile* file = nullptr;
         if (SUCCEEDED(shell->QueryInterface(IID_PPV_ARGS(&file)))) {
             file->Save(link.c_str(), TRUE);
@@ -772,29 +790,42 @@ std::atomic<bool> appForeground{true};
 
 void setAppForeground(bool foreground) { appForeground = foreground; }
 
+namespace {
+// Windows: notifications waiting for the tray icon to show them (takeTrayNotifications).
+std::mutex trayNotificationsMutex;
+std::vector<std::pair<std::string, std::string>> trayNotifications;
+
+// A notification's title and text for what came from `from`.
+std::pair<std::string, std::string> receivedText(const std::string& from, const std::vector<std::string>& files,
+                                                 const std::string& text, bool secret) {
+    if (!files.empty()) {
+        auto name = [](const std::string& p) { auto s = p.find_last_of("/\\"); return s == std::string::npos ? p : p.substr(s + 1); };
+        std::string title = files.size() == 1 ? trf("{} bir dosya gönderdi", from) : trf("{} {} dosya gönderdi", from, files.size());
+        std::string body = files.size() > 1 ? trf("{} ve {} dosya daha", name(files[0]), files.size() - 1) : name(files[0]);
+        return {title, body};
+    }
+    if (secret) return {trf("{} bir şifre gönderdi", from), tr("Panoya kondu (gizli)")};
+    return {trf("{} panosunu paylaştı", from), text.size() > 240 ? text.substr(0, 240) + "…" : text};
+}
+}  // namespace
+
+std::vector<std::pair<std::string, std::string>> takeTrayNotifications() {
+    std::lock_guard lock(trayNotificationsMutex);
+    return std::exchange(trayNotifications, {});
+}
+
 void notifyReceived(const std::string& from, const std::vector<std::string>& files, const std::string& text, bool secret) {
     if (appForeground) return;
+    auto [title, body] = receivedText(from, files, text, secret);
 #if defined(__linux__)
-    std::string title, body;
-    if (!files.empty()) {
-        auto name = [](const std::string& p) { auto s = p.find_last_of('/'); return s == std::string::npos ? p : p.substr(s + 1); };
-        title = files.size() == 1 ? from + " bir dosya gönderdi" : from + " " + std::to_string(files.size()) + " dosya gönderdi";
-        body = name(files[0]);
-        if (files.size() > 1) body += " ve " + std::to_string(files.size() - 1) + " dosya daha";
-    } else if (secret) {
-        title = from + " bir şifre gönderdi";
-        body = "Panoya kondu (gizli)";
-    } else {
-        title = from + " panosunu paylaştı";
-        body = text.size() > 240 ? text.substr(0, 240) + "…" : text;
-    }
     std::string first = files.empty() ? std::string() : files[0];
     // notify-send waits for the user's choice and prints it: open the file or its folder.
-    std::thread([title, body, first] {
+    std::string openLabel = tr("Aç"), folderLabel = tr("Klasörde göster");
+    std::thread([title, body, first, openLabel, folderLabel] {
         std::vector<std::string> argv = {"notify-send", "--app-name=AirLink", "--icon=airlink", title, body};
         if (!first.empty()) {
-            argv.push_back("--action=open=Aç");
-            argv.push_back("--action=folder=Klasörde göster");
+            argv.push_back("--action=open=" + openLabel);
+            argv.push_back("--action=folder=" + folderLabel);
         }
         std::vector<char*> args;
         for (auto& a : argv) args.push_back(a.data());
@@ -819,7 +850,9 @@ void notifyReceived(const std::string& from, const std::vector<std::string>& fil
         else if (chosen.starts_with("folder")) showInFolder(first);
     }).detach();
 #else
-    (void)from, (void)files, (void)text, (void)secret;  // TODO(windows): a toast
+    // Windows: the tray icon shows it (a toast on Windows 10 and 11).
+    std::lock_guard lock(trayNotificationsMutex);
+    trayNotifications.emplace_back(std::move(title), std::move(body));
 #endif
 }
 
@@ -836,10 +869,13 @@ bool clipboardMarkedSensitive() {
 
 void askSendPassword(std::function<void(bool)> answer) {
 #if defined(__linux__)
-    std::thread([answer = std::move(answer)] {
-        const char* args[] = {"notify-send", "--app-name=AirLink", "--icon=airlink", "--urgency=normal",
-                              "--action=send=Gönder", "--action=skip=Gönderme",
-                              "Panoda şifre var", "Güvenilir cihazlarınıza gönderilsin mi?", nullptr};
+    std::vector<std::string> argv = {"notify-send", "--app-name=AirLink", "--icon=airlink", "--urgency=normal",
+                                     "--action=send=" + tr("Gönder"), "--action=skip=" + tr("Gönderme"),
+                                     tr("Panoda şifre var"), tr("Güvenilir cihazlarınıza gönderilsin mi?")};
+    std::thread([answer = std::move(answer), argv]() mutable {
+        std::vector<char*> args;
+        for (auto& a : argv) args.push_back(a.data());
+        args.push_back(nullptr);
         int out[2];
         if (pipe(out) != 0) return;
         posix_spawn_file_actions_t actions;
@@ -847,7 +883,7 @@ void askSendPassword(std::function<void(bool)> answer) {
         posix_spawn_file_actions_adddup2(&actions, out[1], 1);
         posix_spawn_file_actions_addclose(&actions, out[0]);
         pid_t pid = 0;
-        bool spawned = posix_spawnp(&pid, "notify-send", &actions, nullptr, const_cast<char* const*>(args), environ) == 0;
+        bool spawned = posix_spawnp(&pid, "notify-send", &actions, nullptr, args.data(), environ) == 0;
         posix_spawn_file_actions_destroy(&actions);
         close(out[1]);
         std::string chosen;
