@@ -31,7 +31,7 @@ Every provider signs in through an app registration. A build includes a provider
    ```
 2. The environment at run time.
 3. The environment at build time.
-4. AirLink's own registration, built in. Dropbox has one so far.
+4. AirLink's own registration, built in. Dropbox and OneDrive have one so far.
 
 The environment variables are `AIRLINK_ONEDRIVE_CLIENT_ID`, `AIRLINK_DROPBOX_CLIENT_ID`, `AIRLINK_GDRIVE_CLIENT_ID` and `AIRLINK_GDRIVE_CLIENT_SECRET`.
 

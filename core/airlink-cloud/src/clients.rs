@@ -21,6 +21,7 @@ use crate::Provider;
 
 /// AirLink's own registrations (public: they show in the browser's address bar at sign-in).
 const DROPBOX: &str = "qhltau20544zsm3";
+const ONEDRIVE: &str = "adbb2297-142f-48bf-9d6d-86c878ac5b5d";
 
 #[derive(Clone, Debug, Default)]
 pub struct Client {
@@ -64,7 +65,8 @@ impl Clients {
             .unwrap_or_default();
         let plain = |id: Option<String>| id.filter(|v| !v.trim().is_empty()).map(|id| Client { id, secret: None });
         let onedrive = plain(file.onedrive).or_else(|| {
-            env("AIRLINK_ONEDRIVE_CLIENT_ID", option_env!("AIRLINK_ONEDRIVE_CLIENT_ID")).map(|id| Client { id, secret: None })
+            let id = env("AIRLINK_ONEDRIVE_CLIENT_ID", option_env!("AIRLINK_ONEDRIVE_CLIENT_ID")).unwrap_or_else(|| ONEDRIVE.to_owned());
+            Some(Client { id, secret: None })
         });
         let dropbox = plain(file.dropbox).or_else(|| {
             let id = env("AIRLINK_DROPBOX_CLIENT_ID", option_env!("AIRLINK_DROPBOX_CLIENT_ID")).unwrap_or_else(|| DROPBOX.to_owned());
