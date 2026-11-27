@@ -343,6 +343,7 @@ void callWithPath(jmethodID method, const std::string& path) {
 }  // namespace
 
 void openFile(const std::string& path) { callWithPath(openFileId, path); }
+void openUrl(const std::string& url) { callWithPath(openFileId, url); }
 
 void setAppForeground(bool) {}  // (Android: MainActivity knows)
 

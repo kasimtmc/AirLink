@@ -58,6 +58,8 @@ void spawn(std::vector<std::string> argv) {
 }
 }  // namespace
 
+void openUrl(const std::string& url) { openFile(url); }
+
 void openFile(const std::string& path) {
     if (path.empty()) return;
 #if defined(__linux__)

@@ -11,6 +11,7 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
+mod cloud;
 mod desktop;
 
 use airlink_core::{DEFAULT_PORT, Node, NodeConfig, OutgoingPairing, read_saved_name};
@@ -27,6 +28,7 @@ pub struct AirlinkNode {
     node: Node,
     shared: Arc<Shared>,
     desktop: Arc<Mutex<Option<desktop::Running>>>,
+    drives: cloud::Drives,
 }
 
 pub struct AirlinkH264Decoder {
@@ -150,6 +152,7 @@ fn start(cfg: StartConfig) -> anyhow::Result<AirlinkNode> {
     } else if let (None, Some(n)) = (saved, cfg.fallback_name.filter(nonempty)) {
         nc.device_name = n;
     }
+    let data_dir = nc.data_dir.clone();
     let node = rt.block_on(Node::start(nc))?;
 
     let shared = Arc::new(Shared {
@@ -179,6 +182,10 @@ fn start(cfg: StartConfig) -> anyhow::Result<AirlinkNode> {
         node,
         shared,
         desktop: Default::default(),
+        drives: cloud::Drives {
+            cloud: cloud::open(&data_dir),
+            running: Default::default(),
+        },
     })
 }
 
@@ -225,9 +232,16 @@ pub unsafe extern "C" fn airlink_stop(node: *mut AirlinkNode) {
         // while the process exits (a C++ static's destructor), when the calling thread's
         // thread-locals, Tokio's among them, are already gone.
         let AirlinkNode {
-            rt, node, desktop, ..
+            rt,
+            node,
+            desktop,
+            drives,
+            ..
         } = *n;
         drop(desktop.lock().unwrap().take()); // stops a screen share
+        for (_, task) in drives.running.lock().unwrap().drain() {
+            task.abort();
+        }
         let (tx, rx) = std::sync::mpsc::channel();
         rt.spawn(async move {
             node.shutdown().await;

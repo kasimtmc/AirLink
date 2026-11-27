@@ -13,6 +13,7 @@
 
 #include "app_icons.hpp"
 #include "app_state.hpp"
+#include "cloud_state.hpp"
 #include "json.hpp"
 #include "platform.hpp"
 #include "tray_icon.hpp"
@@ -23,6 +24,68 @@ using namespace airlink;
 // ---- C++ helpers the composables call ------------------------------------------------------
 
 static App appState() { return App::get(); }
+static Drives drivesState() { return Drives::get(); }
+
+// "27.11.2026 14:05" in the local time zone, for an RFC 3339 time from a cloud drive ("" stays).
+static std::string cloudDate(const std::string& rfc3339) {
+    std::tm utc{};
+    if (rfc3339.size() < 19 || std::sscanf(rfc3339.c_str(), "%4d-%2d-%2dT%2d:%2d:%2d", &utc.tm_year, &utc.tm_mon, &utc.tm_mday,
+                                           &utc.tm_hour, &utc.tm_min, &utc.tm_sec) != 6)
+        return {};
+    utc.tm_year -= 1900;
+    utc.tm_mon -= 1;
+#if defined(_WIN32)
+    std::time_t t = _mkgmtime(&utc);
+#else
+    std::time_t t = timegm(&utc);
+#endif
+    std::tm local{};
+#if defined(_WIN32)
+    localtime_s(&local, &t);
+#else
+    localtime_r(&t, &local);
+#endif
+    char buf[24];
+    std::strftime(buf, sizeof buf, "%d.%m.%Y %H:%M", &local);
+    return buf;
+}
+
+// A drive entry's second line: "3.4 MB · 27.11.2026 14:05", a folder's date alone.
+static std::string cloudEntryLine(const CloudEntry& e) {
+    std::string date = cloudDate(e.modified);
+    std::string size = e.folder ? std::string() : !e.kind.empty() ? std::string("Google dokümanı") : humanSize(e.size);
+    if (size.empty()) return date;
+    return date.empty() ? size : size + " · " + date;
+}
+
+// "12.3 GB / 15 GB kullanılıyor", or the used space alone when there is no limit.
+static std::string quotaText(const CloudView& v) {
+    if (v.used <= 0 && v.total <= 0) return {};
+    return v.total > 0 ? humanSize(v.used) + " / " + humanSize(v.total) + " kullanılıyor" : humanSize(v.used) + " kullanılıyor";
+}
+
+static float quotaFraction(const CloudView& v) { return v.total > 0 ? float(double(v.used) / double(v.total)) : 0.f; }
+
+// A tab's label: the service, with the account when it has more than one tab.
+static std::string cloudTabLabel(const std::vector<CloudAccount>& all, const CloudAccount& a) {
+    int same = 0;
+    for (const auto& other : all) same += other.provider == a.provider;
+    if (same < 2) return providerTitle(a.provider);
+    std::string who = a.email.empty() ? a.name : a.email.substr(0, a.email.find('@'));
+    return providerTitle(a.provider) + " · " + who;
+}
+
+static std::string cloudTitle(const CloudAccount& a) {
+    std::string who = a.email.empty() ? a.name : a.email;
+    return who.empty() ? providerTitle(a.provider) : providerTitle(a.provider) + " · " + who;
+}
+
+static std::string cloudJobLine(const CloudJob& j) {
+    if (!j.error.empty()) return j.error;
+    if (j.finished) return j.upload ? "Yüklendi" : !j.sendTo.empty() ? "İndirildi, cihaza gönderiliyor" : "İndirildi";
+    std::string done = humanSize(j.done) + (j.total > 0 ? " / " + humanSize(j.total) : std::string());
+    return (j.upload ? "Yükleniyor · " : "İndiriliyor · ") + done;
+}
 static void openDownloads(const std::string& path) { airlink::platform::openFolder(path); }
 static bool needsBackgroundAutostartSettings() { return airlink::platform::needsBackgroundAutostartSettings(); }
 static bool canStartAtLogin() { return airlink::platform::canStartAtLogin(); }
@@ -587,6 +650,7 @@ fun AirLinkTray(app: App) {
 
 // Home's destinations.
 constexpr int TAB_DEVICES = 0, TAB_MESSAGES = 1, TAB_PHONE = 2, TAB_APPS = 3, TAB_SETTINGS = 4, TAB_CLIPBOARD = 5, TAB_FILES = 6;
+constexpr int TAB_CLOUD = 100;  // a cloud drive account's tab: TAB_CLOUD + its index
 
 static std::string tabTitle(int tab) {
     switch (tab) {
@@ -627,6 +691,11 @@ fun Home() {
 
     // Destinations: a computer also has a paired phone's messages, calls and apps.
     val desktopTabs = isDesktop() && app.ready()
+    val drives = drivesState()
+    val cloudAccounts = if (desktopTabs) drives.accounts() else listOf()
+    // (a tab whose account was just removed goes back to Settings, where it was removed)
+    if (tab >= TAB_CLOUD && tab - TAB_CLOUD >= cloudAccounts.size) tab = TAB_SETTINGS
+    val cloudIndex = if (tab >= TAB_CLOUD) tab - TAB_CLOUD else -1
     val activeCall = app.activeCall()
     var minimizedCall by remember { mutableStateOf(0L) }
     val callOpen = activeCall != null && isDesktop() && minimizedCall != activeCall!!.since
@@ -651,6 +720,10 @@ fun Home() {
                 NavigationSuiteItem(selected = tab == TAB_APPS, onClick = { tab = TAB_APPS },
                                     icon = { Icon(AppIcons.Apps, contentDescription = null) }, label = { Text("Uygulamalar") })
             }
+            cloudAccounts.forEachIndexed { i, a ->
+                NavigationSuiteItem(selected = tab == TAB_CLOUD + i, onClick = { tab = TAB_CLOUD + i },
+                                    icon = { Icon(AppIcons.Cloud, contentDescription = null) }, label = { Text(cloudTabLabel(cloudAccounts, a)) })
+            }
             NavigationSuiteItem(selected = tab == TAB_SETTINGS, onClick = { tab = TAB_SETTINGS },
                                 icon = { Icon(Icons.Filled.Settings, contentDescription = null) }, label = { Text("Ayarlar") })
         },
@@ -660,13 +733,16 @@ fun Home() {
         Scaffold(
             topBar = {
                 if (!callOpen) TopAppBar(
-                    title = { Text(tabTitle(tab)) },
+                    title = { Text(if (cloudIndex >= 0) cloudTitle(cloudAccounts[cloudIndex]) else tabTitle(tab)) },
                     actions = {
                         if (tab == TAB_DEVICES && app.transfers().any { !it.active() }) {
                             TextButton(onClick = { app.clearFinishedTransfers() }) { Text("Temizle") }
                         }
                         if (tab == TAB_FILES && app.fileHistory().isNotEmpty()) {
                             TextButton(onClick = { app.clearFileHistory() }) { Text("Geçmişi temizle") }
+                        }
+                        if (cloudIndex >= 0 && drives.jobs().any { it.accountId == cloudAccounts[cloudIndex].id && !it.active() }) {
+                            TextButton(onClick = { drives.clearFinishedJobs() }) { Text("Temizle") }
                         }
                         if (tab == TAB_CLIPBOARD && app.clipboardHistory().isNotEmpty()) {
                             TextButton(onClick = { app.clearClipboardHistory() }) { Text("Temizle") }
@@ -687,7 +763,8 @@ fun Home() {
                     } else if (app.ready() && app.screenPeer().isNotEmpty()) {
                         ScreenView(app)
                     } else if (app.ready()) {
-                        if (tab == TAB_MESSAGES) MessagesScreen(app)
+                        if (cloudIndex >= 0) CloudScreen(app, drives, cloudAccounts[cloudIndex])
+                        else if (tab == TAB_MESSAGES) MessagesScreen(app)
                         else if (tab == TAB_PHONE) PhoneScreen(app)
                         else if (tab == TAB_APPS) AppsScreen(app)
                         else if (tab == TAB_SETTINGS) SettingsScreen(app)
@@ -1270,6 +1347,309 @@ fun FileRow(app: App, f: FileRecord, exists: Boolean) {
     }
 }
 
+// ---- Cloud drives (a computer): a tab per connected account ----------------------------------
+
+@Kompozable
+fun CloudAccountsCard(drives: Drives) {
+    val cs = MaterialTheme.colorScheme
+    val accounts = drives.accounts()
+    val connecting = drives.connecting()
+    var removing by remember { mutableStateOf("") }
+    OutlinedCard(modifier = Modifier.fillMaxWidth()) {
+        Column(modifier = Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text("OneDrive, Dropbox ve Google Drive hesaplarınızı bağlayın; her hesap kendi sekmesinde açılır. Giriş tarayıcıda yapılır, oturum sistemin anahtar zincirinde saklanır.",
+                 style = MaterialTheme.typography.bodyMedium, color = cs.onSurfaceVariant)
+            for (a in accounts) {
+                Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    Icon(AppIcons.Cloud, contentDescription = null, tint = cs.primary)
+                    Spacer(modifier = Modifier.width(12.dp))
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(providerTitle(a.provider), style = MaterialTheme.typography.titleSmall)
+                        Text(if (a.email.isEmpty()) a.name else "${a.name} · ${a.email}", style = MaterialTheme.typography.bodySmall,
+                             color = cs.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    }
+                    TextButton(onClick = { removing = a.id }) { Text("Kaldır") }
+                }
+            }
+            if (connecting.isNotEmpty()) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
+                    Spacer(modifier = Modifier.width(12.dp))
+                    Text("${providerTitle(connecting)}: tarayıcıda giriş bekleniyor…", modifier = Modifier.weight(1f))
+                    TextButton(onClick = { drives.cancelConnect() }) { Text("Vazgeç") }
+                }
+            } else {
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    for (p in drives.providers()) {
+                        OutlinedButton(onClick = { drives.connect(p) }) {
+                            Icon(Icons.Filled.Add, contentDescription = null, modifier = Modifier.size(18.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(providerTitle(p))
+                        }
+                    }
+                }
+            }
+        }
+    }
+    if (removing.isNotEmpty()) {
+        AlertDialog(
+            onDismissRequest = { removing = "" },
+            title = { Text("Hesap kaldırılsın mı?") },
+            text = { Text("AirLink bu hesabın oturumunu bu bilgisayardan siler. Sürücüdeki dosyalarınız olduğu gibi kalır.") },
+            confirmButton = {
+                TextButton(onClick = {
+                    drives.disconnect(removing)
+                    removing = ""
+                }) { Text("Kaldır") }
+            },
+            dismissButton = { TextButton(onClick = { removing = "" }) { Text("Vazgeç") } },
+        )
+    }
+}
+
+@Kompozable
+fun CloudScreen(app: App, drives: Drives, account: CloudAccount) {
+    LaunchedEffect(account.id) { drives.openRoot(account.id) }
+    val cs = MaterialTheme.colorScheme
+    val view = drives.view(account.id)
+    val jobs = drives.jobs().filter { it.accountId == account.id }
+    var query by remember(account.id) { mutableStateOf("") }
+    var newFolder by remember { mutableStateOf(false) }
+    var folderName by remember { mutableStateOf("") }
+    var dragging by remember { mutableStateOf(false) }
+    val drop = Modifier.dragAndDropTarget(
+        shouldStartDragAndDrop = { e -> carriesFiles(e) },
+        target = DragAndDropTarget(
+            onDrop = { e ->
+                dragging = false
+                drives.upload(account.id, droppedFiles(e))
+                true
+            },
+            onEntered = { dragging = true },
+            onExited = { dragging = false },
+            onEnded = { dragging = false },
+        ),
+    )
+    Column(modifier = drop.fillMaxSize().background(if (dragging) cs.secondaryContainer else cs.surface)) {
+        Column(modifier = Modifier.fillMaxWidth().wrapContentWidth().widthIn(0.dp, 900.dp).padding(start = 16.dp, end = 16.dp, top = 8.dp)) {
+            Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                OutlinedTextField(value = query, onValueChange = { query = it }, singleLine = true, label = "Sürücüde ara",
+                                  modifier = Modifier.weight(1f), onSubmit = { drives.search(account.id, query.trim()) },
+                                  leadingIcon = { Icon(Icons.Filled.Search, contentDescription = null) },
+                                  trailingIcon = {
+                                      if (query.isNotEmpty() || view.search.isNotEmpty()) {
+                                          IconButton(onClick = {
+                                              query = ""
+                                              drives.search(account.id, "")
+                                          }) { Icon(Icons.Filled.Close, contentDescription = "Aramayı temizle") }
+                                      }
+                                  })
+                Spacer(modifier = Modifier.width(8.dp))
+                FilledTonalButton(onClick = { drives.pickAndUpload(account.id) }) {
+                    Icon(AppIcons.Upload, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text("Yükle")
+                }
+                IconButton(onClick = {
+                    folderName = ""
+                    newFolder = true
+                }) { Icon(AppIcons.CreateNewFolder, contentDescription = "Yeni klasör") }
+                IconButton(onClick = { drives.refresh(account.id) }) { Icon(Icons.Filled.Refresh, contentDescription = "Yenile") }
+            }
+            // Where we are: the folders from the root, or the search.
+            Row(modifier = Modifier.fillMaxWidth().padding(top = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                if (view.search.isNotEmpty()) {
+                    Text("\"${view.search}\" için sonuçlar", style = MaterialTheme.typography.titleSmall, modifier = Modifier.weight(1f).padding(vertical = 12.dp))
+                } else {
+                    Row(modifier = Modifier.weight(1f).horizontalScroll(rememberScrollState()), verticalAlignment = Alignment.CenterVertically) {
+                        view.path.forEachIndexed { i, f ->
+                            if (i > 0) Icon(Icons.Filled.KeyboardArrowRight, contentDescription = null, tint = cs.onSurfaceVariant)
+                            TextButton(onClick = { drives.goUp(account.id, i) }, enabled = i < view.path.size - 1) {
+                                Text(if (i == 0) providerTitle(account.provider) else f.name, maxLines = 1)
+                            }
+                        }
+                    }
+                }
+                val quota = quotaText(view)
+                if (quota.isNotEmpty()) {
+                    Column(horizontalAlignment = Alignment.End, modifier = Modifier.widthIn(120.dp, 220.dp)) {
+                        Text(quota, style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant, maxLines = 1)
+                        if (view.total > 0) LinearProgressIndicator(progress = { quotaFraction(view) }, modifier = Modifier.fillMaxWidth().padding(top = 4.dp))
+                    }
+                }
+            }
+            if (view.loading) LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+        }
+        LazyColumn(
+            modifier = Modifier.fillMaxSize().wrapContentWidth().widthIn(0.dp, 900.dp),
+            contentPadding = PaddingValues(16.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            items(jobs.take(6)) { j -> CloudJobRow(drives, j) }
+            if (view.error.isNotEmpty()) {
+                item {
+                    Card(colors = CardDefaults.cardColors(containerColor = cs.errorContainer), modifier = Modifier.fillMaxWidth()) {
+                        Row(modifier = Modifier.fillMaxWidth().padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+                            Text(view.error, color = cs.onErrorContainer, modifier = Modifier.weight(1f))
+                            TextButton(onClick = { drives.refresh(account.id) }) { Text("Yeniden dene") }
+                        }
+                    }
+                }
+            }
+            if (!view.loading && view.error.isEmpty() && view.entries.isEmpty()) {
+                item {
+                    Text(if (view.search.isNotEmpty()) "Eşleşen dosya yok" else "Bu klasör boş. Dosyaları buraya sürükleyin ya da Yükle'ye basın.",
+                         color = cs.onSurfaceVariant, modifier = Modifier.padding(16.dp))
+                }
+            }
+            items(view.entries) { e -> CloudEntryRow(app, drives, account, e) }
+        }
+    }
+    if (newFolder) {
+        AlertDialog(
+            onDismissRequest = { newFolder = false },
+            title = { Text("Yeni klasör") },
+            text = {
+                OutlinedTextField(value = folderName, onValueChange = { folderName = it }, singleLine = true, label = "Klasör adı",
+                                  modifier = Modifier.fillMaxWidth(),
+                                  onSubmit = {
+                                      newFolder = false
+                                      drives.createFolder(account.id, folderName.trim())
+                                  })
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    newFolder = false
+                    drives.createFolder(account.id, folderName.trim())
+                }, enabled = folderName.isNotBlank()) { Text("Oluştur") }
+            },
+            dismissButton = { TextButton(onClick = { newFolder = false }) { Text("Vazgeç") } },
+        )
+    }
+}
+
+@Kompozable
+fun CloudJobRow(drives: Drives, j: CloudJob) {
+    val cs = MaterialTheme.colorScheme
+    val tint = if (j.error.isNotEmpty()) cs.error else if (j.finished) Color(0xFF2E7D32) else cs.primary
+    Card(modifier = Modifier.fillMaxWidth()) {
+        Row(modifier = Modifier.fillMaxWidth().padding(start = 16.dp, top = 8.dp, end = 4.dp, bottom = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+            Icon(if (j.upload) AppIcons.Upload else AppIcons.Download, contentDescription = null, tint = tint)
+            Spacer(modifier = Modifier.width(16.dp))
+            Column(modifier = Modifier.weight(1f)) {
+                Text(j.name, style = MaterialTheme.typography.titleSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                if (j.active()) LinearProgressIndicator(progress = { j.fraction() }, modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp))
+                Text(cloudJobLine(j), style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant, maxLines = 2)
+            }
+            if (j.active()) {
+                IconButton(onClick = { drives.cancelJob(j.op) }) { Icon(Icons.Filled.Close, contentDescription = "İptal") }
+            } else if (!j.upload && j.finished && j.sendTo.isEmpty()) {
+                IconButton(onClick = { drives.openJobFile(j) }) { Icon(AppIcons.OpenInNew, contentDescription = "Aç") }
+            }
+        }
+    }
+}
+
+@Kompozable
+fun CloudEntryRow(app: App, drives: Drives, account: CloudAccount, e: CloudEntry) {
+    val cs = MaterialTheme.colorScheme
+    var menu by remember { mutableStateOf(false) }
+    var sendMenu by remember { mutableStateOf(false) }
+    var renaming by remember { mutableStateOf(false) }
+    var newName by remember { mutableStateOf("") }
+    var confirmDelete by remember { mutableStateOf(false) }
+    val targets = app.pairedPeers().filter { it.online }
+    Card(modifier = Modifier.fillMaxWidth().clickable { if (e.folder) drives.open(account.id, e) },
+         colors = CardDefaults.cardColors(containerColor = cs.surfaceContainerHigh)) {
+        Row(modifier = Modifier.fillMaxWidth().padding(start = 12.dp, top = 6.dp, end = 4.dp, bottom = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+            Box(modifier = Modifier.size(40.dp).background(if (e.folder) cs.secondaryContainer else cs.primaryContainer, RoundedCornerShape(8.dp)),
+                contentAlignment = Alignment.Center) {
+                Icon(if (e.folder) AppIcons.Folder else AppIcons.InsertDriveFile, contentDescription = null,
+                     tint = if (e.folder) cs.onSecondaryContainer else cs.onPrimaryContainer)
+            }
+            Spacer(modifier = Modifier.width(12.dp))
+            Column(modifier = Modifier.weight(1f)) {
+                Text(e.name, style = MaterialTheme.typography.titleSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                val line = cloudEntryLine(e)
+                if (line.isNotEmpty()) Text(line, style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant, maxLines = 1)
+            }
+            if (!e.folder) {
+                IconButton(onClick = { drives.download(account.id, e) }) { Icon(AppIcons.Download, contentDescription = "İndir") }
+                Box {
+                    IconButton(onClick = { sendMenu = true }) { Icon(Icons.Filled.Send, contentDescription = "Cihaza gönder") }
+                    DropdownMenu(expanded = sendMenu, onDismissRequest = { sendMenu = false }) {
+                        for (peer in targets) {
+                            DropdownMenuItem(text = { Text("${peer.name} cihazına gönder") },
+                                             onClick = {
+                                                 sendMenu = false
+                                                 drives.sendToDevice(account.id, e, peer.id)
+                                             },
+                                             leadingIcon = { Icon(AppIcons.forPlatform(peer.platform), contentDescription = null) })
+                        }
+                        if (targets.isEmpty()) DropdownMenuItem(text = { Text("Çevrimiçi cihaz yok") }, onClick = { sendMenu = false }, enabled = false)
+                    }
+                }
+            }
+            Box {
+                IconButton(onClick = { menu = true }) { Icon(Icons.Filled.MoreVert, contentDescription = "Diğer") }
+                DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
+                    DropdownMenuItem(text = { Text("Yeniden adlandır") },
+                                     onClick = {
+                                         menu = false
+                                         newName = e.name
+                                         renaming = true
+                                     },
+                                     leadingIcon = { Icon(Icons.Filled.Edit, contentDescription = null) })
+                    DropdownMenuItem(text = { Text("Sil") },
+                                     onClick = {
+                                         menu = false
+                                         confirmDelete = true
+                                     },
+                                     leadingIcon = { Icon(Icons.Filled.Delete, contentDescription = null) })
+                }
+            }
+        }
+    }
+    if (renaming) {
+        AlertDialog(
+            onDismissRequest = { renaming = false },
+            title = { Text("Yeniden adlandır") },
+            text = {
+                OutlinedTextField(value = newName, onValueChange = { newName = it }, singleLine = true, label = "Yeni ad",
+                                  modifier = Modifier.fillMaxWidth(),
+                                  onSubmit = {
+                                      renaming = false
+                                      drives.rename(account.id, e, newName.trim())
+                                  })
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    renaming = false
+                    drives.rename(account.id, e, newName.trim())
+                }, enabled = newName.isNotBlank()) { Text("Kaydet") }
+            },
+            dismissButton = { TextButton(onClick = { renaming = false }) { Text("Vazgeç") } },
+        )
+    }
+    if (confirmDelete) {
+        AlertDialog(
+            onDismissRequest = { confirmDelete = false },
+            title = { Text("${e.name} silinsin mi?") },
+            text = {
+                Text(if (account.provider == "dropbox") "Dropbox'tan silinir; Dropbox silinen dosyaları bir süre geri yüklenebilir tutar."
+                     else "${providerTitle(account.provider)} çöp kutusuna taşınır; oradan geri alınabilir.")
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    confirmDelete = false
+                    drives.trash(account.id, e)
+                }) { Text("Sil") }
+            },
+            dismissButton = { TextButton(onClick = { confirmDelete = false }) { Text("Vazgeç") } },
+        )
+    }
+}
+
 // What went through the clipboard share: copy it again, open its link, or remove it.
 @Kompozable
 fun ClipboardScreen(app: App, clipboard: ClipboardManager) {
@@ -1406,6 +1786,10 @@ fun SettingsScreen(app: App) {
             if (app.canShareSms()) item { SmsAccessCard(app) }
             if (app.canShareCalls()) item { CallAccessCard(app) }
             if (app.canShareScreen()) item { ScreenControlCard(app) }
+        }
+        if (isDesktop() && drivesState().available()) {
+            item { SectionTitle("Bulut sürücüleri") }
+            item { CloudAccountsCard(drivesState()) }
         }
         if (paired.any { it.autoAccept }) {
             item { SectionTitle("Gizlilik") }

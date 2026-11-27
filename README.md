@@ -12,6 +12,7 @@ A seamless link between your Linux, Windows and Android devices, on your own net
 - **Phone audio**: share calls over Bluetooth HFP or player audio over Bluetooth A2DP with a paired Linux PC. Screen sharing audio uses its own stream on Android, Linux and Windows.
 - **Battery and find my phone**: the phone's battery level and charging state show on the computer, and **Telefonu bul** (Find my phone) rings it at full volume, even in silent mode.
 - **Screen**: the phone's screen on the computer, with touch and swipe.
+- **Cloud drives** (Linux and Windows): OneDrive, Dropbox and Google Drive accounts, each in its own tab. You can browse and search, download and upload, make folders, rename and delete, and send a file straight to a paired device. See [cloud drives](docs/cloud-drives.md).
 - **Phone apps on the computer** (advanced mode): pick any app from the phone's app list and open it in its own window on the computer. You can use it with mouse and keyboard, minimize it and close it. It keeps running while the phone's own screen does something else.
 
 Devices find each other with mDNS. You pair two devices once by comparing a 6-digit code shown on both screens. After that, all traffic goes over QUIC with mutual TLS.
@@ -40,6 +41,7 @@ Builds for Linux (AppImage, .deb, Flatpak, tar.gz), Windows (installer, portable
 core/airlink-core   Rust core library: protocol, discovery, pairing, transfers, messages, media streams
 core/airlink-capi   C API over the core (include/airlink.h), used by the app
 core/airlink-adb    Android wireless-debugging client for advanced mode (pairing, shell)
+core/airlink-cloud  Cloud drives: OneDrive, Dropbox and Google Drive over their web APIs
 core/airlink-cli    Command-line tool for development and testing
 app/                The app: one C++20 code base for Linux, Windows and Android, with a Kompoz UI
 app/android         Android Gradle project (Kotlin, package com.plyg.airlink), including the privileged helper

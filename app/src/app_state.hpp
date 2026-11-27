@@ -321,6 +321,7 @@ public:
     bool smsAccess() const;
     std::string peerName(const std::string& id) const;
 
+    void notice(const std::string& text) const;  // a message for the snackbar
     // Messages for a snackbar, and clipboard texts from other devices, since the last call.
     std::vector<std::string> takeNotices() const;
     std::vector<std::string> takeIncomingClipboard() const;

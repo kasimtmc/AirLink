@@ -4,6 +4,10 @@
 #
 # Android signing secrets (without them the APK is unsigned): ANDROID_KEYSTORE_BASE64 (the .jks,
 # base64), ANDROID_KEYSTORE_PASSWORD, ANDROID_KEY_ALIAS, ANDROID_KEY_PASSWORD.
+#
+# Cloud drives' app registrations (docs/cloud-drives.md; a provider without one is left out of the
+# build): repository variables AIRLINK_ONEDRIVE_CLIENT_ID, AIRLINK_DROPBOX_CLIENT_ID,
+# AIRLINK_GDRIVE_CLIENT_ID and the secret AIRLINK_GDRIVE_CLIENT_SECRET.
 name: Release
 
 on:
@@ -13,6 +17,12 @@ on:
 
 permissions:
   contents: read
+
+env:
+  AIRLINK_ONEDRIVE_CLIENT_ID: ${{ vars.AIRLINK_ONEDRIVE_CLIENT_ID }}
+  AIRLINK_DROPBOX_CLIENT_ID: ${{ vars.AIRLINK_DROPBOX_CLIENT_ID }}
+  AIRLINK_GDRIVE_CLIENT_ID: ${{ vars.AIRLINK_GDRIVE_CLIENT_ID }}
+  AIRLINK_GDRIVE_CLIENT_SECRET: ${{ secrets.AIRLINK_GDRIVE_CLIENT_SECRET }}
 
 jobs:
   linux:

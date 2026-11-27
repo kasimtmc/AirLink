@@ -15,6 +15,7 @@
 #include <map>
 #include <mutex>
 
+#include "cloud_state.hpp"
 #include "json.hpp"
 #include "platform.hpp"
 
@@ -368,6 +369,7 @@ struct App::Impl {
                           .downloadDir = info["download_dir"].str(),
                           .dataDir = info["data_dir"].str()});
         loadFileHistory();
+        Drives::get().attach(node, me.peek().downloadDir, me.peek().dataDir);
         if (auto path = settingPath("password-privacy"); !path.empty()) {
             std::ifstream in(path);
             int on = 1;
@@ -469,6 +471,7 @@ struct App::Impl {
     }
 
     void handle(const json::Value& e) {
+        if (Drives::get().handle(e)) return;
         std::string kind = e["event"].str();
         if (kind == "peer_discovered" || kind == "peer_lost") {
             refreshPeers();
@@ -1055,6 +1058,7 @@ void App::pump() const {
         return;
     }
     while (char* raw = airlink_poll_event(s.node)) s.handle(json::Value::parse(takeString(raw)));
+    Drives::get().pump();
 
     std::vector<std::pair<std::string, std::vector<std::string>>> picked;
     std::vector<std::string> shared;
@@ -1861,6 +1865,8 @@ void App::confirmOutgoing(bool accept) const {
         impl_->outgoing.set(std::nullopt);
     }
 }
+
+void App::notice(const std::string& text) const { impl_->notices.push_back(text); }
 
 void App::respond(uint64_t requestId, bool accept) const {
     airlink_respond(impl_->node, requestId, accept);

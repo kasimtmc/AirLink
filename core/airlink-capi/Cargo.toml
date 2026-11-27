@@ -16,11 +16,13 @@ anyhow.workspace = true
 tokio.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+tracing.workspace = true
 openh264 = "0.9.9"
 
 # This computer's screen and input, shared with a paired phone (not on Android).
 [target.'cfg(not(target_os = "android"))'.dependencies]
 airlink-desktop = { path = "../airlink-desktop" }
+airlink-cloud = { path = "../airlink-cloud" }
 
 [dev-dependencies]
 tempfile = "3"

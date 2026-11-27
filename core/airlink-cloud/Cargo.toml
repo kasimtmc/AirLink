@@ -1,0 +1,25 @@
+[package]
+name = "airlink-cloud"
+version.workspace = true
+edition.workspace = true
+license-file.workspace = true
+description = "AirLink cloud drives: OneDrive, Dropbox and Google Drive over their web APIs"
+
+[dependencies]
+anyhow.workspace = true
+tokio.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tracing.workspace = true
+reqwest = { version = "0.13", default-features = false, features = ["rustls-no-provider", "http2", "json", "form", "query", "stream", "system-proxy"] }
+rustls = { version = "0.23", default-features = false, features = ["ring", "std"] }
+futures-util = "0.3"
+keyring = "4"
+sha2 = "0.10"
+base64 = "0.23"
+rand = "0.9"
+url = "2"
+percent-encoding = "2"
+
+[dev-dependencies]
+tempfile = "3"

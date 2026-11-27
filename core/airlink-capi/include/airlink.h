@@ -149,6 +149,39 @@ uint64_t airlink_adb_shell_port(AirlinkNode* node, const char* dir, const char* 
 
 void airlink_free_string(char* s);
 
+/* Cloud drives (Linux and Windows; on Android they do nothing and return 0 or an empty state).
+ * Providers: "onedrive", "dropbox", "gdrive". An entry is
+ *   {"id","name","folder":bool,"size","modified" (RFC 3339 or ""),"kind" (Google's document type or "")}
+ * and its id is what the provider names it by (a Dropbox path); the root folder is "".
+ * Every call but airlink_cloud_state and airlink_cloud_cancel returns an operation (0 if it could
+ * not start) whose result comes as an op_result event. Besides:
+ *   {"event":"cloud_auth","op":N,"url":"..."}: open this sign-in page in the browser.
+ *   {"event":"cloud_progress","op":N,"done":B,"total":B}: a download's or an upload's bytes.
+ * Sign-ins are kept in the system keyring, the accounts in <data_dir>/cloud/accounts.json. */
+
+/* {"providers":[...] (those this build can sign in to), "accounts":[{"id","provider","name","email"}]} */
+char* airlink_cloud_state(AirlinkNode* node);
+/* Value: the account. Waits up to 5 minutes for the browser. */
+uint64_t airlink_cloud_connect(AirlinkNode* node, const char* provider);
+uint64_t airlink_cloud_disconnect(AirlinkNode* node, const char* account);
+/* Value: [entry], folders first. */
+uint64_t airlink_cloud_list(AirlinkNode* node, const char* account, const char* folder);
+uint64_t airlink_cloud_search(AirlinkNode* node, const char* account, const char* query);
+/* Value: {"used","total"} in bytes; total 0 when unknown. */
+uint64_t airlink_cloud_quota(AirlinkNode* node, const char* account);
+/* entry_json: an entry from a listing. Value: the downloaded file's path (in dir; a taken name
+ * gets " (2)"). Google's documents come as Office files. */
+uint64_t airlink_cloud_download(AirlinkNode* node, const char* account, const char* entry_json, const char* dir);
+/* Uploads a local file into folder. Value: the new entry. */
+uint64_t airlink_cloud_upload(AirlinkNode* node, const char* account, const char* folder, const char* path);
+uint64_t airlink_cloud_create_folder(AirlinkNode* node, const char* account, const char* parent, const char* name);
+/* Value: the renamed entry (a Dropbox entry's id changes with its name). */
+uint64_t airlink_cloud_rename(AirlinkNode* node, const char* account, const char* id, const char* name);
+/* To the drive's recycle bin. */
+uint64_t airlink_cloud_delete(AirlinkNode* node, const char* account, const char* id);
+/* Stops a running operation; its op_result fails with "cancelled". False if it is not running. */
+bool airlink_cloud_cancel(AirlinkNode* node, uint64_t op);
+
 #ifdef _WIN32
 /* Windows: the paired phone's Bluetooth audio. Phones are matched by their Bluetooth name
  * (or the only paired one).

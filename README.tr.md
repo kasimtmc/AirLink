@@ -12,6 +12,7 @@ Linux, Windows ve Android cihazlarınız arasında, kendi ağınızda, hesap ve 
 - **Telefon sesi**: Eşleşmiş Linux bilgisayara görüşme sesini Bluetooth HFP, oynatıcı sesini Bluetooth A2DP üzerinden aktarın. Ekran paylaşımı sesi Android, Linux ve Windows arasında ayrı akışta taşınır.
 - **Pil ve telefonu bul**: telefonun pil seviyesi ve şarj durumu bilgisayarda görünür; **Telefonu bul** telefonu sessiz kipte bile tam sesle çaldırır.
 - **Ekran**: telefonun ekranı bilgisayarda, dokunma ve kaydırma ile.
+- **Bulut sürücüleri** (Linux ve Windows): OneDrive, Dropbox ve Google Drive hesaplarının her biri kendi sekmesinde açılır. Gezinip arayabilir, indirip yükleyebilir, klasör oluşturabilir, yeniden adlandırıp silebilir ve bir dosyayı doğrudan eşleşmiş bir cihaza gönderebilirsiniz. Bkz. [bulut sürücüleri](docs/cloud-drives.md).
 - **Telefon uygulamaları bilgisayarda** (gelişmiş mod): telefonun uygulama listesinden herhangi bir uygulamayı seçip bilgisayarda kendi penceresinde açın. Fare ve klavyeyle kullanabilir, küçültebilir ve kapatabilirsiniz. Telefonun kendi ekranı başka bir şey gösterirken de çalışmaya devam eder.
 
 Cihazlar birbirini mDNS ile bulur. İki cihazı, iki ekranda da görünen 6 haneli kodu karşılaştırarak bir kez eşleştirirsiniz. Sonrasında tüm trafik karşılıklı TLS ile QUIC üzerinden gider.
@@ -40,6 +41,7 @@ Linux (AppImage, .deb, Flatpak, tar.gz), Windows (kurulum dosyası, taşınabili
 core/airlink-core   Rust çekirdek kütüphane: protokol, keşif, eşleştirme, aktarımlar, mesajlar, medya akışları
 core/airlink-capi   Çekirdeğin C arayüzü (include/airlink.h); uygulama bunu kullanır
 core/airlink-adb    Gelişmiş mod için Android kablosuz hata ayıklama istemcisi (eşleştirme, kabuk)
+core/airlink-cloud  Bulut sürücüleri: OneDrive, Dropbox ve Google Drive, web API'leri üzerinden
 core/airlink-cli    Geliştirme ve test için komut satırı aracı
 app/                Uygulama: Linux, Windows ve Android için tek C++20 kod tabanı, Kompoz arayüzü
 app/android         Android Gradle projesi (Kotlin, paket com.plyg.airlink); gelişmiş modun yetkili yardımcısı da burada

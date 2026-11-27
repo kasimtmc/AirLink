@@ -39,6 +39,8 @@ inline const ImageVector Bluetooth = materialIcon("Filled.Bluetooth", "M17.71,7.
 inline const ImageVector Folder = materialIcon("Filled.Folder", "M10,4H4c-1.1,0 -1.99,0.9 -1.99,2L2,18c0,1.1 0.9,2 2,2h16c1.1,0 2,-0.9 2,-2V8c0,-1.1 -0.9,-2 -2,-2h-8l-2,-2z");
 inline const ImageVector OpenInNew = materialIcon("Filled.OpenInNew", "M19,19H5V5h7V3H5c-1.11,0 -2,0.9 -2,2v14c0,1.1 0.89,2 2,2h14c1.1,0 2,-0.9 2,-2v-7h-2v7zM14,3v2h3.59l-9.83,9.83 1.41,1.41L19,6.41V10h2V3h-7z");
 inline const ImageVector InsertDriveFile = materialIcon("Filled.InsertDriveFile", "M6,2c-1.1,0 -1.99,0.9 -1.99,2L4,20c0,1.1 0.89,2 1.99,2H18c1.1,0 2,-0.9 2,-2V8l-6,-6H6zm7,7V3.5L18.5,9H13z");
+inline const ImageVector Cloud = materialIcon("Filled.Cloud", "M19.35,10.04C18.67,6.59 15.64,4 12,4 9.11,4 6.6,5.64 5.35,8.04 2.34,8.36 0,10.91 0,14c0,3.31 2.69,6 6,6h13c2.76,0 5,-2.24 5,-5 0,-2.64 -2.05,-4.78 -4.65,-4.96z");
+inline const ImageVector CreateNewFolder = materialIcon("Filled.CreateNewFolder", "M20,6h-8l-2,-2H4c-1.11,0 -1.99,0.89 -1.99,2L2,18c0,1.11 0.89,2 2,2h16c1.11,0 2,-0.89 2,-2V8c0,-1.11 -0.89,-2 -2,-2zM19,14h-3v3h-2v-3h-3v-2h3V9h2v3h3v2z");
 // clang-format on
 
 inline const ImageVector& forPlatform(const std::string& platform) {
