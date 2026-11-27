@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AirLink Privacy Policy</title>
+<link rel="icon" href="airlink.svg">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header>
+  <img src="airlink.svg" alt="">
+  <a href="./">AirLink</a>
+  <nav><a href="privacy.html">Privacy</a><a href="terms.html">Terms</a><a href="https://github.com/kasimtmc/AirLink">GitHub</a></nav>
+</header>
+<main>
+  <h1>Privacy policy</h1>
+  <p class="muted">Effective 27 November 2026. <a href="#tr">Türkçesi aşağıda.</a></p>
+
+  <p>AirLink is an app for Linux, Windows and Android, made by Kasim ("we"). This policy says what data AirLink handles, where it goes and how you control it. In short: AirLink has no servers and no accounts of its own, collects nothing about you, and sends your data only between your own devices and the cloud drive providers you connect.</p>
+
+  <h2>Data we collect</h2>
+  <p>None. AirLink contains no analytics, advertising, tracking or crash reporting, and we run no server that receives your data. Everything described below stays on your devices or goes directly between your devices and the services you choose.</p>
+
+  <h2>Between your devices</h2>
+  <p>Devices running AirLink find each other on your local network and exchange what you ask them to: files, clipboard text, notifications, SMS, contacts, call information, screen images and audio. This traffic goes directly between your paired devices over an encrypted connection (QUIC with mutual TLS). It is not sent to us or to anyone else. What a device receives is stored on that device (for example, files in your Downloads folder), and you can delete it there.</p>
+  <p>On Android, AirLink asks for permissions such as notification access, SMS, contacts and phone only to provide these features to your own paired computer, and only after you allow each one.</p>
+
+  <h2>Cloud drives (Google Drive, OneDrive, Dropbox)</h2>
+  <p>On a computer, you can connect your Google Drive, Microsoft OneDrive or Dropbox account so that its files open in AirLink. When you connect one:</p>
+  <ul>
+    <li>You sign in on the provider's own page in your browser and allow AirLink access. AirLink never sees your password.</li>
+    <li>The provider gives AirLink an access token and a refresh token. The refresh token is stored on your computer in the system keyring (KWallet or GNOME Keyring on Linux, Credential Manager on Windows), or, where no keyring is available, in a file that only your user account can read. The account's name and email address are stored on your computer to label its tab.</li>
+    <li>AirLink uses the access to show your files and folders, search them, show how much space is used, download files to your computer, upload files you choose, create folders, rename items, move items to the drive's trash, and send a file to one of your paired devices when you ask it to.</li>
+    <li>All of this happens directly between your computer and the provider. Your files, tokens and account details are never sent to us or to any third party.</li>
+  </ul>
+  <p>The permissions AirLink requests:</p>
+  <ul>
+    <li><strong>Google Drive:</strong> <code>https://www.googleapis.com/auth/drive</code> (see, edit, create and delete your Google Drive files), used for the actions above across your whole drive, since you browse and manage all of it from AirLink.</li>
+    <li><strong>OneDrive:</strong> <code>Files.ReadWrite</code>, <code>User.Read</code> (your name and email for the tab) and <code>offline_access</code> (to stay connected).</li>
+    <li><strong>Dropbox:</strong> <code>files.metadata.read/write</code>, <code>files.content.read/write</code> and <code>account_info.read</code>.</li>
+  </ul>
+
+  <h2>Google API Services</h2>
+  <p>AirLink's use and transfer of information received from Google APIs adheres to the <a href="https://developers.google.com/terms/api-services-user-data-policy">Google API Services User Data Policy</a>, including the Limited Use requirements. AirLink uses Google user data only to provide the user-facing features described above, does not transfer it to anyone except as needed to provide those features at your request (such as sending a file to your own paired device), does not use it for advertising, does not sell it, does not use it to train AI or machine-learning models, and does not let humans read it.</p>
+
+  <h2>Removing access and data</h2>
+  <ul>
+    <li>In AirLink, open <strong>Ayarlar → Bulut sürücüleri</strong> (Settings → Cloud drives) and choose <strong>Kaldır</strong> (Remove) next to an account. This deletes its stored token and account details from your computer. Your files in the drive are not touched.</li>
+    <li>You can also revoke AirLink's access with the provider: <a href="https://myaccount.google.com/permissions">Google</a>, <a href="https://account.live.com/consent/Manage">Microsoft</a>, or Dropbox's <em>Settings → Connected apps</em>.</li>
+    <li>Uninstalling AirLink and deleting its data folder removes everything it kept on that device.</li>
+  </ul>
+
+  <h2>Children</h2>
+  <p>AirLink is not directed at children under 13, and we do not knowingly handle their data. In any case, AirLink sends no data to us.</p>
+
+  <h2>Changes</h2>
+  <p>If this policy changes, the new version will be posted on this page with a new effective date.</p>
+
+  <h2>Contact</h2>
+  <p>Questions about this policy: open an issue at <a href="https://github.com/kasimtmc/AirLink/issues">github.com/kasimtmc/AirLink/issues</a>.</p>
+
+  <h1 id="tr">Gizlilik politikası</h1>
+  <p class="muted">Yürürlük: 27 Kasım 2026.</p>
+  <p>AirLink, Kasim'in geliştirdiği bir Linux, Windows ve Android uygulamasıdır. Kısaca: AirLink'in kendi sunucusu ve hesabı yoktur, sizinle ilgili hiçbir veri toplamaz. Verileriniz yalnızca kendi cihazlarınız arasında ve bağladığınız bulut sürücüsü sağlayıcılarıyla doğrudan gider.</p>
+  <h2>Topladığımız veriler</h2>
+  <p>Yok. AirLink'te analiz, reklam, izleme ya da çökme raporu yoktur. Verilerinizi alan bir sunucumuz yoktur.</p>
+  <h2>Cihazlarınız arasında</h2>
+  <p>Dosyalar, pano, bildirimler, SMS, kişiler, arama bilgileri, ekran görüntüsü ve ses yalnızca eşleşmiş cihazlarınız arasında, şifreli bir bağlantıyla (karşılıklı TLS ile QUIC) doğrudan gider. Bize ya da başkasına gönderilmez. Android'deki izinler yalnızca bu özellikler için ve siz her birine izin verdikten sonra kullanılır.</p>
+  <h2>Bulut sürücüleri</h2>
+  <p>Bilgisayarda bir Google Drive, OneDrive ya da Dropbox hesabı bağladığınızda sağlayıcının kendi sayfasında giriş yaparsınız; AirLink şifrenizi görmez. Sağlayıcının verdiği yenileme anahtarı bilgisayarınızda, sistemin anahtar zincirinde saklanır (Linux'ta KWallet ya da GNOME Keyring, Windows'ta Kimlik Bilgileri Yöneticisi). Anahtar zinciri yoksa yalnızca kullanıcı hesabınızın okuyabildiği bir dosyada saklanır. Hesabın adı ve e-postası sekmeyi adlandırmak için bilgisayarınızda tutulur.</p>
+  <p>AirLink bu erişimi şunlar için kullanır: dosya ve klasörlerinizi göstermek ve aramak, kullanılan alanı göstermek, dosya indirmek ve yüklemek, klasör oluşturmak, yeniden adlandırmak, çöp kutusuna taşımak ve istediğinizde bir dosyayı eşleşmiş cihazınıza göndermek. Bunların hepsi bilgisayarınızla sağlayıcı arasında doğrudan olur. Dosyalarınız, anahtarlarınız ve hesap bilgileriniz bize ya da üçüncü kişilere gönderilmez. Google'dan alınan verilerin kullanımı, Sınırlı Kullanım şartları dahil Google API Hizmetleri Kullanıcı Verileri Politikası'na uyar.</p>
+  <h2>Erişimi ve verileri kaldırma</h2>
+  <p>AirLink'te <strong>Ayarlar → Bulut sürücüleri</strong>'nde hesabın yanındaki <strong>Kaldır</strong> düğmesi, saklanan anahtarı ve hesap bilgilerini bilgisayarınızdan siler; sürücüdeki dosyalarınıza dokunmaz. Erişimi sağlayıcının hesap ayarlarından da geri alabilirsiniz.</p>
+  <h2>İletişim</h2>
+  <p>Sorularınız için: <a href="https://github.com/kasimtmc/AirLink/issues">github.com/kasimtmc/AirLink/issues</a>.</p>
+</main>
+<footer>AirLink is made by Kasim. <a href="terms.html">Terms of service</a>.</footer>
+</body>
+</html>
