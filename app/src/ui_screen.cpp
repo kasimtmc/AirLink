@@ -117,26 +117,44 @@ fun DesktopView(app: App) {
 
 // ---- A paired phone's screen (on a computer) ------------------------------------------------
 
+// The phone's screen in a window of its own (the main window stays as it was), sized as a phone:
+// its options on top, Android's three buttons under it.
 @Kompozable
-fun ScreenView(app: App) {
+fun PhoneScreenWindow(app: App) {
+    val peer = app.screenPeer()
+    if (peer.isNotEmpty()) {
+        key(peer) {
+            val state = rememberWindowState(size = DpSize(420.dp, 900.dp))
+            Window(onCloseRequest = { app.stopScreen() }, state = state, title = trf("{} ekranı", app.peerName(peer))) {
+                Surface(modifier = Modifier.fillMaxSize()) {
+                    ScreenView(app, state)
+                }
+            }
+        }
+    }
+}
+
+@Kompozable
+fun ScreenView(app: App, state: WindowState) {
+    val cs = MaterialTheme.colorScheme
     val frame = app.screenFrame()
     var box by remember { mutableStateOf(Size(0f, 0f)) }
     var dragFrom by remember { mutableStateOf(Offset(0f, 0f)) }
     var dragTo by remember { mutableStateOf(Offset(0f, 0f)) }
     Column(modifier = Modifier.fillMaxSize()) {
-        Row(modifier = Modifier.fillMaxWidth().padding(8.dp), verticalAlignment = Alignment.CenterVertically) {
-            Text(trf("{} ekranı", app.peerName(app.screenPeer())), style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
-            TextButton(onClick = { app.screenInput("{\"type\":\"back\"}") }) { Text(tr("Geri")) }
-            TextButton(onClick = { app.screenInput("{\"type\":\"home\"}") }) { Text(tr("Ana ekran")) }
-            TextButton(onClick = { app.screenInput("{\"type\":\"recents\"}") }) { Text(tr("Son")) }
-            Button(onClick = { app.stopScreen() }) { Text(tr("Kapat")) }
+        Row(modifier = Modifier.fillMaxWidth().padding(start = 12.dp, end = 4.dp, top = 4.dp, bottom = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+            Text(trf("{} ekranı", app.peerName(app.screenPeer())), style = MaterialTheme.typography.titleSmall, modifier = Modifier.weight(1f),
+                 maxLines = 1, overflow = TextOverflow.Ellipsis)
+            IconButton(onClick = { state.setIsMinimized(true) }) { Icon(AppIcons.Minimize, contentDescription = tr("Küçült")) }
+            IconButton(onClick = { app.stopScreen() }) { Icon(Icons.Filled.Close, contentDescription = tr("Kapat")) }
         }
         Box(modifier = Modifier.weight(1f).fillMaxWidth().background(Color(0xFF111111)), contentAlignment = Alignment.Center) {
             if (frame.empty()) {
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.padding(24.dp)) {
                     CircularProgressIndicator()
                     Spacer(modifier = Modifier.height(12.dp))
-                    Text(if (app.screenStatus() == "asking") tr("Telefonda ekran paylaşımına izin verin…") else tr("Görüntü bekleniyor…"), color = Color.White)
+                    Text(if (app.screenStatus() == "asking") tr("Telefonda ekran paylaşımına izin verin…") else tr("Görüntü bekleniyor…"), color = Color.White,
+                         textAlign = TextAlign.Center)
                 }
             } else {
                 Image(frame, contentDescription = tr("Telefon ekranı"), contentScale = ContentScale.Fit,
@@ -160,6 +178,13 @@ fun ScreenView(app: App) {
                               )
                           })
             }
+        }
+        // Android's navigation buttons.
+        Row(modifier = Modifier.fillMaxWidth().background(cs.surfaceContainer).padding(vertical = 4.dp),
+            horizontalArrangement = Arrangement.SpaceEvenly, verticalAlignment = Alignment.CenterVertically) {
+            IconButton(onClick = { app.screenInput("{\"type\":\"back\"}") }) { Icon(Icons.Filled.ArrowBack, contentDescription = tr("Geri")) }
+            IconButton(onClick = { app.screenInput("{\"type\":\"home\"}") }) { Icon(Icons.Filled.Home, contentDescription = tr("Ana ekran")) }
+            IconButton(onClick = { app.screenInput("{\"type\":\"recents\"}") }) { Icon(AppIcons.Recents, contentDescription = tr("Son uygulamalar")) }
         }
     }
 }
@@ -208,19 +233,23 @@ fun AppGrid(app: App, apps: List<PhoneApp>) {
                 Spacer(modifier = Modifier.width(8.dp))
                 IconButton(onClick = { app.requestPhoneApps() }) { Icon(Icons.Default.Refresh, contentDescription = tr("Yenile")) }
             }
-            Text(trf("{} uygulama", shown.size), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant,
+            Text(if (app.canMakeAppShortcuts()) trf("{} uygulama · sağ tıklayarak kısayol oluşturabilirsiniz", shown.size) else trf("{} uygulama", shown.size),
+                 style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant,
                  modifier = Modifier.padding(20.dp, 0.dp))
             LazyVerticalGrid(GridCells.Adaptive(96.dp), modifier = Modifier.fillMaxSize(), contentPadding = PaddingValues(12.dp),
                              verticalArrangement = Arrangement.spacedBy(4.dp), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                 items(shown) { a ->
-                    Column(modifier = Modifier.fillMaxWidth().height(112.dp).clip(RoundedCornerShape(16.dp))
-                                         .clickable(onClick = { app.openPhoneApp(a) }).padding(6.dp, 10.dp),
-                           horizontalAlignment = Alignment.CenterHorizontally) {
-                        if (a.icon.empty()) Box(modifier = Modifier.size(48.dp).background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(12.dp)))
-                        else Image(a.icon, contentDescription = null, modifier = Modifier.size(48.dp).clip(RoundedCornerShape(12.dp)))
-                        Spacer(modifier = Modifier.height(8.dp))
-                        Text(a.label, style = MaterialTheme.typography.bodySmall, maxLines = 2, minLines = 2, overflow = TextOverflow.Ellipsis,
-                             textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth())
+                    // A right click: open it, or make a shortcut that opens it in its own window.
+                    ContextMenuArea(items = { appMenu(app, a) }) {
+                        Column(modifier = Modifier.fillMaxWidth().height(112.dp).clip(RoundedCornerShape(16.dp))
+                                             .clickable(onClick = { app.openPhoneApp(a) }).padding(6.dp, 10.dp),
+                               horizontalAlignment = Alignment.CenterHorizontally) {
+                            if (a.icon.empty()) Box(modifier = Modifier.size(48.dp).background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(12.dp)))
+                            else Image(a.icon, contentDescription = null, modifier = Modifier.size(48.dp).clip(RoundedCornerShape(12.dp)))
+                            Spacer(modifier = Modifier.height(8.dp))
+                            Text(a.label, style = MaterialTheme.typography.bodySmall, maxLines = 2, minLines = 2, overflow = TextOverflow.Ellipsis,
+                                 textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth())
+                        }
                     }
                 }
             }

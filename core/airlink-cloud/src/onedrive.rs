@@ -14,10 +14,18 @@ const CHUNK: usize = 32 * 320 * 1024;
 /// Smaller files go in one request.
 const SIMPLE_MAX: u64 = 4 * 1024 * 1024;
 
-const PATH: &AsciiSet = &NON_ALPHANUMERIC.remove(b'-').remove(b'_').remove(b'.').remove(b'~');
+const PATH: &AsciiSet = &NON_ALPHANUMERIC
+    .remove(b'-')
+    .remove(b'_')
+    .remove(b'.')
+    .remove(b'~');
 
 fn item(id: &str) -> String {
-    if id.is_empty() { format!("{API}/me/drive/root") } else { format!("{API}/me/drive/items/{}", utf8_percent_encode(id, PATH)) }
+    if id.is_empty() {
+        format!("{API}/me/drive/root")
+    } else {
+        format!("{API}/me/drive/items/{}", utf8_percent_encode(id, PATH))
+    }
 }
 
 fn entry(v: &Value) -> Entry {
@@ -26,22 +34,42 @@ fn entry(v: &Value) -> Entry {
         name: v["name"].as_str().unwrap_or_default().to_owned(),
         folder: v.get("folder").is_some_and(|f| !f.is_null()),
         size: v["size"].as_u64().unwrap_or(0),
-        modified: v["lastModifiedDateTime"].as_str().unwrap_or_default().to_owned(),
+        modified: v["lastModifiedDateTime"]
+            .as_str()
+            .unwrap_or_default()
+            .to_owned(),
         kind: String::new(),
+        thumb: String::new(),
     }
 }
 
 pub(crate) async fn account(http: &reqwest::Client, access: &str) -> Result<Account> {
-    let me: Value = crate::http::check(http.get(format!("{API}/me?$select=id,displayName,userPrincipalName,mail")).bearer_auth(access).send().await?)
-        .await?
-        .json()
-        .await?;
-    let id = me["id"].as_str().ok_or_else(|| anyhow!("Microsoft hesabı okunamadı"))?;
-    let email = me["mail"].as_str().or(me["userPrincipalName"].as_str()).unwrap_or_default();
+    let me: Value = crate::http::check(
+        http.get(format!(
+            "{API}/me?$select=id,displayName,userPrincipalName,mail"
+        ))
+        .bearer_auth(access)
+        .send()
+        .await?,
+    )
+    .await?
+    .json()
+    .await?;
+    let id = me["id"]
+        .as_str()
+        .ok_or_else(|| anyhow!("Microsoft hesabı okunamadı"))?;
+    let email = me["mail"]
+        .as_str()
+        .or(me["userPrincipalName"].as_str())
+        .unwrap_or_default();
     Ok(Account {
         id: format!("onedrive:{id}"),
         provider: Provider::Onedrive,
-        name: me["displayName"].as_str().filter(|n| !n.is_empty()).unwrap_or(email).to_owned(),
+        name: me["displayName"]
+            .as_str()
+            .filter(|n| !n.is_empty())
+            .unwrap_or(email)
+            .to_owned(),
         email: email.to_owned(),
     })
 }
@@ -59,25 +87,59 @@ async fn pages(call: &Call<'_>, first: String) -> Result<Vec<Entry>> {
 }
 
 pub(crate) async fn list(call: &Call<'_>, folder: &str) -> Result<Vec<Entry>> {
-    pages(call, format!("{}/children?$select={SELECT}&$top=999", item(folder))).await
+    pages(
+        call,
+        format!("{}/children?$select={SELECT}&$top=999", item(folder)),
+    )
+    .await
 }
 
 pub(crate) async fn search(call: &Call<'_>, query: &str) -> Result<Vec<Entry>> {
     let q = query.replace('\'', "''");
-    pages(call, format!("{API}/me/drive/root/search(q='{}')?$select={SELECT}&$top=200", utf8_percent_encode(&q, PATH))).await
+    pages(
+        call,
+        format!(
+            "{API}/me/drive/root/search(q='{}')?$select={SELECT}&$top=200",
+            utf8_percent_encode(&q, PATH)
+        ),
+    )
+    .await
 }
 
 pub(crate) async fn quota(call: &Call<'_>) -> Result<Quota> {
-    let v = call.json(|h, t| h.get(format!("{API}/me/drive?$select=quota")).bearer_auth(t)).await?;
-    Ok(Quota { used: v["quota"]["used"].as_u64().unwrap_or(0), total: v["quota"]["total"].as_u64().unwrap_or(0) })
+    let v = call
+        .json(|h, t| {
+            h.get(format!("{API}/me/drive?$select=quota"))
+                .bearer_auth(t)
+        })
+        .await?;
+    Ok(Quota {
+        used: v["quota"]["used"].as_u64().unwrap_or(0),
+        total: v["quota"]["total"].as_u64().unwrap_or(0),
+    })
 }
 
 pub(crate) async fn download(call: &Call<'_>, id: &str) -> Result<reqwest::Response> {
     // (Graph answers with a redirect to a pre-signed address; the token is not sent there)
-    call.send(|h, t| h.get(format!("{}/content", item(id))).bearer_auth(t)).await
+    call.send(|h, t| h.get(format!("{}/content", item(id))).bearer_auth(t))
+        .await
 }
 
-pub(crate) async fn upload(call: &Call<'_>, folder: &str, name: &str, source: Source) -> Result<Entry> {
+pub(crate) async fn thumbnail(call: &Call<'_>, id: &str) -> Result<Option<Vec<u8>>> {
+    // (a redirect to a pre-signed address)
+    call.picture(|h, t| {
+        h.get(format!("{}/thumbnails/0/medium/content", item(id)))
+            .bearer_auth(t)
+    })
+    .await
+}
+
+pub(crate) async fn upload(
+    call: &Call<'_>,
+    folder: &str,
+    name: &str,
+    source: Source,
+) -> Result<Entry> {
     let target = format!("{}:/{}:", item(folder), utf8_percent_encode(name, PATH));
     let progress = source.progress.clone();
     let total = source.size;
@@ -86,10 +148,12 @@ pub(crate) async fn upload(call: &Call<'_>, folder: &str, name: &str, source: So
         let body = tokio::fs::read(&source.path).await?;
         let v = call
             .json(|h, t| {
-                h.put(format!("{target}/content?@microsoft.graph.conflictBehavior=rename"))
-                    .bearer_auth(t)
-                    .header("Content-Type", "application/octet-stream")
-                    .body(body.clone())
+                h.put(format!(
+                    "{target}/content?@microsoft.graph.conflictBehavior=rename"
+                ))
+                .bearer_auth(t)
+                .header("Content-Type", "application/octet-stream")
+                .body(body.clone())
             })
             .await?;
         progress(total, total);
@@ -102,7 +166,10 @@ pub(crate) async fn upload(call: &Call<'_>, folder: &str, name: &str, source: So
                 .json(&json!({"item": {"@microsoft.graph.conflictBehavior": "rename"}}))
         })
         .await?;
-    let upload = session["uploadUrl"].as_str().ok_or_else(|| anyhow!("OneDrive yükleme oturumu açılamadı"))?.to_owned();
+    let upload = session["uploadUrl"]
+        .as_str()
+        .ok_or_else(|| anyhow!("OneDrive yükleme oturumu açılamadı"))?
+        .to_owned();
     let mut file = source.open().await?;
     let mut offset = 0u64;
     loop {
@@ -115,7 +182,10 @@ pub(crate) async fn upload(call: &Call<'_>, folder: &str, name: &str, source: So
         let response = call
             .http()
             .put(&upload)
-            .header("Content-Range", format!("bytes {offset}-{}/{total}", end - 1))
+            .header(
+                "Content-Range",
+                format!("bytes {offset}-{}/{total}", end - 1),
+            )
             .body(chunk)
             .send()
             .await?;
@@ -140,7 +210,13 @@ pub(crate) async fn create_folder(call: &Call<'_>, parent: &str, name: &str) -> 
 }
 
 pub(crate) async fn rename(call: &Call<'_>, id: &str, name: &str) -> Result<Entry> {
-    let v = call.json(|h, t| h.patch(item(id)).bearer_auth(t).json(&json!({"name": name}))).await?;
+    let v = call
+        .json(|h, t| {
+            h.patch(item(id))
+                .bearer_auth(t)
+                .json(&json!({"name": name}))
+        })
+        .await?;
     Ok(entry(&v))
 }
 
@@ -156,8 +232,13 @@ mod tests {
     #[test]
     fn items() {
         assert_eq!(item(""), "https://graph.microsoft.com/v1.0/me/drive/root");
-        assert_eq!(item("A1!2"), "https://graph.microsoft.com/v1.0/me/drive/items/A1%212");
-        let e = entry(&json!({"id": "1", "name": "a", "folder": {"childCount": 2}, "lastModifiedDateTime": "2026-01-01T00:00:00Z"}));
+        assert_eq!(
+            item("A1!2"),
+            "https://graph.microsoft.com/v1.0/me/drive/items/A1%212"
+        );
+        let e = entry(
+            &json!({"id": "1", "name": "a", "folder": {"childCount": 2}, "lastModifiedDateTime": "2026-01-01T00:00:00Z"}),
+        );
         assert!(e.folder && e.size == 0);
         assert!(!entry(&json!({"id": "2", "name": "b", "file": {}, "size": 5})).folder);
     }

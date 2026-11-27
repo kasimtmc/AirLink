@@ -65,8 +65,26 @@ fun CloudAccountsCard(drives: Drives) {
 @Kompozable
 fun CloudScreen(app: App, drives: Drives, account: CloudAccount) {
     LaunchedEffect(account.id) { drives.openRoot(account.id) }
+    var page by remember(account.id) { mutableStateOf(0) }  // 0: the files, 1: the history
+    val history = drives.history(account.id)
+    Column(modifier = Modifier.fillMaxSize()) {
+        PrimaryTabRow(selectedTabIndex = page) {
+            Tab(selected = page == 0, onClick = { page = 0 }, text = { Text(tr("Dosyalar")) },
+                icon = { Icon(AppIcons.Folder, contentDescription = null) })
+            Tab(selected = page == 1, onClick = { page = 1 }, text = { Text(tr("Geçmiş")) },
+                icon = { Icon(AppIcons.History, contentDescription = null) })
+        }
+        if (page == 0) CloudFiles(app, drives, account)
+        else CloudHistory(app, drives, account, history)
+    }
+}
+
+// The open folder (or a search) as a list or a grid, with the transfers running in it on top.
+@Kompozable
+fun CloudFiles(app: App, drives: Drives, account: CloudAccount) {
     val cs = MaterialTheme.colorScheme
     val view = drives.view(account.id)
+    val grid = drives.layout() == CloudLayout.Grid
     val jobs = drives.jobs().filter { it.accountId == account.id }
     var query by remember(account.id) { mutableStateOf("") }
     var newFolder by remember { mutableStateOf(false) }
@@ -86,7 +104,7 @@ fun CloudScreen(app: App, drives: Drives, account: CloudAccount) {
         ),
     )
     Column(modifier = drop.fillMaxSize().background(if (dragging) cs.secondaryContainer else cs.surface)) {
-        Column(modifier = Modifier.fillMaxWidth().wrapContentWidth().widthIn(0.dp, 900.dp).padding(start = 16.dp, end = 16.dp, top = 8.dp)) {
+        Column(modifier = Modifier.fillMaxWidth().wrapContentWidth().widthIn(0.dp, 1100.dp).padding(start = 16.dp, end = 16.dp, top = 8.dp)) {
             Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                 OutlinedTextField(value = query, onValueChange = { query = it }, singleLine = true, label = tr("Sürücüde ara"),
                                   modifier = Modifier.weight(1f), onSubmit = { drives.search(account.id, query.trim()) },
@@ -109,6 +127,9 @@ fun CloudScreen(app: App, drives: Drives, account: CloudAccount) {
                     folderName = ""
                     newFolder = true
                 }) { Icon(AppIcons.CreateNewFolder, contentDescription = tr("Yeni klasör")) }
+                IconButton(onClick = { drives.setLayout(if (grid) CloudLayout.List else CloudLayout.Grid) }) {
+                    Icon(if (grid) AppIcons.ViewList else AppIcons.GridView, contentDescription = if (grid) tr("Liste görünümü") else tr("Izgara görünümü"))
+                }
                 IconButton(onClick = { drives.refresh(account.id) }) { Icon(Icons.Filled.Refresh, contentDescription = tr("Yenile")) }
             }
             // Where we are: the folders from the root, or the search.
@@ -134,30 +155,39 @@ fun CloudScreen(app: App, drives: Drives, account: CloudAccount) {
                 }
             }
             if (view.loading) LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
-        }
-        LazyColumn(
-            modifier = Modifier.fillMaxSize().wrapContentWidth().widthIn(0.dp, 900.dp),
-            contentPadding = PaddingValues(16.dp),
-            verticalArrangement = Arrangement.spacedBy(6.dp),
-        ) {
-            items(jobs.take(6)) { j -> CloudJobRow(drives, j) }
+            // Transfers: a finished one stays a few seconds, then it is in the history.
+            if (jobs.isNotEmpty()) {
+                Column(modifier = Modifier.fillMaxWidth().padding(top = 8.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    for (j in jobs.take(4)) { CloudJobRow(drives, j) }
+                }
+            }
             if (view.error.isNotEmpty()) {
-                item {
-                    Card(colors = CardDefaults.cardColors(containerColor = cs.errorContainer), modifier = Modifier.fillMaxWidth()) {
-                        Row(modifier = Modifier.fillMaxWidth().padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
-                            Text(view.error, color = cs.onErrorContainer, modifier = Modifier.weight(1f))
-                            TextButton(onClick = { drives.refresh(account.id) }) { Text(tr("Yeniden dene")) }
-                        }
+                Card(colors = CardDefaults.cardColors(containerColor = cs.errorContainer), modifier = Modifier.fillMaxWidth().padding(top = 8.dp)) {
+                    Row(modifier = Modifier.fillMaxWidth().padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Text(view.error, color = cs.onErrorContainer, modifier = Modifier.weight(1f))
+                        TextButton(onClick = { drives.refresh(account.id) }) { Text(tr("Yeniden dene")) }
                     }
                 }
             }
             if (!view.loading && view.error.isEmpty() && view.entries.isEmpty()) {
-                item {
-                    Text(if (view.search.isNotEmpty()) tr("Eşleşen dosya yok") else tr("Bu klasör boş. Dosyaları buraya sürükleyin ya da Yükle'ye basın."),
-                         color = cs.onSurfaceVariant, modifier = Modifier.padding(16.dp))
-                }
+                Text(if (view.search.isNotEmpty()) tr("Eşleşen dosya yok") else tr("Bu klasör boş. Dosyaları buraya sürükleyin ya da Yükle'ye basın."),
+                     color = cs.onSurfaceVariant, modifier = Modifier.padding(16.dp))
             }
-            items(view.entries) { e -> CloudEntryRow(app, drives, account, e) }
+        }
+        if (grid) {
+            LazyVerticalGrid(GridCells.Adaptive(150.dp), modifier = Modifier.fillMaxSize().wrapContentWidth().widthIn(0.dp, 1100.dp),
+                             contentPadding = PaddingValues(16.dp),
+                             verticalArrangement = Arrangement.spacedBy(10.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                items(view.entries) { e -> CloudEntryTile(app, drives, account, e) }
+            }
+        } else {
+            LazyColumn(
+                modifier = Modifier.fillMaxSize().wrapContentWidth().widthIn(0.dp, 900.dp),
+                contentPadding = PaddingValues(16.dp),
+                verticalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                items(view.entries) { e -> CloudEntryRow(app, drives, account, e) }
+            }
         }
     }
     if (newFolder) {
@@ -183,6 +213,57 @@ fun CloudScreen(app: App, drives: Drives, account: CloudAccount) {
     }
 }
 
+// The account's finished downloads and uploads, newest first.
+@Kompozable
+fun CloudHistory(app: App, drives: Drives, account: CloudAccount, history: List<CloudRecord>) {
+    val cs = MaterialTheme.colorScheme
+    if (history.isEmpty()) {
+        EmptyState(AppIcons.History, tr("Geçmiş boş"), tr("Bu hesaba yüklediğiniz ve buradan indirdiğiniz dosyalar burada görünür."))
+        return
+    }
+    LazyColumn(
+        modifier = Modifier.fillMaxSize().wrapContentWidth().widthIn(0.dp, 900.dp),
+        contentPadding = PaddingValues(16.dp),
+        verticalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        item {
+            Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                Text(trf("{} kayıt", history.size), style = MaterialTheme.typography.labelLarge, color = cs.onSurfaceVariant, modifier = Modifier.weight(1f))
+                TextButton(onClick = { drives.clearHistory(account.id) }) { Text(tr("Geçmişi temizle")) }
+            }
+        }
+        items(history) { r -> CloudRecordRow(app, drives, r, r.path.isNotEmpty() && fileExists(r.path)) }
+    }
+}
+
+@Kompozable
+fun CloudRecordRow(app: App, drives: Drives, r: CloudRecord, exists: Boolean) {
+    val cs = MaterialTheme.colorScheme
+    val failed = r.error.isNotEmpty()
+    Card(modifier = Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = cs.surfaceContainerHigh)) {
+        Row(modifier = Modifier.fillMaxWidth().padding(start = 12.dp, top = 6.dp, end = 4.dp, bottom = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+            Box(modifier = Modifier.size(40.dp).background(if (failed) cs.errorContainer else cs.primaryContainer, RoundedCornerShape(8.dp)),
+                contentAlignment = Alignment.Center) {
+                Icon(if (r.upload) AppIcons.Upload else AppIcons.Download, contentDescription = null,
+                     tint = if (failed) cs.onErrorContainer else cs.onPrimaryContainer)
+            }
+            Spacer(modifier = Modifier.width(12.dp))
+            Column(modifier = Modifier.weight(1f)) {
+                Text(r.name, style = MaterialTheme.typography.titleSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(cloudRecordLine(r, app.peerName(r.sendTo)), style = MaterialTheme.typography.bodySmall,
+                     color = if (failed) cs.error else cs.onSurfaceVariant, maxLines = 2, overflow = TextOverflow.Ellipsis)
+            }
+            if (!r.upload && r.sendTo.isEmpty() && !failed) {
+                IconButton(onClick = { openFile(r.path) }, enabled = exists) { Icon(AppIcons.OpenInNew, contentDescription = tr("Aç")) }
+                IconButton(onClick = { showInFolder(r.path) }, enabled = exists) {
+                    Icon(AppIcons.Folder, contentDescription = tr("Dosya yöneticisinde göster"))
+                }
+            }
+            IconButton(onClick = { drives.forgetRecord(r.id) }) { Icon(Icons.Filled.Close, contentDescription = tr("Geçmişten kaldır")) }
+        }
+    }
+}
+
 @Kompozable
 fun CloudJobRow(drives: Drives, j: CloudJob) {
     val cs = MaterialTheme.colorScheme
@@ -205,23 +286,46 @@ fun CloudJobRow(drives: Drives, j: CloudJob) {
     }
 }
 
+// An entry's picture: its thumbnail once it is in (asked for as it shows), else its kind's icon.
+@Kompozable
+fun CloudEntryPicture(drives: Drives, account: CloudAccount, e: CloudEntry, size: Dp, big: Boolean) {
+    val cs = MaterialTheme.colorScheme
+    LaunchedEffect(account.id, e.id, e.modified) { drives.requestThumbnail(account.id, e) }
+    val thumb = drives.thumbnail(account.id, e)
+    val shape = RoundedCornerShape(if (big) 12.dp else 8.dp)
+    val box = if (big) Modifier.fillMaxWidth().aspectRatio(1f) else Modifier.size(size)
+    val plain = e.folder || !hasFileKindColor(e.name, e.kind)
+    Box(modifier = box.clip(shape).background(if (e.folder) cs.secondaryContainer else if (plain) cs.primaryContainer else cs.surfaceContainerHighest),
+        contentAlignment = Alignment.Center) {
+        if (!thumb.empty()) {
+            Image(thumb, contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
+            if (isVideo(e.name)) {
+                Icon(AppIcons.PlayCircle, contentDescription = null, tint = Color.White.copy(alpha = 0.9f),
+                     modifier = Modifier.size(if (big) 40.dp else 20.dp))
+            }
+        } else if (e.folder) {
+            Icon(AppIcons.Folder, contentDescription = null, tint = cs.onSecondaryContainer, modifier = Modifier.size(if (big) 48.dp else 24.dp))
+        } else if (hasFileKindColor(e.name, e.kind)) {
+            // (its kind's color, over a light wash of it)
+            val tone = fileKindColor(e.name, e.kind)
+            Box(modifier = Modifier.fillMaxSize().background(tone.copy(alpha = 0.16f)), contentAlignment = Alignment.Center) {
+                Icon(fileKindIcon(e.name, e.kind), contentDescription = null, tint = tone, modifier = Modifier.size(if (big) 48.dp else 24.dp))
+            }
+        } else {
+            Icon(fileKindIcon(e.name, e.kind), contentDescription = null, tint = cs.onPrimaryContainer, modifier = Modifier.size(if (big) 48.dp else 24.dp))
+        }
+    }
+}
+
 @Kompozable
 fun CloudEntryRow(app: App, drives: Drives, account: CloudAccount, e: CloudEntry) {
     val cs = MaterialTheme.colorScheme
-    var menu by remember { mutableStateOf(false) }
     var sendMenu by remember { mutableStateOf(false) }
-    var renaming by remember { mutableStateOf(false) }
-    var newName by remember { mutableStateOf("") }
-    var confirmDelete by remember { mutableStateOf(false) }
     val targets = app.pairedPeers().filter { it.online }
     Card(modifier = Modifier.fillMaxWidth().clickable { if (e.folder) drives.open(account.id, e) },
          colors = CardDefaults.cardColors(containerColor = cs.surfaceContainerHigh)) {
         Row(modifier = Modifier.fillMaxWidth().padding(start = 12.dp, top = 6.dp, end = 4.dp, bottom = 6.dp), verticalAlignment = Alignment.CenterVertically) {
-            Box(modifier = Modifier.size(40.dp).background(if (e.folder) cs.secondaryContainer else cs.primaryContainer, RoundedCornerShape(8.dp)),
-                contentAlignment = Alignment.Center) {
-                Icon(if (e.folder) AppIcons.Folder else AppIcons.InsertDriveFile, contentDescription = null,
-                     tint = if (e.folder) cs.onSecondaryContainer else cs.onPrimaryContainer)
-            }
+            CloudEntryPicture(drives, account, e, 40.dp, false)
             Spacer(modifier = Modifier.width(12.dp))
             Column(modifier = Modifier.weight(1f)) {
                 Text(e.name, style = MaterialTheme.typography.titleSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
@@ -245,24 +349,71 @@ fun CloudEntryRow(app: App, drives: Drives, account: CloudAccount, e: CloudEntry
                     }
                 }
             }
-            Box {
-                IconButton(onClick = { menu = true }) { Icon(Icons.Filled.MoreVert, contentDescription = tr("Diğer")) }
-                DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
-                    DropdownMenuItem(text = { Text(tr("Yeniden adlandır")) },
+            CloudEntryMenu(app, drives, account, e, false)
+        }
+    }
+}
+
+// A grid cell: the picture on top, the name and the menu under it.
+@Kompozable
+fun CloudEntryTile(app: App, drives: Drives, account: CloudAccount, e: CloudEntry) {
+    val cs = MaterialTheme.colorScheme
+    Card(modifier = Modifier.fillMaxWidth().clickable { if (e.folder) drives.open(account.id, e) },
+         colors = CardDefaults.cardColors(containerColor = cs.surfaceContainerHigh)) {
+        Column(modifier = Modifier.fillMaxWidth().padding(8.dp)) {
+            CloudEntryPicture(drives, account, e, 0.dp, true)
+            Row(modifier = Modifier.fillMaxWidth().padding(top = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+                Column(modifier = Modifier.weight(1f).padding(start = 4.dp)) {
+                    Text(e.name, style = MaterialTheme.typography.labelLarge, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    val line = if (e.folder) tr("Klasör") else if (!e.kind.isEmpty()) tr("Google dokümanı") else humanSize(e.size)
+                    Text(line, style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant, maxLines = 1)
+                }
+                CloudEntryMenu(app, drives, account, e, true)
+            }
+        }
+    }
+}
+
+// The "more" menu of an entry: rename and delete, and in a grid cell download and send too.
+@Kompozable
+fun CloudEntryMenu(app: App, drives: Drives, account: CloudAccount, e: CloudEntry, full: Boolean) {
+    var menu by remember { mutableStateOf(false) }
+    var renaming by remember { mutableStateOf(false) }
+    var newName by remember { mutableStateOf("") }
+    var confirmDelete by remember { mutableStateOf(false) }
+    val targets = app.pairedPeers().filter { it.online }
+    Box {
+        IconButton(onClick = { menu = true }) { Icon(Icons.Filled.MoreVert, contentDescription = tr("Diğer")) }
+        DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
+            if (full && !e.folder) {
+                DropdownMenuItem(text = { Text(tr("İndir")) },
+                                 onClick = {
+                                     menu = false
+                                     drives.download(account.id, e)
+                                 },
+                                 leadingIcon = { Icon(AppIcons.Download, contentDescription = null) })
+                for (peer in targets) {
+                    DropdownMenuItem(text = { Text(trf("{} cihazına gönder", peer.name)) },
                                      onClick = {
                                          menu = false
-                                         newName = e.name
-                                         renaming = true
+                                         drives.sendToDevice(account.id, e, peer.id)
                                      },
-                                     leadingIcon = { Icon(Icons.Filled.Edit, contentDescription = null) })
-                    DropdownMenuItem(text = { Text(tr("Sil")) },
-                                     onClick = {
-                                         menu = false
-                                         confirmDelete = true
-                                     },
-                                     leadingIcon = { Icon(Icons.Filled.Delete, contentDescription = null) })
+                                     leadingIcon = { Icon(AppIcons.forPlatform(peer.platform), contentDescription = null) })
                 }
             }
+            DropdownMenuItem(text = { Text(tr("Yeniden adlandır")) },
+                             onClick = {
+                                 menu = false
+                                 newName = e.name
+                                 renaming = true
+                             },
+                             leadingIcon = { Icon(Icons.Filled.Edit, contentDescription = null) })
+            DropdownMenuItem(text = { Text(tr("Sil")) },
+                             onClick = {
+                                 menu = false
+                                 confirmDelete = true
+                             },
+                             leadingIcon = { Icon(Icons.Filled.Delete, contentDescription = null) })
         }
     }
     if (renaming) {
@@ -302,5 +453,23 @@ fun CloudEntryRow(app: App, drives: Drives, account: CloudAccount, e: CloudEntry
             },
             dismissButton = { TextButton(onClick = { confirmDelete = false }) { Text(tr("Vazgeç")) } },
         )
+    }
+}
+
+@Preview(widthDp = 720, heightDp = 640)
+@Kompozable
+fun CloudKindsPreview() {
+    val account = CloudAccount(id = "gdrive:preview", provider = "gdrive", name = "Önizleme", email = "")
+    val names = listOf("Rapor.pdf", "Teklif.docx", "Bütçe.xlsx", "Sunum.pptx", "Yedek.zip", "Şarkı.mp3", "main.rs", "notlar.txt",
+                       "AirLink.apk", "kurulum.exe", "ubuntu.iso", "kitap.epub", "veri.bin")
+    MaterialTheme {
+        Column(modifier = Modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            LazyVerticalGrid(GridCells.Adaptive(130.dp), modifier = Modifier.fillMaxWidth().height(400.dp),
+                             verticalArrangement = Arrangement.spacedBy(8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                items(names) { n -> CloudEntryTile(appState(), drivesState(), account, CloudEntry(id = n, name = n, size = 123456)) }
+            }
+            CloudEntryRow(appState(), drivesState(), account, CloudEntry(id = "a", name = "Rapor.pdf", size = 123456))
+            CloudEntryRow(appState(), drivesState(), account, CloudEntry(id = "b", name = "Bütçe", kind = "application/vnd.google-apps.spreadsheet"))
+        }
     }
 }

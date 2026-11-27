@@ -15,7 +15,12 @@ object Helper {
                 args.size >= 2 && args[0] == "test" -> test(args[1], "jpeg")
                 args.size >= 2 && args[0] == "test-h264" -> test(args[1], "h264")
                 args.size >= 3 && args[0] == "serve" -> Server.run(args[1].toInt(), args[2])
-                else -> Log.i("usage: test|test-h264 <package/activity> | serve <port> <token>")
+                args.isNotEmpty() && args[0] == "clipboard" -> {
+                    // (a try: the clipboard's copies to the log for a minute)
+                    ClipboardWatch.start { Log.i("clipboard event: $it") }
+                    Thread.sleep(60_000)
+                }
+                else -> Log.i("usage: test|test-h264 <package/activity> | serve <port> <token> | clipboard")
             }
         } catch (cause: Throwable) {
             Log.e("helper failed", cause)

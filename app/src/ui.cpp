@@ -12,13 +12,24 @@ fun AirLinkApp() {
     } else {
         if (dark) darkColorScheme() else lightColorScheme()
     }
-    // Started at login: straight to the tray, the window shown from there.
+    // Started at login (or by a phone app's shortcut): straight to the tray, the window shown from
+    // there. The tray icon is registered a moment after start: waited for (up to 3 s).
     LaunchedEffect(Unit) {
-        if (launchedAtLogin() && isTraySupported()) setAppWindowVisible(false)
+        var waited = 0
+        while (launchedAtLogin() && waited < 60) {
+            if (isTraySupported()) {
+                setAppWindowVisible(false)
+                waited = 60
+            } else {
+                delay(50)
+                waited += 1
+            }
+        }
     }
     MaterialTheme(colorScheme = scheme) {
         Home()
         if (isDesktop()) PhoneAppWindows(appState())
+        if (isDesktop()) PhoneScreenWindow(appState())
         if (isDesktop()) AirLinkTray(appState())
     }
 }
@@ -61,13 +72,20 @@ fun AirLinkTray(app: App) {
         else -> "starting"
     }
     LaunchedEffect(statusName, tip, received) { publishStatus(statusName, tip, received) }
-    // A click on the icon opens the panel there; a click while it is open closes it (the panel loses
-    // the focus first, then the click comes: one right after the panel closed is that click).
+    // A click on the icon opens the panel there; a click while it is open closes it. Where the click
+    // takes the focus from the panel, the panel has closed just before the click comes: a click
+    // right after it closed is that one, and leaves it closed.
     var panel by remember { mutableStateOf<WindowPopup?>(null) }
     var panelClosedAt by remember { mutableStateOf(0L) }
-    Tray(icon = icon, tooltip = tip, onAction = { at ->
-            if (nowMs() - panelClosedAt > 400) panel = WindowPopup(anchor = at)
-        }, state = trayState) {
+    val togglePanel = { at: IntOffset? ->
+        if (panel != null) {
+            panel = null
+            panelClosedAt = nowMs()
+        } else if (nowMs() - panelClosedAt > 400) {
+            panel = WindowPopup(anchor = at)
+        }
+    }
+    Tray(icon = icon, tooltip = tip, onAction = { at -> togglePanel(at) }, state = trayState) {
         Item(tr("AirLink'i aç"), onClick = { setAppWindowVisible(true) })
         val paired = app.pairedPeers()
         if (paired.isNotEmpty()) {
@@ -78,7 +96,7 @@ fun AirLinkTray(app: App) {
                     Item(tr("Panoyu gönder"), onClick = { app.sendClipboard(peer.id, clipboard.getText()) })
                     if (peer.platform == "android") {
                         Separator()
-                        Item(tr("Ekranı göster"), onClick = { app.startScreen(peer.id); setAppWindowVisible(true) })
+                        Item(tr("Ekranı göster"), onClick = { app.startScreen(peer.id) })
                     }
                 }
             }
@@ -93,21 +111,23 @@ fun AirLinkTray(app: App) {
     // The Plasma panel widget's click (`airlink --panel X Y`): the panel at that point, as a tray click.
     val request = app.panelRequest()
     LaunchedEffect(request.serial) {
-        if (request.serial > 0 && nowMs() - panelClosedAt > 400) {
-            panel = WindowPopup(anchor = if (request.x == 0 && request.y == 0) null else IntOffset(request.x, request.y))
-        }
+        if (request.serial > 0) togglePanel(if (request.x == 0 && request.y == 0) null else IntOffset(request.x, request.y))
     }
     val open = panel
     if (open != null) {
         Window(onCloseRequest = {
                    panel = null
                    panelClosedAt = nowMs()
-               }, popup = open!!, title = "AirLink", state = rememberWindowState(size = DpSize(380.dp, 600.dp))) {
-            TrayPanel(app, onOpenApp = {
-                panel = null
-                panelClosedAt = nowMs()
-                setAppWindowVisible(true)
-            })
+               }, popup = open!!, transparent = true, title = "AirLink", state = rememberWindowState(size = DpSize(380.dp, 600.dp))) {
+            // Rounded: the window is see-through outside this surface (opaque and square where the
+            // platform can't have it).
+            Surface(shape = RoundedCornerShape(16.dp), color = MaterialTheme.colorScheme.surfaceContainer, modifier = Modifier.fillMaxSize()) {
+                TrayPanel(app, onOpenApp = {
+                    panel = null
+                    panelClosedAt = nowMs()
+                    setAppWindowVisible(true)
+                })
+            }
         }
     }
 }
@@ -146,8 +166,8 @@ fun Home() {
         var clipboardTicks = 0
         while (true) {
             app.pump()
-            for (text in app.takeIncomingClipboard()) clipboard.setText(text)
-            if (++clipboardTicks % 20 == 0) app.syncClipboard(clipboard.getText(), clipSensitive(clipEntries))
+            for (text in app.takeIncomingClipboard()) putOnClipboard(clipboard, text, app.incomingClipboardSecret())
+            if (++clipboardTicks % 20 == 0) app.syncClipboard(clipboardText(clipboard), clipboardSensitive(clipEntries))
             for (message in app.takeNotices()) scope.launch { snackbar.showSnackbar(message) }
             delay(50)
         }
@@ -163,7 +183,8 @@ fun Home() {
     val activeCall = app.activeCall()
     var minimizedCall by remember { mutableStateOf(0L) }
     val callOpen = activeCall != null && isDesktop() && minimizedCall != activeCall!!.since
-    val fullView = app.ready() && (app.desktopPeer().isNotEmpty() || app.screenPeer().isNotEmpty() || callOpen)
+    // (a phone's screen opens in a window of its own on a computer: PhoneScreenWindow)
+    val fullView = app.ready() && (app.desktopPeer().isNotEmpty() || (!isDesktop() && app.screenPeer().isNotEmpty()) || callOpen)
     if (!desktopTabs && tab != TAB_SETTINGS && tab != TAB_DEVICES && tab != TAB_CLIPBOARD && tab != TAB_FILES) tab = TAB_DEVICES
     val navType = if (!app.ready() || fullView) NavigationSuiteType.None
                   else NavigationSuiteScaffoldDefaults.navigationSuiteType(currentWindowAdaptiveInfo())
@@ -205,9 +226,6 @@ fun Home() {
                         if (tab == TAB_FILES && app.fileHistory().isNotEmpty()) {
                             TextButton(onClick = { app.clearFileHistory() }) { Text(tr("Geçmişi temizle")) }
                         }
-                        if (cloudIndex >= 0 && drives.jobs().any { it.accountId == cloudAccounts[cloudIndex].id && !it.active() }) {
-                            TextButton(onClick = { drives.clearFinishedJobs() }) { Text(tr("Temizle")) }
-                        }
                         if (tab == TAB_CLIPBOARD && app.clipboardHistory().isNotEmpty()) {
                             TextButton(onClick = { app.clearClipboardHistory() }) { Text(tr("Temizle")) }
                         }
@@ -224,8 +242,6 @@ fun Home() {
                         CallScreen(app, activeCall!!, onMinimize = { minimizedCall = activeCall!!.since })
                     } else if (app.ready() && app.desktopPeer().isNotEmpty()) {
                         DesktopView(app)
-                    } else if (app.ready() && app.screenPeer().isNotEmpty()) {
-                        ScreenView(app)
                     } else if (app.ready()) {
                         if (cloudIndex >= 0) CloudScreen(app, drives, cloudAccounts[cloudIndex])
                         else if (tab == TAB_MESSAGES) MessagesScreen(app)

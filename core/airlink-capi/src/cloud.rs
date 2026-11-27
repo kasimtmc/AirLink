@@ -114,7 +114,8 @@ pub unsafe extern "C" fn airlink_cloud_cancel(node: *mut AirlinkNode, op: u64) -
             return false;
         };
         task.abort();
-        n.shared.op_result::<()>(op, Err(anyhow::anyhow!("cancelled")));
+        n.shared
+            .op_result::<()>(op, Err(anyhow::anyhow!("cancelled")));
         true
     })
 }
@@ -204,4 +205,14 @@ cloud_op! {
 cloud_op! {
     /// Moves an entry to the drive's recycle bin.
     fn airlink_cloud_delete(account, id) |cloud, shared, op| { cloud.delete(&account, &id).await }
+}
+
+cloud_op! {
+    /// A small picture of an image or a video entry (as JSON, from a listing), cached in `dir`.
+    /// Value: the picture file's path, or null when the drive has none.
+    fn airlink_cloud_thumbnail(account, entry_json, dir) |cloud, shared, op| {
+        let entry: airlink_cloud::Entry = serde_json::from_str(&entry_json)?;
+        let path = cloud.thumbnail(&account, &entry, &PathBuf::from(dir)).await?;
+        anyhow::Ok(path.map(|p| p.to_string_lossy().into_owned()))
+    }
 }

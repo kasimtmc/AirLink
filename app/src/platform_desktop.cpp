@@ -252,6 +252,8 @@ std::vector<std::string> sharedEarly;  // before the handler was set
 // A panel widget's click (`airlink --panel X Y`), for takePanelRequest.
 std::optional<std::pair<int, int>> panelRequest;
 bool backgroundLaunch = false;  // `--background`: started at login
+std::vector<std::pair<std::string, std::string>> phoneAppRequests;  // `--phone-app COMPONENT LABEL`
+constexpr std::string_view kAppLine = "\x1f" "app ";  // + component, a tab, the label
 
 bool hasArg(int argc, char** argv, std::string_view arg) {
     for (int i = 1; i < argc; ++i)
@@ -267,6 +269,18 @@ std::optional<std::pair<int, int>> panelArgs(int argc, char** argv) {
         return std::pair{std::atoi(argv[i + 1]), std::atoi(argv[i + 2])};
     }
     return std::nullopt;
+}
+
+std::optional<std::pair<std::string, std::string>> phoneAppArgs(int argc, char** argv) {
+    for (int i = 1; i + 1 < argc; ++i)
+        if (std::string_view(argv[i]) == "--phone-app") return std::pair{std::string(argv[i + 1]), std::string(i + 2 < argc ? argv[i + 2] : "")};
+    return std::nullopt;
+}
+
+void deliverPhoneApp(std::string line) {
+    auto tab = line.find('\t');
+    std::lock_guard lock(shareMutex);
+    phoneAppRequests.emplace_back(line.substr(0, tab), tab == std::string::npos ? std::string() : line.substr(tab + 1));
 }
 
 void deliverPanel(std::pair<int, int> at) {
@@ -302,7 +316,13 @@ std::vector<std::string> filesFromArgs(int argc, char** argv) {
     for (int i = 1; i < argc; ++i) args.push_back(argv[i]);
 #endif
     std::vector<std::string> files;
+    int skip = 0;
     for (std::string arg : args) {
+        if (skip > 0 && skip--) continue;
+        if (arg == "--phone-app") {
+            skip = 2;  // (its component and label)
+            continue;
+        }
         if (arg == "--send") continue;
         if (arg.starts_with("file://")) arg = arg.substr(7);  // (%U from some file managers)
         if (arg.starts_with("--")) continue;
@@ -424,6 +444,8 @@ void serve() {
                     int x = 0, y = 0;
                     std::sscanf(line.c_str() + kPanelLine.size(), "%d %d", &x, &y);
                     deliverPanel({x, y});
+                } else if (line.starts_with(kAppLine)) {
+                    deliverPhoneApp(line.substr(kAppLine.size()));
                 } else if (!line.empty()) files.push_back(line);
             }
             deliverShared(std::move(files));
@@ -437,11 +459,15 @@ void handleLaunch(int argc, char** argv) {
     backgroundLaunch = hasArg(argc, argv, "--background");
     std::vector<std::string> files = filesFromArgs(argc, argv);
     auto panel = panelArgs(argc, argv);
+    auto phoneApp = phoneAppArgs(argc, argv);
+    // A shortcut's app opens in its own window, without AirLink's.
+    if (phoneApp) backgroundLaunch = true;
     // Scripted (headless) runs stay apart from a real instance unless a test names a socket.
     if (std::getenv("KOMPOZ_HEADLESS") && !std::getenv("AIRLINK_SOCKET")) return deliverShared(std::move(files));
     // One instance: a second one would run the same device identity twice.
     std::vector<std::string> lines = files;
     if (panel) lines.push_back(std::string(kPanelLine) + std::to_string(panel->first) + " " + std::to_string(panel->second));
+    if (phoneApp) lines.push_back(std::string(kAppLine) + phoneApp->first + "\t" + phoneApp->second);
     if (forward(lines)) {
         if (lines.empty()) std::fprintf(stderr, "AirLink is already running.\n");
         std::exit(0);
@@ -450,6 +476,7 @@ void handleLaunch(int argc, char** argv) {
     recordLauncher();
     if (startAtLogin()) setStartAtLogin(true);  // (kept pointing at this binary)
     if (panel) deliverPanel(*panel);
+    if (phoneApp) deliverPhoneApp(phoneApp->first + "\t" + phoneApp->second);
     deliverShared(std::move(files));
 }
 
@@ -502,8 +529,11 @@ void serve() {
                 while (ReadFile(pipe, buf, sizeof buf, &n, nullptr) && n > 0) data.append(buf, n);
                 std::vector<std::string> files;
                 size_t start = 0;
-                for (size_t end; (end = data.find('\n', start)) != std::string::npos; start = end + 1)
-                    if (end > start) files.push_back(data.substr(start, end - start));
+                for (size_t end; (end = data.find('\n', start)) != std::string::npos; start = end + 1) {
+                    std::string line = data.substr(start, end - start);
+                    if (line.starts_with(kAppLine)) deliverPhoneApp(line.substr(kAppLine.size()));
+                    else if (!line.empty()) files.push_back(line);
+                }
                 deliverShared(std::move(files));
             }
             DisconnectNamedPipe(pipe);
@@ -578,7 +608,11 @@ void handleLaunch(int argc, char** argv) {
         }
     backgroundLaunch = hasArg(argc, argv, "--background");
     std::vector<std::string> files = filesFromArgs(argc, argv);
+    auto phoneApp = phoneAppArgs(argc, argv);
+    if (phoneApp) backgroundLaunch = true;  // (its own window, without AirLink's)
     if (std::getenv("KOMPOZ_HEADLESS")) return deliverShared(std::move(files));
+    std::vector<std::string> lines = files;
+    if (phoneApp) lines.push_back(std::string(kAppLine) + phoneApp->first + "\t" + phoneApp->second);
     // One instance. Explorer starts one process per selected file at once: the first takes the
     // mutex and serves; the others wait for its pipe and hand it their file.
     CreateMutexW(nullptr, TRUE, (L"Local\\AirLink-" + userName()).c_str());
@@ -586,13 +620,14 @@ void handleLaunch(int argc, char** argv) {
     if (std::getenv("AIRLINK_DIAG_LOG"))
         std::fprintf(stderr, "airlink: existing instance: %s\n", another ? "yes" : "no");
     for (int tries = 0; another && tries < 30; ++tries) {
-        if (forward(files)) std::exit(0);
+        if (forward(lines)) std::exit(0);
         Sleep(100);
     }
     if (another) std::exit(0);  // it never answered; don't run the same identity twice
     serve();
     registerShell();
     if (startAtLogin()) setStartAtLogin(true);  // (kept pointing at this .exe)
+    if (phoneApp) deliverPhoneApp(phoneApp->first + "\t" + phoneApp->second);
     deliverShared(std::move(files));
 }
 
@@ -740,6 +775,11 @@ std::optional<std::pair<int, int>> takePanelRequest() {
     return std::exchange(panelRequest, std::nullopt);
 }
 
+std::vector<std::pair<std::string, std::string>> takePhoneAppRequests() {
+    std::lock_guard lock(shareMutex);
+    return std::exchange(phoneAppRequests, {});
+}
+
 void nodeStarted(void*) {}
 
 bool canShareSms() { return false; }
@@ -774,6 +814,7 @@ void requestFlingMediaAccess() {}
 void startAdvancedSetup() {}
 void advancedSetupResult(bool, const std::string&) {}
 void helperStarted(bool, const std::string&) {}
+void watchClipboardInBackground() {}
 
 void log(const std::string& line) { std::fprintf(stderr, "airlink: %s\n", line.c_str()); }
 
@@ -921,5 +962,177 @@ void stageUris(const std::vector<std::string>&, std::function<void(std::vector<s
 }
 
 void filesReceived(const std::vector<std::string>&) {}
+
+// ---- A phone app's shortcut (`airlink --phone-app COMPONENT LABEL`) ---------------------------
+
+namespace {
+
+// The package of "package/.Activity", made safe as a file name.
+std::string shortcutId(const std::string& component) {
+    std::string id = component.substr(0, component.find('/'));
+    for (char& c : id)
+        if (!std::isalnum(static_cast<unsigned char>(c)) && c != '.' && c != '-' && c != '_') c = '_';
+    return id.empty() ? std::string("app") : id;
+}
+
+std::filesystem::path pathOf(const std::string& utf8) { return std::filesystem::path(std::u8string(utf8.begin(), utf8.end())); }
+
+bool writeFile(const std::filesystem::path& path, const std::string& bytes) {
+    std::error_code ec;
+    std::filesystem::create_directories(path.parent_path(), ec);
+    std::ofstream out(path, std::ios::binary | std::ios::trunc);
+    out << bytes;
+    return bool(out);
+}
+
+}  // namespace
+
+#if defined(__linux__)
+
+namespace {
+
+std::filesystem::path homeDir() {
+    const char* home = std::getenv("HOME");
+    return home ? std::filesystem::path(home) : std::filesystem::path("/tmp");
+}
+
+// The host's ~/.local/share (a Flatpak's XDG_DATA_HOME is its own, under ~/.var/app).
+std::filesystem::path hostDataHome() {
+    const char* data = std::getenv("FLATPAK_ID") ? nullptr : std::getenv("XDG_DATA_HOME");
+    return data && *data ? std::filesystem::path(data) : homeDir() / ".local/share";
+}
+
+// The desktop folder (XDG_DESKTOP_DIR in user-dirs.dirs: "Masaüstü" in Turkish, and so on).
+std::filesystem::path desktopDir() {
+    std::ifstream dirs(homeDir() / ".config/user-dirs.dirs");
+    std::string line;
+    while (std::getline(dirs, line)) {
+        if (!line.starts_with("XDG_DESKTOP_DIR=")) continue;
+        std::string value = line.substr(16);
+        if (value.size() >= 2 && value.front() == '"') value = value.substr(1, value.size() - 2);
+        if (value.starts_with("$HOME")) return homeDir() / value.substr(value.size() > 5 && value[5] == '/' ? 6 : 5);
+        return pathOf(value);
+    }
+    return homeDir() / "Desktop";
+}
+
+// One argument of a .desktop entry's Exec, quoted as its spec says.
+std::string execArg(const std::string& arg) {
+    std::string out = "\"";
+    for (char c : arg) {
+        if (c == '"' || c == '`' || c == '$' || c == '\\') out += '\\';
+        if (c == '%') out += '%';
+        out += c;
+    }
+    return out + "\"";
+}
+
+// A value on a .desktop line: no line breaks.
+std::string entryValue(std::string text) {
+    for (char& c : text)
+        if (c == '\n' || c == '\r') c = ' ';
+    return text;
+}
+
+}  // namespace
+
+bool canMakeAppShortcuts() { return true; }
+
+std::string makePhoneAppShortcut(const std::string& label, const std::string& component, const std::string& iconPng, bool onDesktop) {
+    std::string id = shortcutId(component);
+    auto applications = hostDataHome() / "applications";
+    // (the icon next to the entries: a folder a Flatpak may write too)
+    auto icon = applications / "airlink-icons" / (id + ".png");
+    if (!iconPng.empty() && !writeFile(icon, iconPng)) return tr("Simge kaydedilemedi");
+    std::string command;
+    if (const char* flatpak = std::getenv("FLATPAK_ID")) command = std::string("flatpak run ") + flatpak;
+    else if (std::string bin = hostBinary(); !bin.empty()) command = execArg(bin);
+    else return tr("AirLink'in yeri bulunamadı");
+    std::string entry = "[Desktop Entry]\n"
+                        "Type=Application\n"
+                        "Name=" + entryValue(label) + "\n"
+                        "Comment=" + entryValue(trf("Telefondaki {}, AirLink ile kendi penceresinde", label)) + "\n"
+                        "Exec=" + command + " --phone-app " + execArg(component) + " " + execArg(label) + "\n" +
+                        (iconPng.empty() ? std::string("Icon=airlink\n") : "Icon=" + icon.string() + "\n") +
+                        "Terminal=false\n"
+                        "Categories=Utility;\n"
+                        "X-AirLink-Component=" + entryValue(component) + "\n";
+    auto file = (onDesktop ? desktopDir() : applications) / ("airlink-" + id + ".desktop");
+    if (!writeFile(file, entry)) return trf("{} yazılamadı", file.string());
+    // A desktop's launcher must be executable to be trusted (KDE, GNOME); the menu's are read as they are.
+    std::error_code ec;
+    std::filesystem::permissions(file, std::filesystem::perms::owner_exec | std::filesystem::perms::group_exec | std::filesystem::perms::others_exec,
+                                 std::filesystem::perm_options::add, ec);
+    if (!onDesktop) {
+        // (the menus see a new entry at once where they watch the folder; update-desktop-database for the rest)
+        std::thread([dir = applications.string()] {
+            pid_t pid = 0;
+            const char* args[] = {"update-desktop-database", dir.c_str(), nullptr};
+            if (posix_spawnp(&pid, "update-desktop-database", nullptr, nullptr, const_cast<char* const*>(args), environ) == 0)
+                waitpid(pid, nullptr, 0);
+        }).detach();
+    }
+    return {};
+}
+
+#elif defined(_WIN32)
+
+bool canMakeAppShortcuts() { return true; }
+
+std::string makePhoneAppShortcut(const std::string& label, const std::string& component, const std::string& iconPng, bool onDesktop) {
+    std::string id = shortcutId(component);
+    // The icon as an .ico holding the PNG as it is (Vista and later read those).
+    std::wstring icoPath;
+    if (!iconPng.empty()) {
+        PWSTR local = nullptr;
+        if (SUCCEEDED(SHGetKnownFolderPath(FOLDERID_LocalAppData, 0, nullptr, &local))) {
+            auto ico = std::filesystem::path(local) / L"AirLink" / L"app-icons" / (pathOf(id).wstring() + L".ico");
+            uint32_t size = uint32_t(iconPng.size());
+            std::string bytes = {0, 0, 1, 0, 1, 0};                  // ICONDIR: an icon, one image
+            bytes += std::string{0, 0, 0, 0, 1, 0, 32, 0};          // 256x256 (0), no palette, 1 plane, 32 bits
+            for (int i = 0; i < 4; ++i) bytes += char((size >> (8 * i)) & 0xff);
+            for (int i = 0; i < 4; ++i) bytes += char((22u >> (8 * i)) & 0xff);  // the image right after
+            bytes += iconPng;
+            if (writeFile(ico, bytes)) icoPath = ico.wstring();
+        }
+        CoTaskMemFree(local);
+    }
+    PWSTR folder = nullptr;
+    if (FAILED(SHGetKnownFolderPath(onDesktop ? FOLDERID_Desktop : FOLDERID_Programs, 0, nullptr, &folder))) return tr("Klasör bulunamadı");
+    std::wstring name = pathOf(label).wstring();
+    for (wchar_t& c : name)
+        if (wcschr(L"\\/:*?\"<>|", c)) c = L'_';
+    std::filesystem::path link = std::filesystem::path(folder) / (onDesktop ? std::filesystem::path() : std::filesystem::path(L"AirLink")) / (name + L".lnk");
+    CoTaskMemFree(folder);
+    std::error_code ec;
+    std::filesystem::create_directories(link.parent_path(), ec);
+    wchar_t exe[MAX_PATH];
+    if (!GetModuleFileNameW(nullptr, exe, MAX_PATH)) return tr("AirLink'in yeri bulunamadı");
+    std::wstring args = L"--phone-app \"" + pathOf(component).wstring() + L"\" \"" + name + L"\"";
+    bool initialized = SUCCEEDED(CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED));
+    bool saved = false;
+    IShellLinkW* shell = nullptr;
+    if (SUCCEEDED(CoCreateInstance(CLSID_ShellLink, nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&shell)))) {
+        shell->SetPath(exe);
+        shell->SetArguments(args.c_str());
+        shell->SetDescription(name.c_str());
+        if (!icoPath.empty()) shell->SetIconLocation(icoPath.c_str(), 0);
+        IPersistFile* file = nullptr;
+        if (SUCCEEDED(shell->QueryInterface(IID_PPV_ARGS(&file)))) {
+            saved = SUCCEEDED(file->Save(link.c_str(), TRUE));
+            file->Release();
+        }
+        shell->Release();
+    }
+    if (initialized) CoUninitialize();
+    return saved ? std::string() : tr("Kısayol kaydedilemedi");
+}
+
+#else
+
+bool canMakeAppShortcuts() { return false; }
+std::string makePhoneAppShortcut(const std::string&, const std::string&, const std::string&, bool) { return "unsupported"; }
+
+#endif
 
 }  // namespace airlink::platform

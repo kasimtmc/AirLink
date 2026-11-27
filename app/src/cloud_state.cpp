@@ -3,10 +3,16 @@
 #include <airlink.h>
 
 #include <algorithm>
+#include <cctype>
+#include <chrono>
+#include <tuple>
 #include <filesystem>
+#include <deque>
+#include <fstream>
 #include <functional>
 #include <map>
 #include <mutex>
+#include <set>
 
 #include "app_state.hpp"
 #include "i18n.hpp"
@@ -54,13 +60,32 @@ std::string clean(const std::string& error) {
     return error;
 }
 
-enum class Kind { Connect, Disconnect, List, Search, Quota, Download, Upload, CreateFolder, Rename, Delete };
+enum class Kind { Connect, Disconnect, List, Search, Quota, Download, Upload, CreateFolder, Rename, Delete, Thumbnail };
 
 struct Op {
     Kind kind;
     std::string account;
-    std::string folder;  // List: the folder asked for; Upload/CreateFolder/Rename/Delete: the folder to reload
+    std::string folder;  // List: the folder asked for; Upload/CreateFolder/Rename/Delete: the folder to reload; Thumbnail: its key
 };
+
+std::filesystem::path fsPath(const std::string& utf8) { return std::filesystem::path(std::u8string(utf8.begin(), utf8.end())); }
+
+std::string lowerExtension(const std::string& name) {
+    auto dot = name.rfind('.');
+    if (dot == std::string::npos) return {};
+    std::string ext = name.substr(dot + 1);
+    for (char& c : ext) c = char(std::tolower(static_cast<unsigned char>(c)));
+    return ext;
+}
+
+int64_t clockMs() {
+    return std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch()).count();
+}
+
+// How long a finished card stays in the tab (it is in the history from then on).
+constexpr int64_t SHOW_DONE_MS = 6000, SHOW_FAILED_MS = 15000;
+constexpr size_t HISTORY_MAX = 300;
+constexpr int THUMBNAILS_AT_ONCE = 4;
 
 }  // namespace
 
@@ -79,6 +104,105 @@ struct Drives::Impl {
     int cacheFolders = 0;
     std::mutex pickedMutex;
     std::vector<std::pair<std::string, std::vector<std::string>>> picked;
+    // Finished transfers, newest first, in <data dir>/cloud-history.json.
+    std::string historyPath;
+    MutableState<std::vector<CloudRecord>> history = mutableStateOf(std::vector<CloudRecord>{});
+    int64_t nextRecord = 1;
+    std::string layoutPath;
+    MutableState<CloudLayout> layout = mutableStateOf(CloudLayout::List);
+    // Small pictures: fetched a few at a time, kept on disk by the core (<data dir>/cloud-thumbnails).
+    std::string thumbDir;
+    MutableState<std::map<std::string, kompoz::ImageBitmap>> thumbs = mutableStateOf(std::map<std::string, kompoz::ImageBitmap>{});
+    std::set<std::string> asked;
+    std::deque<std::tuple<std::string, std::string, std::string>> thumbQueue;  // key, account, entry JSON
+    int thumbsRunning = 0;
+
+    static std::string thumbKey(const std::string& account, const CloudEntry& e) { return account + "\n" + e.id + "\n" + e.modified; }
+
+    void nextThumbnails() {
+        while (thumbsRunning < THUMBNAILS_AT_ONCE && !thumbQueue.empty()) {
+            auto [key, account, entry] = thumbQueue.front();
+            thumbQueue.pop_front();
+            uint64_t op = airlink_cloud_thumbnail(node, account.c_str(), entry.c_str(), thumbDir.c_str());
+            if (!op) continue;
+            ops[op] = Op{Kind::Thumbnail, account, key};
+            ++thumbsRunning;
+        }
+    }
+
+    void thumbnailDone(const std::string& key, bool ok, const json::Value& value) {
+        --thumbsRunning;
+        if (ok && !value.str().empty()) {
+            std::ifstream in(fsPath(value.str()), std::ios::binary);
+            std::vector<uint8_t> bytes((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+            kompoz::ImageBitmap image = bytes.empty() ? kompoz::ImageBitmap() : kompoz::decodeToImageBitmap(bytes);
+            if (!image.empty() && image.width() > 0) thumbs.update([&](std::map<std::string, kompoz::ImageBitmap>& all) { all[key] = image; });
+        }
+        nextThumbnails();
+    }
+
+    void loadHistory() {
+        if (historyPath.empty()) return;
+        std::ifstream in(fsPath(historyPath));
+        if (!in) return;
+        std::string text((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+        std::vector<CloudRecord> list;
+        for (const auto& r : json::Value::parse(text).array())
+            list.push_back(CloudRecord{.id = nextRecord++, .accountId = r["account"].str(), .name = r["name"].str(), .upload = r["upload"].boolean(),
+                                       .size = r["size"].i64(), .time = r["time"].i64(), .path = r["path"].str(), .sendTo = r["send_to"].str(),
+                                       .error = r["error"].str()});
+        history.set(std::move(list));
+    }
+
+    void saveHistory() {
+        if (historyPath.empty()) return;
+        std::string out = "[";
+        for (const CloudRecord& r : history.peek()) {
+            if (out.size() > 1) out += ",\n";
+            out += "{\"account\":" + json::quote(r.accountId) + ",\"name\":" + json::quote(r.name) + ",\"upload\":" + (r.upload ? "true" : "false") +
+                   ",\"size\":" + std::to_string(r.size) + ",\"time\":" + std::to_string(r.time) + ",\"path\":" + json::quote(r.path) +
+                   ",\"send_to\":" + json::quote(r.sendTo) + ",\"error\":" + json::quote(r.error) + "}";
+        }
+        out += "]\n";
+        auto file = fsPath(historyPath);
+        auto temp = file;
+        temp += ".tmp";
+        { std::ofstream(temp, std::ios::binary) << out; }
+        std::error_code ec;
+        std::filesystem::rename(temp, file, ec);
+    }
+
+    // A transfer ended: its card shows it a few seconds more, the history keeps it.
+    void ended(uint64_t op) {
+        int64_t now = clockMs();
+        CloudRecord record;
+        bool found = false;
+        jobs.update([&](std::vector<CloudJob>& all) {
+            for (CloudJob& j : all) {
+                if (j.op != op) continue;
+                j.endedAt = now;
+                record = CloudRecord{.id = nextRecord++, .accountId = j.accountId, .name = j.name, .upload = j.upload,
+                                     .size = std::max(j.total, j.done), .time = now, .path = j.path, .sendTo = j.sendTo, .error = j.error};
+                found = true;
+            }
+        });
+        if (!found) return;
+        history.update([&](std::vector<CloudRecord>& all) {
+            all.insert(all.begin(), record);
+            if (all.size() > HISTORY_MAX) all.resize(HISTORY_MAX);
+        });
+        saveHistory();
+    }
+
+    // Takes off the cards whose few seconds are over.
+    void expireJobs() {
+        int64_t now = clockMs();
+        auto over = [&](const CloudJob& j) {
+            return j.endedAt > 0 && now - j.endedAt > (j.error.empty() ? SHOW_DONE_MS : SHOW_FAILED_MS);
+        };
+        const auto& all = jobs.peek();
+        if (std::any_of(all.begin(), all.end(), over)) jobs.update([&](std::vector<CloudJob>& list) { std::erase_if(list, over); });
+    }
 
     void notice(const std::string& text) { App::get().notice(text); }
 
@@ -195,6 +319,7 @@ struct Drives::Impl {
                     }
                     sendTo = j.sendTo;
                 });
+                ended(op);
                 if (ok && !sendTo.empty()) App::get().sendFiles(sendTo, {path});
                 else if (ok) notice(trf("İndirildi: {}", std::filesystem::path(std::u8string(path.begin(), path.end())).filename().string()));
                 else if (err != "cancelled") notice(trf("İndirilemedi: {}", err));
@@ -209,8 +334,12 @@ struct Drives::Impl {
                         j.error = err == "cancelled" ? tr("İptal edildi") : err;
                     }
                 });
+                ended(op);
                 if (!ok && err != "cancelled") notice(trf("Yüklenemedi: {}", err));
                 if (ok && openFolder(what.account) == what.folder && !searching(what.account)) list(what.account);
+                break;
+            case Kind::Thumbnail:
+                thumbnailDone(what.folder, ok, value);
                 break;
             case Kind::CreateFolder:
             case Kind::Rename:
@@ -240,6 +369,16 @@ std::string providerTitle(const std::string& provider) {
     return provider;
 }
 
+bool isVideo(const std::string& name) {
+    static const std::set<std::string> video = {"mp4", "m4v", "mov", "mkv", "webm", "avi", "3gp", "wmv"};
+    return video.count(lowerExtension(name)) > 0;
+}
+
+bool isPicture(const std::string& name) {
+    static const std::set<std::string> image = {"jpg", "jpeg", "png", "gif", "webp", "bmp", "tif", "tiff", "heic", "heif", "avif"};
+    return image.count(lowerExtension(name)) > 0 || isVideo(name);
+}
+
 void Drives::attach(AirlinkNode* node, const std::string& downloadDir, const std::string& dataDir) const {
     Impl& s = *impl_;
     s.node = node;
@@ -250,6 +389,16 @@ void Drives::attach(AirlinkNode* node, const std::string& downloadDir, const std
     std::filesystem::remove_all(cache, ec);  // what an earlier run sent on (or left half-done)
     auto u8 = cache.u8string();
     s.cacheDir = std::string(u8.begin(), u8.end());
+    auto thumbs = (std::filesystem::path(data) / "cloud-thumbnails").u8string();
+    s.thumbDir = std::string(thumbs.begin(), thumbs.end());
+    if (!dataDir.empty()) {
+        s.historyPath = dataDir + "/cloud-history.json";
+        s.layoutPath = dataDir + "/cloud-layout";
+        s.loadHistory();
+        std::string saved;
+        if (std::ifstream in(fsPath(s.layoutPath)); in) in >> saved;
+        s.layout.set(saved == "grid" ? CloudLayout::Grid : CloudLayout::List);
+    }
     s.loadState();
 }
 
@@ -284,6 +433,7 @@ void Drives::pump() const {
         picked.swap(impl_->picked);
     }
     for (auto& [account, paths] : picked) upload(account, paths);
+    impl_->expireJobs();
 }
 
 bool Drives::available() const { return !impl_->providers.get().empty(); }
@@ -301,6 +451,21 @@ CloudView Drives::view(const std::string& accountId) const {
 }
 
 std::vector<CloudJob> Drives::jobs() const { return impl_->jobs.get(); }
+
+std::vector<CloudRecord> Drives::history(const std::string& accountId) const {
+    std::vector<CloudRecord> out;
+    for (const CloudRecord& r : impl_->history.get())
+        if (r.accountId == accountId) out.push_back(r);
+    return out;
+}
+
+CloudLayout Drives::layout() const { return impl_->layout.get(); }
+
+kompoz::ImageBitmap Drives::thumbnail(const std::string& accountId, const CloudEntry& entry) const {
+    auto all = impl_->thumbs.get();
+    auto it = all.find(Impl::thumbKey(accountId, entry));
+    return it == all.end() ? kompoz::ImageBitmap() : it->second;
+}
 
 void Drives::connect(const std::string& provider) const {
     Impl& s = *impl_;
@@ -437,8 +602,29 @@ void Drives::trash(const std::string& accountId, const CloudEntry& entry) const 
 
 void Drives::cancelJob(uint64_t op) const { airlink_cloud_cancel(impl_->node, op); }
 
-void Drives::clearFinishedJobs() const {
-    impl_->jobs.update([](std::vector<CloudJob>& all) { std::erase_if(all, [](const CloudJob& j) { return !j.active(); }); });
+void Drives::setLayout(CloudLayout layout) const {
+    Impl& s = *impl_;
+    s.layout.set(layout);
+    if (!s.layoutPath.empty()) std::ofstream(fsPath(s.layoutPath)) << (layout == CloudLayout::Grid ? "grid" : "list");
+}
+
+void Drives::requestThumbnail(const std::string& accountId, const CloudEntry& entry) const {
+    Impl& s = *impl_;
+    if (!s.node || entry.folder || !isPicture(entry.name) || s.thumbDir.empty()) return;
+    std::string key = Impl::thumbKey(accountId, entry);
+    if (!s.asked.insert(key).second) return;
+    s.thumbQueue.emplace_back(key, accountId, entry.json);
+    s.nextThumbnails();
+}
+
+void Drives::forgetRecord(int64_t id) const {
+    impl_->history.update([&](std::vector<CloudRecord>& all) { std::erase_if(all, [&](const CloudRecord& r) { return r.id == id; }); });
+    impl_->saveHistory();
+}
+
+void Drives::clearHistory(const std::string& accountId) const {
+    impl_->history.update([&](std::vector<CloudRecord>& all) { std::erase_if(all, [&](const CloudRecord& r) { return r.accountId == accountId; }); });
+    impl_->saveHistory();
 }
 
 void Drives::openJobFile(const CloudJob& job) const {

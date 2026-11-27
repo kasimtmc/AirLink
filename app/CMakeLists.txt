@@ -98,6 +98,16 @@ else()
     set(AIRLINK_TARGET airlink)
 endif()
 target_include_directories(${AIRLINK_TARGET} PRIVATE src)
+# The clipboard without the window's focus: Wayland's data-control, where Kompoz has its Wayland
+# platform (its run-time loaded libwayland-client and generated core protocol); else nothing.
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND NOT ANDROID AND KOMPOZ_WAYLAND_INCLUDE_DIR AND KOMPOZ_XKBCOMMON_INCLUDE_DIR)
+    add_library(airlink_clipboard_watch OBJECT src/clipboard_watch_wayland.cpp src/wayland/ext-data-control-v1-protocol.c)
+    target_include_directories(airlink_clipboard_watch PRIVATE src "${KOMPOZ_DIR}/platform/linux/wayland"
+                               "${KOMPOZ_DIR}/platform/linux/wayland/generated" ${KOMPOZ_WAYLAND_INCLUDE_DIR} ${KOMPOZ_XKBCOMMON_INCLUDE_DIR})
+    target_sources(${AIRLINK_TARGET} PRIVATE $<TARGET_OBJECTS:airlink_clipboard_watch>)
+else()
+    target_sources(${AIRLINK_TARGET} PRIVATE src/clipboard_watch_none.cpp)
+endif()
 target_compile_definitions(${AIRLINK_TARGET} PRIVATE AIRLINK_VERSION="${AIRLINK_VERSION}")
 # kompoz::app (an OBJECT library with the entry points: main, the activity's JNI methods) is
 # linked straight into the final binary, so the linker keeps them.

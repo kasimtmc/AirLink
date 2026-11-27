@@ -48,6 +48,13 @@ void setShareHandler(std::function<void(std::vector<std::string>)> handler);
 // `airlink --panel X Y` (the Plasma panel widget's click, at that screen point): the tray panel
 // asked for there, taken once by the app's loop. Linux desktops only; none elsewhere.
 std::optional<std::pair<int, int>> takePanelRequest();
+// `airlink --phone-app COMPONENT LABEL` (a phone app's shortcut): the apps to open, each in its
+// own window, taken once by the app's loop (component, label). Computers only.
+std::vector<std::pair<std::string, std::string>> takePhoneAppRequests();
+// A phone app's shortcut that starts it that way: in the applications menu (Linux: a .desktop
+// entry; Windows: the Start menu), or on the desktop. Empty when made, else why not.
+bool canMakeAppShortcuts();
+std::string makePhoneAppShortcut(const std::string& label, const std::string& component, const std::string& iconPng, bool onDesktop);
 // What the tray icon shows (starting, connected, nodevices, paused, error), its tooltip and how many
 // times something was received (the widget blinks as it changes), for the Plasma panel widget:
 // $XDG_RUNTIME_DIR/airlink.status (in a Flatpak $XDG_RUNTIME_DIR/app/<id>/), gone as AirLink ends. Linux only.
@@ -137,6 +144,8 @@ void startAdvancedSetup();
 void advancedSetupResult(bool ok, const std::string& message);
 // The command that starts the helper ran (or not).
 void helperStarted(bool ok, const std::string& message);
+// Android with advanced mode: the shell helper reads the clipboard in the background (AppStreams).
+void watchClipboardInBackground();
 
 // Linux HFP Hands-Free audio bridge. Only active for an explicit call and user action.
 enum class CallAudioPhase { Off, Connecting, WaitingForRoute, Active, Error };

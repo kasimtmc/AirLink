@@ -79,6 +79,9 @@ pub struct Entry {
     /// Google Drive's MIME type for its own documents (they are exported to download), else empty.
     #[serde(default)]
     pub kind: String,
+    /// Google Drive's address of the file's small picture (fetched with the token), else empty.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub thumb: String,
 }
 
 /// A drive's used and total space in bytes; `total` is 0 when there is no limit or it is unknown.
@@ -120,27 +123,51 @@ impl Cloud {
             .unwrap_or_default();
         let sessions = accounts
             .into_iter()
-            .map(|account| Arc::new(Session { account, tokens: tokio::sync::Mutex::new(None) }))
+            .map(|account| {
+                Arc::new(Session {
+                    account,
+                    tokens: tokio::sync::Mutex::new(None),
+                })
+            })
             .collect();
-        Ok(Cloud { dir, http: http::client()?, clients, sessions: Mutex::new(sessions) })
+        Ok(Cloud {
+            dir,
+            http: http::client()?,
+            clients,
+            sessions: Mutex::new(sessions),
+        })
     }
 
     /// The providers this build can sign in to (those with an app registration).
     pub fn providers(&self) -> Vec<Provider> {
-        Provider::ALL.into_iter().filter(|p| self.clients.has(*p)).collect()
+        Provider::ALL
+            .into_iter()
+            .filter(|p| self.clients.has(*p))
+            .collect()
     }
 
     pub fn accounts(&self) -> Vec<Account> {
-        self.sessions.lock().unwrap().iter().map(|s| s.account.clone()).collect()
+        self.sessions
+            .lock()
+            .unwrap()
+            .iter()
+            .map(|s| s.account.clone())
+            .collect()
     }
 
     /// Signs in to `provider` in the browser: `open` gets the sign-in page's address. Waits (up
     /// to five minutes) for the browser to come back, then saves the account. Signing in to an
     /// account again replaces its saved sign-in.
     pub async fn connect(&self, provider: Provider, open: impl FnOnce(String)) -> Result<Account> {
-        let client = self.clients.get(provider).ok_or_else(|| anyhow!("{} bu sürümde etkin değil", provider.title()))?;
+        let client = self
+            .clients
+            .get(provider)
+            .ok_or_else(|| anyhow!("{} bu sürümde etkin değil", provider.title()))?;
         let grant = oauth::sign_in(&self.http, provider, &client, open).await?;
-        let refresh = grant.refresh.clone().ok_or_else(|| anyhow!("{} kalıcı oturum vermedi", provider.title()))?;
+        let refresh = grant
+            .refresh
+            .clone()
+            .ok_or_else(|| anyhow!("{} kalıcı oturum vermedi", provider.title()))?;
         let access = grant.access.clone();
         let account = match provider {
             Provider::Onedrive => onedrive::account(&self.http, &access).await?,
@@ -151,7 +178,10 @@ impl Cloud {
         blocking(move || secrets::save(&dir, &id, &refresh)).await?;
         let session = Arc::new(Session {
             account: account.clone(),
-            tokens: tokio::sync::Mutex::new(Some(Tokens { access, expires: grant.expires })),
+            tokens: tokio::sync::Mutex::new(Some(Tokens {
+                access,
+                expires: grant.expires,
+            })),
         });
         {
             let mut sessions = self.sessions.lock().unwrap();
@@ -165,7 +195,10 @@ impl Cloud {
     /// Forgets an account and its saved sign-in on this computer. (It talks to the keyring: call
     /// it off the async runtime's threads.)
     pub fn disconnect(&self, account: &str) -> Result<()> {
-        self.sessions.lock().unwrap().retain(|s| s.account.id != account);
+        self.sessions
+            .lock()
+            .unwrap()
+            .retain(|s| s.account.id != account);
         secrets::delete(&self.dir, account);
         self.save_accounts()
     }
@@ -205,14 +238,26 @@ impl Cloud {
 
     /// Downloads a file into `dir` (a name already there gets " (2)" and on). Google Drive's
     /// own documents come as Office files (or PNG for drawings). Returns the file's path.
-    pub async fn download(&self, account: &str, entry: &Entry, dir: &Path, progress: Progress) -> Result<PathBuf> {
+    pub async fn download(
+        &self,
+        account: &str,
+        entry: &Entry,
+        dir: &Path,
+        progress: Progress,
+    ) -> Result<PathBuf> {
         if entry.folder {
             bail!("klasörler indirilemiyor");
         }
         let call = self.call(account)?;
         let (response, name) = match call.provider() {
-            Provider::Onedrive => (onedrive::download(&call, &entry.id).await?, entry.name.clone()),
-            Provider::Dropbox => (dropbox::download(&call, &entry.id).await?, entry.name.clone()),
+            Provider::Onedrive => (
+                onedrive::download(&call, &entry.id).await?,
+                entry.name.clone(),
+            ),
+            Provider::Dropbox => (
+                dropbox::download(&call, &entry.id).await?,
+                entry.name.clone(),
+            ),
             Provider::Gdrive => gdrive::download(&call, entry).await?,
         };
         http::save(response, dir, &name, entry.size, progress).await
@@ -220,18 +265,38 @@ impl Cloud {
 
     /// Uploads a file, or a folder with everything in it, into `folder`. A name already there is
     /// kept: the new file or folder gets another. Returns the new entry.
-    pub async fn upload(&self, account: &str, folder: &str, path: &Path, progress: Progress) -> Result<Entry> {
-        let meta = tokio::fs::metadata(path).await.with_context(|| format!("{} okunamadı", path.display()))?;
+    pub async fn upload(
+        &self,
+        account: &str,
+        folder: &str,
+        path: &Path,
+        progress: Progress,
+    ) -> Result<Entry> {
+        let meta = tokio::fs::metadata(path)
+            .await
+            .with_context(|| format!("{} okunamadı", path.display()))?;
         if meta.is_dir() {
             return self.upload_folder(account, folder, path, progress).await;
         }
-        self.upload_file(account, folder, path, meta.len(), progress).await
+        self.upload_file(account, folder, path, meta.len(), progress)
+            .await
     }
 
-    async fn upload_file(&self, account: &str, folder: &str, file: &Path, size: u64, progress: Progress) -> Result<Entry> {
+    async fn upload_file(
+        &self,
+        account: &str,
+        folder: &str,
+        file: &Path,
+        size: u64,
+        progress: Progress,
+    ) -> Result<Entry> {
         let name = file_name(file)?;
         let call = self.call(account)?;
-        let source = http::Source { path: file.to_owned(), size, progress };
+        let source = http::Source {
+            path: file.to_owned(),
+            size,
+            progress,
+        };
         match call.provider() {
             Provider::Onedrive => onedrive::upload(&call, folder, &name, source).await,
             Provider::Dropbox => dropbox::upload(&call, folder, &name, source).await,
@@ -241,25 +306,41 @@ impl Cloud {
 
     /// The folder on the drive first, then its subfolders and files, depth first. Progress counts
     /// the bytes of all its files. Symbolic links are left out.
-    async fn upload_folder(&self, account: &str, parent: &str, dir: &Path, progress: Progress) -> Result<Entry> {
+    async fn upload_folder(
+        &self,
+        account: &str,
+        parent: &str,
+        dir: &Path,
+        progress: Progress,
+    ) -> Result<Entry> {
         let (folders, files) = walk(dir).await?;
         let total: u64 = files.iter().map(|(_, size)| size).sum();
-        let root = self.create_folder(account, parent, &file_name(dir)?).await?;
+        let root = self
+            .create_folder(account, parent, &file_name(dir)?)
+            .await?;
         // Each local folder's id on the drive.
         let mut ids = std::collections::HashMap::from([(dir.to_owned(), root.id.clone())]);
         for local in &folders {
-            let (Some(up), Ok(name)) = (local.parent(), file_name(local)) else { continue };
-            let parent_id = ids.get(up).cloned().ok_or_else(|| anyhow!("klasör sırası bozuk: {}", local.display()))?;
+            let (Some(up), Ok(name)) = (local.parent(), file_name(local)) else {
+                continue;
+            };
+            let parent_id = ids
+                .get(up)
+                .cloned()
+                .ok_or_else(|| anyhow!("klasör sırası bozuk: {}", local.display()))?;
             let made = self.create_folder(account, &parent_id, &name).await?;
             ids.insert(local.clone(), made.id);
         }
         let mut before = 0u64;
         progress(0, total);
         for (file, size) in files {
-            let Some(folder_id) = file.parent().and_then(|p| ids.get(p)).cloned() else { continue };
+            let Some(folder_id) = file.parent().and_then(|p| ids.get(p)).cloned() else {
+                continue;
+            };
             let (outer, offset) = (progress.clone(), before);
             let each: Progress = Arc::new(move |done, _| outer(offset + done, total));
-            self.upload_file(account, &folder_id, &file, size, each).await?;
+            self.upload_file(account, &folder_id, &file, size, each)
+                .await?;
             before += size;
         }
         progress(total, total);
@@ -294,6 +375,43 @@ impl Cloud {
         }
     }
 
+    /// A small picture (JPEG or PNG, about 256 pixels) of an image or a video, kept in `cache` so
+    /// each one is fetched once. None when the drive has none for it.
+    pub async fn thumbnail(
+        &self,
+        account: &str,
+        entry: &Entry,
+        cache: &Path,
+    ) -> Result<Option<PathBuf>> {
+        if entry.folder {
+            return Ok(None);
+        }
+        let key = {
+            use std::hash::{Hash, Hasher};
+            let mut h = std::collections::hash_map::DefaultHasher::new();
+            (account, &entry.id, &entry.modified, entry.size).hash(&mut h);
+            h.finish()
+        };
+        let path = cache.join(format!("{key:016x}.img"));
+        if tokio::fs::try_exists(&path).await.unwrap_or(false) {
+            return Ok(Some(path));
+        }
+        let call = self.call(account)?;
+        let bytes = match call.provider() {
+            Provider::Onedrive => onedrive::thumbnail(&call, &entry.id).await?,
+            Provider::Dropbox => dropbox::thumbnail(&call, entry).await?,
+            Provider::Gdrive => gdrive::thumbnail(&call, entry).await?,
+        };
+        let Some(bytes) = bytes.filter(|b| !b.is_empty()) else {
+            return Ok(None);
+        };
+        tokio::fs::create_dir_all(cache).await?;
+        let tmp = path.with_extension("part");
+        tokio::fs::write(&tmp, &bytes).await?;
+        tokio::fs::rename(&tmp, &path).await?;
+        Ok(Some(path))
+    }
+
     fn call(&self, account: &str) -> Result<Call<'_>> {
         let session = self
             .sessions
@@ -303,7 +421,10 @@ impl Cloud {
             .find(|s| s.account.id == account)
             .cloned()
             .ok_or_else(|| anyhow!("bağlı hesap yok: {account}"))?;
-        Ok(Call { cloud: self, session })
+        Ok(Call {
+            cloud: self,
+            session,
+        })
     }
 
     fn save_accounts(&self) -> Result<()> {
@@ -325,11 +446,19 @@ impl Cloud {
             return Ok(t.access.clone());
         }
         let provider = session.account.provider;
-        let client = self.clients.get(provider).ok_or_else(|| anyhow!("{} bu sürümde etkin değil", provider.title()))?;
+        let client = self
+            .clients
+            .get(provider)
+            .ok_or_else(|| anyhow!("{} bu sürümde etkin değil", provider.title()))?;
         let (dir, id) = (self.dir.clone(), session.account.id.clone());
         let refresh = blocking(move || secrets::load(&dir, &id))
             .await
-            .ok_or_else(|| anyhow!("{} oturumu bulunamadı: hesabı yeniden bağlayın", provider.title()))?;
+            .ok_or_else(|| {
+                anyhow!(
+                    "{} oturumu bulunamadı: hesabı yeniden bağlayın",
+                    provider.title()
+                )
+            })?;
         let grant = oauth::refresh(&self.http, provider, &client, &refresh).await?;
         if let Some(new) = grant.refresh.as_deref()
             && new != refresh
@@ -338,7 +467,10 @@ impl Cloud {
             blocking(move || secrets::save(&dir, &id, &new)).await?;
         }
         let access = grant.access.clone();
-        *tokens = Some(Tokens { access: grant.access, expires: grant.expires });
+        *tokens = Some(Tokens {
+            access: grant.access,
+            expires: grant.expires,
+        });
         Ok(access)
     }
 }
@@ -360,7 +492,10 @@ impl Call<'_> {
 
     /// Sends a request built with a bearer token, refreshing the token once on a 401 and waiting
     /// out rate limits (429, 503 with Retry-After) a few times. Fails on any other error status.
-    pub(crate) async fn send(&self, build: impl Fn(&reqwest::Client, &str) -> reqwest::RequestBuilder) -> Result<reqwest::Response> {
+    pub(crate) async fn send(
+        &self,
+        build: impl Fn(&reqwest::Client, &str) -> reqwest::RequestBuilder,
+    ) -> Result<reqwest::Response> {
         let mut fresh = false;
         let mut waits = 0;
         loop {
@@ -371,7 +506,10 @@ impl Call<'_> {
                 fresh = true;
                 continue;
             }
-            if (status == reqwest::StatusCode::TOO_MANY_REQUESTS || status == reqwest::StatusCode::SERVICE_UNAVAILABLE) && waits < 3 {
+            if (status == reqwest::StatusCode::TOO_MANY_REQUESTS
+                || status == reqwest::StatusCode::SERVICE_UNAVAILABLE)
+                && waits < 3
+            {
                 waits += 1;
                 let secs = response
                     .headers()
@@ -387,7 +525,30 @@ impl Call<'_> {
         }
     }
 
-    pub(crate) async fn json(&self, build: impl Fn(&reqwest::Client, &str) -> reqwest::RequestBuilder) -> Result<serde_json::Value> {
+    /// A picture's bytes; None when the provider says there is none (404, 400, 409, 415).
+    pub(crate) async fn picture(
+        &self,
+        build: impl Fn(&reqwest::Client, &str) -> reqwest::RequestBuilder,
+    ) -> Result<Option<Vec<u8>>> {
+        let token = self.cloud.access(&self.session, false).await?;
+        let response = build(&self.cloud.http, &token).send().await?;
+        match response.status().as_u16() {
+            200..=299 => Ok(Some(response.bytes().await?.to_vec())),
+            400 | 404 | 409 | 415 | 422 => Ok(None),
+            _ => Err(anyhow!(
+                "{}",
+                http::error_message(
+                    response.status(),
+                    &response.text().await.unwrap_or_default()
+                )
+            )),
+        }
+    }
+
+    pub(crate) async fn json(
+        &self,
+        build: impl Fn(&reqwest::Client, &str) -> reqwest::RequestBuilder,
+    ) -> Result<serde_json::Value> {
         Ok(self.send(build).await?.json().await?)
     }
 }
@@ -404,7 +565,9 @@ async fn walk(dir: &Path) -> Result<(Vec<PathBuf>, Vec<(PathBuf, u64)>)> {
     let (mut folders, mut files) = (Vec::new(), Vec::new());
     let mut pending = vec![dir.to_owned()];
     while let Some(current) = pending.pop() {
-        let mut read = tokio::fs::read_dir(&current).await.with_context(|| format!("{} okunamadı", current.display()))?;
+        let mut read = tokio::fs::read_dir(&current)
+            .await
+            .with_context(|| format!("{} okunamadı", current.display()))?;
         let mut children = Vec::new();
         while let Some(item) = read.next_entry().await? {
             children.push(item);
@@ -427,10 +590,11 @@ fn sort(entries: &mut [Entry]) {
     entries.sort_by_cached_key(|e| (!e.folder, e.name.to_lowercase()));
 }
 
-
 /// The keyring's calls block (D-Bus on Linux): off the runtime's worker threads.
 async fn blocking<T: Send + 'static>(f: impl FnOnce() -> T + Send + 'static) -> T {
-    tokio::task::spawn_blocking(f).await.expect("keyring call panicked")
+    tokio::task::spawn_blocking(f)
+        .await
+        .expect("keyring call panicked")
 }
 
 #[cfg(test)]
@@ -448,8 +612,14 @@ mod tests {
         std::os::unix::fs::symlink(root.join("x.txt"), root.join("link")).unwrap();
         let (folders, files) = walk(&root).await.unwrap();
         assert_eq!(folders, vec![root.join("a"), root.join("a/b")]);
-        let mut files: Vec<_> = files.into_iter().map(|(p, s)| (p.strip_prefix(&root).unwrap().to_owned(), s)).collect();
+        let mut files: Vec<_> = files
+            .into_iter()
+            .map(|(p, s)| (p.strip_prefix(&root).unwrap().to_owned(), s))
+            .collect();
         files.sort();
-        assert_eq!(files, vec![(PathBuf::from("a/b/y.txt"), 2), (PathBuf::from("x.txt"), 5)]);
+        assert_eq!(
+            files,
+            vec![(PathBuf::from("a/b/y.txt"), 2), (PathBuf::from("x.txt"), 5)]
+        );
     }
 }

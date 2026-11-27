@@ -37,6 +37,35 @@ object AppStreams {
     private var starting = false
     private var port = 0
     private var token = ""
+    /** Advanced mode is set up: the helper keeps the clipboard watched (started again when it ends). */
+    @Volatile private var clipboardWanted = false
+    private var clipboardRetries = 0
+    private val main = Handler(Looper.getMainLooper())
+
+    /**
+     * Android keeps the clipboard from an app in the background (and from a closed one): the
+     * shell helper may read it, so with advanced mode it watches it and tells each copy here.
+     * Wireless debugging off (the helper can't start, or its connection ends): tried again later.
+     */
+    @JvmStatic
+    fun watchClipboard() {
+        // (called as the core starts, inside nativeInit: once it has returned)
+        if (!MainActivity.nativeReady) {
+            main.postDelayed(::watchClipboard, 1000)
+            return
+        }
+        worker.execute {
+            clipboardWanted = true
+            toHelper(JSONObject().put("cmd", "clipboard"))
+        }
+    }
+
+    private fun watchClipboardLater() {
+        if (!clipboardWanted) return
+        // 1 min, then 5 (wireless debugging stays off until it is turned on again)
+        val delay = if (clipboardRetries++ < 3) 60_000L else 300_000L
+        main.postDelayed({ if (helper == null) watchClipboard() }, delay)
+    }
 
     @JvmStatic
     fun handle(context: Context, peerId: String, kind: String, request: JSONObject) {
@@ -135,7 +164,7 @@ object AppStreams {
             } catch (_: Exception) { closeHelper() }
         }
         synchronized(waiting) { waiting.add(line) }
-        if (starting) return
+        if (starting || !MainActivity.nativeReady) return
         starting = true
         val random = SecureRandom()
         port = 20000 + random.nextInt(40000)
@@ -143,7 +172,7 @@ object AppStreams {
         val commandLine = "CLASSPATH=\$(pm path com.plyg.airlink | head -1 | cut -d: -f2) " +
             "setsid app_process / com.plyg.airlink.helper.Helper serve $port $token " +
             "</dev/null >/data/local/tmp/airlink-helper.log 2>&1 &"
-        if (MainActivity.nativeReady) MainActivity.startHelper(commandLine)
+        MainActivity.startHelper(commandLine)
     }
 
     @JvmStatic
@@ -153,6 +182,7 @@ object AppStreams {
             if (!ok) {
                 starting = false
                 failAll(Texts.trf("Gelişmiş moda bağlanılamadı: {}", message))
+                watchClipboardLater()
                 return@execute
             }
             for (attempt in 0 until 40) {
@@ -174,8 +204,10 @@ object AppStreams {
             val output = helperOut
             if (helper == null || output == null) {
                 failAll(Texts.tr("Yardımcı başlamadı (/data/local/tmp/airlink-helper.log)"))
+                watchClipboardLater()
                 return@execute
             }
+            clipboardRetries = 0
             synchronized(waiting) {
                 try {
                     while (waiting.isNotEmpty()) output.write(waiting.removeFirst().toByteArray(StandardCharsets.UTF_8))
@@ -196,7 +228,14 @@ object AppStreams {
                     val payload = ByteArray(length - 5)
                     input.readFully(payload)
                     val peer = sessionPeer[session]
-                    if (type == 2 && peer != null) {
+                    if (type == 1 && session == 0) {
+                        val event = JSONObject(payload.toString(StandardCharsets.UTF_8))
+                        if (event.optString("event") == "clipboard") {
+                            val text = event.optString("text")
+                            val sensitive = event.optBoolean("sensitive")
+                            main.post { if (MainActivity.nativeReady) nativeClipboard(text, sensitive) }
+                        }
+                    } else if (type == 2 && peer != null) {
                         if (MainActivity.nativeReady) nativeSendFrame(peer, "app:$session", payload)
                     } else if (type == 1 && peer != null) {
                         val event = JSONObject(payload.toString(StandardCharsets.UTF_8)).put("session", session)
@@ -211,7 +250,10 @@ object AppStreams {
         } catch (error: Exception) {
             android.util.Log.i("AirLink", "helper connection ended", error)
         } finally {
-            worker.execute(::closeHelper)
+            worker.execute {
+                closeHelper()
+                watchClipboardLater()
+            }
         }
     }
 
@@ -235,6 +277,7 @@ object AppStreams {
         sessionPeer.clear()
     }
 
+    @JvmStatic private external fun nativeClipboard(text: String, sensitive: Boolean)
     @JvmStatic private external fun nativeSendFrame(peerId: String, name: String, jpeg: ByteArray)
     @JvmStatic private external fun nativeStopFrames(peerId: String, name: String)
 }

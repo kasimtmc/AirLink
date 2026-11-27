@@ -36,6 +36,7 @@ fn entry(v: &Value) -> Entry {
         size: v["size"].as_u64().unwrap_or(0),
         modified: v["server_modified"].as_str().unwrap_or_default().to_owned(),
         kind: String::new(),
+        thumb: String::new(),
     }
 }
 
@@ -55,35 +56,68 @@ pub(crate) async fn account(http: &reqwest::Client, access: &str) -> Result<Acco
     .await?
     .json()
     .await?;
-    let id = me["account_id"].as_str().ok_or_else(|| anyhow!("Dropbox hesabı okunamadı"))?;
+    let id = me["account_id"]
+        .as_str()
+        .ok_or_else(|| anyhow!("Dropbox hesabı okunamadı"))?;
     let email = me["email"].as_str().unwrap_or_default();
     Ok(Account {
         id: format!("dropbox:{id}"),
         provider: Provider::Dropbox,
-        name: me["name"]["display_name"].as_str().filter(|n| !n.is_empty()).unwrap_or(email).to_owned(),
+        name: me["name"]["display_name"]
+            .as_str()
+            .filter(|n| !n.is_empty())
+            .unwrap_or(email)
+            .to_owned(),
         email: email.to_owned(),
     })
 }
 
 async fn rpc(call: &Call<'_>, endpoint: &str, body: Value) -> Result<Value> {
-    call.json(|h, t| h.post(format!("{API}/{endpoint}")).bearer_auth(t).json(&body)).await
+    call.json(|h, t| {
+        h.post(format!("{API}/{endpoint}"))
+            .bearer_auth(t)
+            .json(&body)
+    })
+    .await
 }
 
 pub(crate) async fn list(call: &Call<'_>, folder: &str) -> Result<Vec<Entry>> {
-    let mut page = rpc(call, "files/list_folder", json!({"path": folder, "limit": 2000})).await?;
+    let mut page = rpc(
+        call,
+        "files/list_folder",
+        json!({"path": folder, "limit": 2000}),
+    )
+    .await?;
     let mut out = Vec::new();
     loop {
-        out.extend(page["entries"].as_array().into_iter().flatten().filter(|e| e[".tag"] != "deleted").map(entry));
+        out.extend(
+            page["entries"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter(|e| e[".tag"] != "deleted")
+                .map(entry),
+        );
         if page["has_more"] != true {
             return Ok(out);
         }
         let cursor = page["cursor"].clone();
-        page = rpc(call, "files/list_folder/continue", json!({"cursor": cursor})).await?;
+        page = rpc(
+            call,
+            "files/list_folder/continue",
+            json!({"cursor": cursor}),
+        )
+        .await?;
     }
 }
 
 pub(crate) async fn search(call: &Call<'_>, query: &str) -> Result<Vec<Entry>> {
-    let v = rpc(call, "files/search_v2", json!({"query": query, "options": {"max_results": 200}})).await?;
+    let v = rpc(
+        call,
+        "files/search_v2",
+        json!({"query": query, "options": {"max_results": 200}}),
+    )
+    .await?;
     Ok(v["matches"]
         .as_array()
         .into_iter()
@@ -95,17 +129,59 @@ pub(crate) async fn search(call: &Call<'_>, query: &str) -> Result<Vec<Entry>> {
 
 pub(crate) async fn quota(call: &Call<'_>) -> Result<Quota> {
     let v = call
-        .json(|h, t| h.post(format!("{API}/users/get_space_usage")).bearer_auth(t).header("Content-Type", "application/json").body("null"))
+        .json(|h, t| {
+            h.post(format!("{API}/users/get_space_usage"))
+                .bearer_auth(t)
+                .header("Content-Type", "application/json")
+                .body("null")
+        })
         .await?;
-    Ok(Quota { used: v["used"].as_u64().unwrap_or(0), total: v["allocation"]["allocated"].as_u64().unwrap_or(0) })
+    Ok(Quota {
+        used: v["used"].as_u64().unwrap_or(0),
+        total: v["allocation"]["allocated"].as_u64().unwrap_or(0),
+    })
 }
 
 pub(crate) async fn download(call: &Call<'_>, path: &str) -> Result<reqwest::Response> {
     let header = arg(&json!({"path": path}));
-    call.send(|h, t| h.post(format!("{CONTENT}/files/download")).bearer_auth(t).header("Dropbox-API-Arg", &header)).await
+    call.send(|h, t| {
+        h.post(format!("{CONTENT}/files/download"))
+            .bearer_auth(t)
+            .header("Dropbox-API-Arg", &header)
+    })
+    .await
 }
 
-pub(crate) async fn upload(call: &Call<'_>, folder: &str, name: &str, source: Source) -> Result<Entry> {
+/// Dropbox makes pictures of images only (not videos).
+pub(crate) async fn thumbnail(call: &Call<'_>, entry: &Entry) -> Result<Option<Vec<u8>>> {
+    let ext = entry
+        .name
+        .rsplit_once('.')
+        .map(|(_, e)| e.to_ascii_lowercase())
+        .unwrap_or_default();
+    if !matches!(
+        ext.as_str(),
+        "jpg" | "jpeg" | "png" | "tiff" | "tif" | "gif" | "webp" | "ppm" | "bmp" | "heic"
+    ) {
+        return Ok(None);
+    }
+    let header = arg(
+        &json!({"resource": {".tag": "path", "path": entry.id}, "format": "jpeg", "size": "w256h256", "mode": "fitone_bestfit"}),
+    );
+    call.picture(|h, t| {
+        h.post(format!("{CONTENT}/files/get_thumbnail_v2"))
+            .bearer_auth(t)
+            .header("Dropbox-API-Arg", &header)
+    })
+    .await
+}
+
+pub(crate) async fn upload(
+    call: &Call<'_>,
+    folder: &str,
+    name: &str,
+    source: Source,
+) -> Result<Entry> {
     let commit = json!({"path": child(folder, name), "mode": "add", "autorename": true});
     let progress = source.progress.clone();
     let total = source.size;
@@ -132,29 +208,52 @@ pub(crate) async fn upload(call: &Call<'_>, folder: &str, name: &str, source: So
     }
     let first = read_chunk(&mut file, CHUNK).await?;
     let mut offset = first.len() as u64;
-    let start: Value = content("files/upload_session/start", json!({"close": false}), first).await?.json().await?;
-    let session = start["session_id"].as_str().ok_or_else(|| anyhow!("Dropbox yükleme oturumu açılamadı"))?.to_owned();
+    let start: Value = content("files/upload_session/start", json!({"close": false}), first)
+        .await?
+        .json()
+        .await?;
+    let session = start["session_id"]
+        .as_str()
+        .ok_or_else(|| anyhow!("Dropbox yükleme oturumu açılamadı"))?
+        .to_owned();
     progress(offset, total);
     loop {
         let chunk = read_chunk(&mut file, CHUNK).await?;
         let len = chunk.len() as u64;
         let cursor = json!({"session_id": session, "offset": offset});
         if offset + len >= total {
-            let v: Value = content("files/upload_session/finish", json!({"cursor": cursor, "commit": commit}), chunk).await?.json().await?;
+            let v: Value = content(
+                "files/upload_session/finish",
+                json!({"cursor": cursor, "commit": commit}),
+                chunk,
+            )
+            .await?
+            .json()
+            .await?;
             progress(total, total);
             return Ok(entry(&v));
         }
         if chunk.is_empty() {
             return Err(anyhow!("dosya yüklenirken kısaldı"));
         }
-        content("files/upload_session/append_v2", json!({"cursor": cursor, "close": false}), chunk).await?;
+        content(
+            "files/upload_session/append_v2",
+            json!({"cursor": cursor, "close": false}),
+            chunk,
+        )
+        .await?;
         offset += len;
         progress(offset, total);
     }
 }
 
 pub(crate) async fn create_folder(call: &Call<'_>, parent: &str, name: &str) -> Result<Entry> {
-    let v = rpc(call, "files/create_folder_v2", json!({"path": child(parent, name), "autorename": true})).await?;
+    let v = rpc(
+        call,
+        "files/create_folder_v2",
+        json!({"path": child(parent, name), "autorename": true}),
+    )
+    .await?;
     let mut e = entry(&v["metadata"]);
     e.folder = true;
     Ok(e)
@@ -162,7 +261,12 @@ pub(crate) async fn create_folder(call: &Call<'_>, parent: &str, name: &str) -> 
 
 pub(crate) async fn rename(call: &Call<'_>, path: &str, name: &str) -> Result<Entry> {
     let parent = path.rsplit_once('/').map(|(p, _)| p).unwrap_or("");
-    let v = rpc(call, "files/move_v2", json!({"from_path": path, "to_path": child(parent, name), "autorename": false})).await?;
+    let v = rpc(
+        call,
+        "files/move_v2",
+        json!({"from_path": path, "to_path": child(parent, name), "autorename": false}),
+    )
+    .await?;
     Ok(entry(&v["metadata"]))
 }
 
@@ -177,7 +281,10 @@ mod tests {
 
     #[test]
     fn header_is_ascii() {
-        assert_eq!(arg(&json!({"path": "/A\u{11f}a\u{e7} \u{1f600}"})), "{\"path\":\"/A\\u011fa\\u00e7 \\ud83d\\ude00\"}");
+        assert_eq!(
+            arg(&json!({"path": "/A\u{11f}a\u{e7} \u{1f600}"})),
+            "{\"path\":\"/A\\u011fa\\u00e7 \\ud83d\\ude00\"}"
+        );
     }
 
     #[test]

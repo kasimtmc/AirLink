@@ -6,6 +6,7 @@
 
 #include <algorithm>
 #include <array>
+#include <chrono>
 #include <cctype>
 #include <cstdio>
 #include <cstdlib>
@@ -15,6 +16,7 @@
 
 #include "app_icons.hpp"
 #include "app_state.hpp"
+#include "clipboard_watch.hpp"
 #include "i18n.hpp"
 #include "cloud_state.hpp"
 #include "json.hpp"
@@ -59,6 +61,112 @@ inline std::string cloudDate(const std::string& rfc3339) {
     return buf;
 }
 
+// A file's kind by its extension (or a Google document's type), for its icon and color. Images
+// and videos show their own picture (cloud_state's isPicture); kinds with none get the plain file.
+enum class FileKindId { Other, Image, Video, Pdf, Document, Sheet, Slides, Archive, Audio, Code, Text, Android, Program, Disc, Book };
+
+inline FileKindId fileKindOf(const std::string& name, const std::string& googleKind = {}) {
+    if (!googleKind.empty()) {
+        if (googleKind.ends_with(".document")) return FileKindId::Document;
+        if (googleKind.ends_with(".spreadsheet")) return FileKindId::Sheet;
+        if (googleKind.ends_with(".presentation")) return FileKindId::Slides;
+        if (googleKind.ends_with(".drawing")) return FileKindId::Image;
+        return FileKindId::Other;
+    }
+    auto dot = name.rfind('.');
+    if (dot == std::string::npos) return FileKindId::Other;
+    std::string ext = name.substr(dot + 1);
+    for (char& c : ext) c = char(std::tolower(static_cast<unsigned char>(c)));
+    static const std::pair<FileKindId, std::vector<std::string>> table[] = {
+        {FileKindId::Video, {"mp4", "m4v", "mov", "mkv", "webm", "avi", "3gp", "wmv", "flv", "mpg", "mpeg", "ts"}},
+        {FileKindId::Image, {"jpg", "jpeg", "png", "gif", "webp", "bmp", "tif", "tiff", "heic", "heif", "avif", "svg", "ico", "raw", "dng", "psd"}},
+        {FileKindId::Pdf, {"pdf"}},
+        {FileKindId::Document, {"doc", "docx", "odt", "rtf", "pages"}},
+        {FileKindId::Sheet, {"xls", "xlsx", "ods", "csv", "tsv", "numbers"}},
+        {FileKindId::Slides, {"ppt", "pptx", "odp", "key"}},
+        {FileKindId::Archive, {"zip", "rar", "7z", "tar", "gz", "tgz", "bz2", "xz", "zst", "cab"}},
+        {FileKindId::Audio, {"mp3", "wav", "flac", "ogg", "opus", "m4a", "aac", "wma", "mid", "midi"}},
+        {FileKindId::Code, {"c", "cc", "cpp", "h", "hpp", "rs", "py", "js", "ts", "tsx", "jsx", "java", "kt", "go", "cs", "php", "rb", "swift",
+                            "sh", "html", "css", "json", "xml", "yaml", "yml", "toml", "sql", "lua", "dart", "ino"}},
+        {FileKindId::Text, {"txt", "md", "log", "ini", "cfg", "conf", "srt"}},
+        {FileKindId::Android, {"apk", "aab", "xapk", "apks"}},
+        {FileKindId::Program, {"exe", "msi", "msix", "appx", "deb", "rpm", "appimage", "flatpak", "dmg", "pkg", "bat", "cmd", "jar"}},
+        {FileKindId::Disc, {"iso", "img", "vhd", "vhdx", "vmdk", "qcow2"}},
+        {FileKindId::Book, {"epub", "mobi", "azw3", "djvu", "fb2"}},
+    };
+    for (const auto& [kind, exts] : table)
+        if (std::find(exts.begin(), exts.end(), ext) != exts.end()) return kind;
+    return FileKindId::Other;
+}
+
+inline const kompoz::ImageVector& fileKindIcon(const std::string& name, const std::string& googleKind) {
+    switch (fileKindOf(name, googleKind)) {
+        case FileKindId::Image: return AppIcons::Image;
+        case FileKindId::Video: return AppIcons::Movie;
+        case FileKindId::Pdf: return AppIcons::PictureAsPdf;
+        case FileKindId::Document: return AppIcons::Description;
+        case FileKindId::Sheet: return AppIcons::TableChart;
+        case FileKindId::Slides: return AppIcons::Slideshow;
+        case FileKindId::Archive: return AppIcons::Archive;
+        case FileKindId::Audio: return AppIcons::MusicNote;
+        case FileKindId::Code: return AppIcons::Code;
+        case FileKindId::Text: return AppIcons::Article;
+        case FileKindId::Android: return AppIcons::Android;
+        case FileKindId::Program: return AppIcons::Terminal;
+        case FileKindId::Disc: return AppIcons::Album;
+        case FileKindId::Book: return AppIcons::Book;
+        default: return AppIcons::InsertDriveFile;
+    }
+}
+
+inline std::string previewImagePath() {
+    const char* path = std::getenv("AIRLINK_PREVIEW_IMAGE");
+    return path ? path : "/tmp/airlink-preview.jpg";
+}
+
+// A phone app's right-click menu in the Apps tab.
+inline std::vector<kompoz::ContextMenuItem> appMenu(const App& app, const PhoneApp& a) {
+    std::vector<kompoz::ContextMenuItem> items;
+    items.push_back(kompoz::ContextMenuItem{tr("Aç"), [app, a] { app.openPhoneApp(a); }});
+    if (app.canMakeAppShortcuts()) {
+        items.push_back(kompoz::ContextMenuItem{tr("Uygulama menüsüne kısayol ekle"), [app, a] { app.makeAppShortcut(a, false); }});
+        items.push_back(kompoz::ContextMenuItem{tr("Masaüstüne kısayol ekle"), [app, a] { app.makeAppShortcut(a, true); }});
+    }
+    return items;
+}
+
+// A local image AsyncImage can show small (JPEG, PNG, WebP, BMP).
+inline bool showsOwnPicture(const std::string& name) {
+    auto dot = name.rfind('.');
+    if (dot == std::string::npos) return false;
+    std::string ext = name.substr(dot + 1);
+    for (char& c : ext) c = char(std::tolower(static_cast<unsigned char>(c)));
+    return ext == "jpg" || ext == "jpeg" || ext == "png" || ext == "webp" || ext == "bmp";
+}
+
+// The kind's own color (as file managers and the drives' web pages color them); false: the theme's.
+inline bool hasFileKindColor(const std::string& name, const std::string& googleKind) {
+    auto k = fileKindOf(name, googleKind);
+    return k != FileKindId::Other && k != FileKindId::Image && k != FileKindId::Video;
+}
+inline Color fileKindColor(const std::string& name, const std::string& googleKind) {
+    switch (fileKindOf(name, googleKind)) {
+        case FileKindId::Pdf: return Color::argb(0xFFE53935);
+        case FileKindId::Document: return Color::argb(0xFF1E88E5);
+        case FileKindId::Sheet: return Color::argb(0xFF43A047);
+        case FileKindId::Slides: return Color::argb(0xFFFB8C00);
+        case FileKindId::Archive: return Color::argb(0xFF8D6E63);
+        case FileKindId::Audio: return Color::argb(0xFF8E24AA);
+        case FileKindId::Code: return Color::argb(0xFF00897B);
+        case FileKindId::Text: return Color::argb(0xFF78909C);
+        case FileKindId::Android: return Color::argb(0xFF7CB342);
+        case FileKindId::Program: return Color::argb(0xFF546E7A);
+        case FileKindId::Disc: return Color::argb(0xFF6D4C41);
+        case FileKindId::Book: return Color::argb(0xFFD81B60);
+        default: return Color::argb(0xFF757575);
+    }
+}
+
 // A drive entry's second line: "3.4 MB · 27.11.2026 14:05", a folder's date alone.
 inline std::string cloudEntryLine(const CloudEntry& e) {
     std::string date = cloudDate(e.modified);
@@ -82,6 +190,43 @@ inline std::string cloudTabLabel(const std::vector<CloudAccount>& all, const Clo
     if (same < 2) return providerTitle(a.provider);
     std::string who = a.email.empty() ? a.name : a.email.substr(0, a.email.find('@'));
     return providerTitle(a.provider) + " · " + who;
+}
+
+// The tray panel's tabs under the devices: the phone's (when one is online) and a drive's each.
+constexpr int TRAY_NOTIFICATIONS = 0, TRAY_MESSAGES = 1, TRAY_CALLS = 2, TRAY_CONTACTS = 3, TRAY_DRIVE = 100;
+
+inline std::vector<int> trayTabs(bool phone, bool notifications, int drives) {
+    std::vector<int> tabs;
+    if (phone || notifications) tabs.push_back(TRAY_NOTIFICATIONS);
+    if (phone) {
+        tabs.push_back(TRAY_MESSAGES);
+        tabs.push_back(TRAY_CALLS);
+        tabs.push_back(TRAY_CONTACTS);
+    }
+    for (int i = 0; i < drives; ++i) tabs.push_back(TRAY_DRIVE + i);
+    return tabs;
+}
+
+inline const kompoz::ImageVector& trayTabIcon(int tab) {
+    switch (tab) {
+        case TRAY_NOTIFICATIONS: return kompoz::Icons::Filled::Notifications;
+        case TRAY_MESSAGES: return AppIcons::Sms;
+        case TRAY_CALLS: return AppIcons::Phone;
+        case TRAY_CONTACTS: return AppIcons::Contacts;
+        default: return AppIcons::Cloud;
+    }
+}
+
+inline std::string trayTabTitle(int tab, const std::vector<CloudAccount>& accounts) {
+    switch (tab) {
+        case TRAY_NOTIFICATIONS: return tr("Bildirimler");
+        case TRAY_MESSAGES: return tr("Son mesajlar");
+        case TRAY_CALLS: return tr("Son çağrılar");
+        case TRAY_CONTACTS: return tr("Rehber");
+        default:
+            if (tab >= TRAY_DRIVE && size_t(tab - TRAY_DRIVE) < accounts.size()) return cloudTabLabel(accounts, accounts[size_t(tab - TRAY_DRIVE)]);
+            return {};
+    }
 }
 
 inline std::string cloudTitle(const CloudAccount& a) {
@@ -205,6 +350,16 @@ inline std::string shortDate(int64_t ms) {
     char buf[16];
     std::strftime(buf, sizeof buf, a.tm_yday == b.tm_yday && a.tm_year == b.tm_year ? "%H:%M" : "%d.%m", &a);
     return buf;
+}
+
+// A history line: "Yüklendi · 3.4 MB · 14:05", a failure's reason in place of the size.
+inline std::string cloudRecordLine(const CloudRecord& r, const std::string& peerName) {
+    std::string what = !r.error.empty() ? r.error
+                       : r.upload       ? std::string(tr("Yüklendi"))
+                       : !r.sendTo.empty() ? trf("{} cihazına gönderildi", peerName)
+                                           : std::string(tr("İndirildi"));
+    std::string size = r.error.empty() && r.size > 0 ? " · " + humanSize(r.size) : std::string();
+    return what + size + " · " + shortDate(r.time);
 }
 
 // "1 dk 05 sn", "42 sn".
@@ -426,6 +581,21 @@ inline bool clipSensitive(const Clipboard& clip) {
     auto entry = clip.getClipEntry().value;
     return (entry && entry->clipMetadata.isSensitive) || airlink::platform::clipboardMarkedSensitive();
 }
+// What is on the clipboard now: the watch's latest copy where there is one (Wayland, also without
+// the focus), else what the window reads.
+inline std::string clipboardText(const ClipboardManager& manager) {
+    if (auto w = airlink::platform::watchedClipboard()) return w->text;
+    return manager.getText();
+}
+// A paired device's text onto the clipboard: through the watch where there is one (Wayland: also
+// with the window hidden), else the window's own clipboard.
+inline void putOnClipboard(const ClipboardManager& manager, const std::string& text, bool sensitive) {
+    if (!airlink::platform::writeClipboard(text, sensitive)) manager.setText(text);
+}
+inline bool clipboardSensitive(const Clipboard& clip) {
+    if (auto w = airlink::platform::watchedClipboard()) return w->sensitive;
+    return clipSensitive(clip);
+}
 inline void setAppForeground(bool focused) { airlink::platform::setAppForeground(focused); }
 inline void publishStatus(const std::string& status, const std::string& tip, int received) {
     airlink::platform::publishStatus(status, tip, received);
@@ -470,7 +640,9 @@ inline const std::vector<std::string>& desktopKeys() {
     return list;
 }
 
-inline int64_t nowMs() { return int64_t(std::time(nullptr)) * 1000; }
+inline int64_t nowMs() {
+    return std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch()).count();
+}
 
 // "03:25" (or "1:03:25") since `since` (ms).
 inline std::string elapsed(int64_t since, int64_t now) {

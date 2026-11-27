@@ -148,16 +148,92 @@ pub async fn shell(dir: &Path, command: &str) -> Result<String> {
 }
 
 /// As [`shell`], with an optional port from Android's Wireless debugging screen when this
-/// device does not expose its own `_adb-tls-connect` mDNS record to apps.
+/// device does not expose its own `_adb-tls-connect` mDNS record to apps. Wireless debugging
+/// gets another port each time it is turned on: when the given one (or mDNS's) doesn't answer,
+/// this device's own open ports are tried, and the one adbd answers on is used.
 pub async fn shell_at(dir: &Path, command: &str, port: Option<u16>) -> Result<String> {
+    key(dir)?; // (not paired yet: said before anything is tried)
+    let mut tried = Vec::new();
+    let mut last: Option<anyhow::Error> = None;
+    if let Some(port) = port {
+        if port == 0 {
+            bail!("wireless debugging port must be between 1 and 65535");
+        }
+        tried.push(port);
+        match shell_on(dir, command, port).await {
+            Ok(out) => return Ok(out),
+            Err(e) => last = Some(e),
+        }
+    }
+    if let Ok(found) = discover(
+        CONNECT_SERVICE,
+        Duration::from_secs(if port.is_some() { 3 } else { 5 }),
+    )
+    .await
+        && !tried.contains(&found)
+    {
+        tried.push(found);
+        match shell_on(dir, command, found).await {
+            Ok(out) => return Ok(out),
+            Err(e) => last = Some(e),
+        }
+    }
+    for open in local_open_ports().await {
+        if tried.contains(&open) {
+            continue;
+        }
+        // (another app's server there: its handshake fails, or doesn't come)
+        match tokio::time::timeout(Duration::from_secs(3), shell_on(dir, command, open)).await {
+            Ok(Ok(out)) => {
+                debug!(port = open, "wireless debugging found by its port");
+                return Ok(out);
+            }
+            Ok(Err(e)) => {
+                last.get_or_insert(e);
+            }
+            Err(_) => {}
+        }
+    }
+    Err(last.unwrap_or_else(|| anyhow!("wireless debugging is off")))
+}
+
+/// This device's TCP ports that take a connection on the loopback, in the range Android gives
+/// out on its own (adbd's wireless debugging port is one of them).
+async fn local_open_ports() -> Vec<u16> {
+    const FIRST: u16 = 32768;
+    const LAST: u16 = 60999;
+    let mut open = Vec::new();
+    let mut tasks = tokio::task::JoinSet::new();
+    let mut next = FIRST as u32;
+    loop {
+        while tasks.len() < 512 && next <= LAST as u32 {
+            let port = next as u16;
+            next += 1;
+            tasks.spawn(async move {
+                let addr = std::net::SocketAddr::from(([127, 0, 0, 1], port));
+                let ok = matches!(
+                    tokio::time::timeout(
+                        Duration::from_millis(300),
+                        tokio::net::TcpStream::connect(addr)
+                    )
+                    .await,
+                    Ok(Ok(_))
+                );
+                ok.then_some(port)
+            });
+        }
+        match tasks.join_next().await {
+            Some(Ok(Some(port))) => open.push(port),
+            Some(_) => {}
+            None => break,
+        }
+    }
+    open.sort_unstable();
+    open
+}
+
+async fn shell_on(dir: &Path, command: &str, port: u16) -> Result<String> {
     let key = key(dir)?;
-    let port = match port {
-        Some(port) if port > 0 => port,
-        Some(_) => bail!("wireless debugging port must be between 1 and 65535"),
-        None => discover(CONNECT_SERVICE, Duration::from_secs(5))
-            .await
-            .context("wireless debugging is off")?,
-    };
     let identity = TlsIdentity::from_key(&key, &mut OsRng).map_err(|e| anyhow!("tls: {e}"))?;
     let tls = TlsClientConfig::adb(&identity).map_err(|e| anyhow!("tls: {e}"))?;
     let transport = any::connect::<Rt, Usb>(&format!("tcp://127.0.0.1:{port}"))

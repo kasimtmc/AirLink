@@ -1,4 +1,5 @@
 #include "app_state.hpp"
+#include "clipboard_watch.hpp"
 
 #include <airlink.h>
 
@@ -167,6 +168,9 @@ struct App::Impl {
     std::map<int, std::vector<PhoneApp>> appsParts;   // its parts so far
     MutableState<std::vector<AppWindow>> appWindows = mutableStateOf(std::vector<AppWindow>{});
     int nextSession = 1;
+    // Apps a shortcut asked for (`--phone-app`), opened once the phone is online.
+    std::vector<std::pair<std::string, std::string>> pendingApps;
+    int64_t pendingSince = 0;
     std::map<std::string, AirlinkH264Decoder*> videoDecoders;
 
     kompoz::ImageBitmap decodeMedia(const std::string& stream, const uint8_t* data, size_t len) {
@@ -284,6 +288,7 @@ struct App::Impl {
     std::string lastClipboard;   // this device's clipboard as last seen or set
     bool lastClipboardSensitive = false;
     MutableState<bool> passwordPrivacy = mutableStateOf(true);
+    MutableState<bool> filesGrid = mutableStateOf(false);
     MutableState<bool> passwordPending = mutableStateOf(false);
     std::string pendingPassword;  // waiting for the user's yes (password privacy)
     std::string settingPath(const char* name) const {
@@ -327,6 +332,7 @@ struct App::Impl {
     }
 
     void start() {
+        platform::startClipboardWatch();  // (Wayland: copies seen without the window's focus too)
         startAttempted = true;
         auto cfg = *platform::config();
         if (!cfg.dataDir.empty()) {
@@ -373,7 +379,16 @@ struct App::Impl {
                           .dataDir = info["data_dir"].str()});
         loadLanguageSetting(settingPath("language"));
         loadFileHistory();
+        // A phone set up for advanced mode: its shell helper watches the clipboard, which Android
+        // keeps from an app in the background.
+        // (set up before this version: the saved port says so)
+        auto adb = std::filesystem::path(cfg.dataDir) / "adb";
+        if (std::filesystem::exists(adb / "ready") || std::filesystem::exists(adb / "connect-port")) platform::watchClipboardInBackground();
         Drives::get().attach(node, me.peek().downloadDir, me.peek().dataDir);
+        if (auto path = settingPath("files-layout"); !path.empty()) {
+            std::string saved;
+            if (std::ifstream in(path); in >> saved) filesGrid.set(saved == "grid");
+        }
         if (auto path = settingPath("password-privacy"); !path.empty()) {
             std::ifstream in(path);
             int on = 1;
@@ -562,7 +577,10 @@ struct App::Impl {
         } else if (kind == "clipboard_received") {
             bool secret = e["sensitive"].boolean();
             incomingClipboard.push_back(e["text"].str());
-            if (secret) lastClipboardSensitive = true;
+            // (now, not when the screen takes it: a phone in the background puts it on the
+            // clipboard itself, and its helper's watch must not send it back)
+            lastClipboard = e["text"].str();
+            lastClipboardSensitive = secret;
             rememberClipboard(e["peer"]["id"].str(), e["text"].str(), true, secret);
             notices.push_back(secret ? trf("{} bir şifre gönderdi", e["peer"]["name"].str()) : trf("{} panosunu paylaştı", e["peer"]["name"].str()));
             platform::notifyReceived(e["peer"]["name"].str(), {}, e["text"].str(), secret);
@@ -614,6 +632,10 @@ struct App::Impl {
                     std::string out = e["value"].str();
                     bool shell = ok && out.find("uid=2000") != std::string::npos;
                     advancedReady.set(shell);
+                    if (shell) {
+                        std::ofstream(std::filesystem::path(platform::config()->dataDir) / "adb" / "ready") << 1;
+                        platform::watchClipboardInBackground();
+                    }
                     advancedStatus.set(shell ? trf("Hazır: kabuk yetkisiyle çalışıyor ({})", out.substr(0, out.find(' ')))
                                              : ok ? trf("Beklenmeyen yanıt: {}", out) : trf("Bağlanılamadı: {}", err));
                     platform::advancedSetupResult(shell, shell ? tr("Gelişmiş mod hazır") : (ok ? out : err));
@@ -730,9 +752,11 @@ struct App::Impl {
             }
             int parts = int(body["parts"].i64()), part = int(body["part"].i64());
             std::vector<PhoneApp> got;
-            for (const auto& a : body["apps"].array())
+            for (const auto& a : body["apps"].array()) {
+                std::vector<uint8_t> png = base64(a["icon"].str());
                 got.push_back(PhoneApp{.label = a["label"].str(), .component = a["component"].str(),
-                                       .icon = kompoz::decodeToImageBitmap(base64(a["icon"].str()))});
+                                       .icon = kompoz::decodeToImageBitmap(png), .iconPng = std::string(png.begin(), png.end())});
+            }
             appsParts[part] = std::move(got);
             if (int(appsParts.size()) == parts) {
                 std::vector<PhoneApp> all;
@@ -1051,6 +1075,10 @@ App App::get() {
     return app;
 }
 
+static int64_t nowMillis() {
+    return std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch()).count();
+}
+
 void App::pump() const {
     Impl& s = *impl_;
     if (auto at = platform::takePanelRequest()) {
@@ -1063,6 +1091,23 @@ void App::pump() const {
     }
     while (char* raw = airlink_poll_event(s.node)) s.handle(json::Value::parse(takeString(raw)));
     Drives::get().pump();
+    for (auto& request : platform::takePhoneAppRequests()) {
+        if (s.pendingApps.empty()) s.pendingSince = nowMillis();
+        s.pendingApps.push_back(std::move(request));
+    }
+    if (!s.pendingApps.empty()) {
+        if (!s.smsPhone().empty()) {
+            for (auto& [component, label] : std::exchange(s.pendingApps, {}))
+                openPhoneApp(PhoneApp{.label = label.empty() ? component.substr(0, component.find('/')) : label, .component = component});
+        } else if (nowMillis() - s.pendingSince > 30000) {
+            // (the phone didn't come: said once, and AirLink's window shown to see why)
+            s.pendingApps.clear();
+            s.notices.push_back(tr("Telefon bağlı değil: uygulama açılamadı"));
+#if !defined(__ANDROID__)
+            kompoz::setAppWindowVisible(true);
+#endif
+        }
+    }
 
     std::vector<std::pair<std::string, std::vector<std::string>>> picked;
     std::vector<std::string> shared;
@@ -1578,6 +1623,15 @@ void App::openPhoneApp(const PhoneApp& app) const {
                                      ",\"width\":720,\"height\":1560,\"dpi\":320,\"fps\":24,\"quality\":70,\"codec\":\"h264\"}");
 }
 
+bool App::canMakeAppShortcuts() const { return platform::canMakeAppShortcuts(); }
+
+void App::makeAppShortcut(const PhoneApp& app, bool onDesktop) const {
+    std::string error = platform::makePhoneAppShortcut(app.label, app.component, app.iconPng, onDesktop);
+    impl_->notices.push_back(!error.empty()        ? trf("Kısayol oluşturulamadı: {}", error)
+                             : onDesktop           ? trf("{} masaüstüne eklendi", app.label)
+                                                   : trf("{} uygulama menüsüne eklendi", app.label));
+}
+
 void App::closeAppWindow(int session) const {
     impl_->phoneAsk("apps.close", "{\"session\":" + std::to_string(session) + "}");
     impl_->removeWindow(session);
@@ -1797,6 +1851,8 @@ std::vector<std::string> App::takeIncomingClipboard() const {
     return list;
 }
 
+bool App::incomingClipboardSecret() const { return impl_->lastClipboardSensitive; }
+
 void App::syncClipboard(const std::string& text, bool sensitive) const {
     auto& s = *impl_;
     if (!s.node || text.empty() || text == s.lastClipboard) return;
@@ -1819,6 +1875,11 @@ void App::syncClipboard(const std::string& text, bool sensitive) const {
     s.sendToTrusted(text, sensitive);
 }
 
+bool App::filesGrid() const { return impl_->filesGrid.get(); }
+void App::setFilesGrid(bool grid) const {
+    impl_->filesGrid.set(grid);
+    if (auto path = impl_->settingPath("files-layout"); !path.empty()) std::ofstream(path) << (grid ? "grid" : "list");
+}
 bool App::passwordPrivacy() const { return impl_->passwordPrivacy.get(); }
 void App::setPasswordPrivacy(bool on) const {
     impl_->passwordPrivacy.set(on);

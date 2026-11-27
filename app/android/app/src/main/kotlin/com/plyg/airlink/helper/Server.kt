@@ -110,6 +110,7 @@ object Server {
                 current.logicalWidth(), current.logicalHeight())
             "key" -> if (current != null) Input.key(current.id(), command.optInt("code", KeyEvent.KEYCODE_BACK), command.optInt("meta"))
             "text" -> if (current != null) Input.text(current.id(), command.optString("text"))
+            "clipboard" -> ClipboardWatch.start { event(0, it) }
             "quit" -> return false
         }
         return true

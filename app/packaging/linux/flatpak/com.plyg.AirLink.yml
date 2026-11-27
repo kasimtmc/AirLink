@@ -22,6 +22,9 @@ finish-args:
   - --filesystem=home:ro
   # "Start at login": the host's autostart entry.
   - --filesystem=xdg-config/autostart:create
+  # Phone apps' shortcuts: in the host's applications menu, or on the desktop.
+  - --filesystem=xdg-data/applications:create
+  - --filesystem=xdg-desktop
   # The screen-cast portal's PipeWire stream (sharing this computer's screen).
   - --filesystem=xdg-run/pipewire-0
   - --talk-name=org.freedesktop.Notifications

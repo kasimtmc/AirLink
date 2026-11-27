@@ -172,6 +172,7 @@ struct PhoneApp {
     std::string label;
     std::string component;  // "package/.Activity"
     kompoz::ImageBitmap icon;
+    std::string iconPng;  // the icon as the phone sent it (for a shortcut's)
     bool operator==(const PhoneApp&) const = default;
 };
 
@@ -325,11 +326,14 @@ public:
     // Messages for a snackbar, and clipboard texts from other devices, since the last call.
     std::vector<std::string> takeNotices() const;
     std::vector<std::string> takeIncomingClipboard() const;
+    bool incomingClipboardSecret() const;  // the latest of them is a password
     std::vector<ClipboardItem> clipboardHistory() const;
     std::vector<FileRecord> fileHistory() const;
     void forgetFileRecord(int64_t id) const;  // from the list (the "x")
     bool deleteFile(int64_t id) const;        // the file from the disk; its card stays, marked deleted
     void clearFileHistory() const;
+    bool filesGrid() const;  // the Files tab as a grid (else a list); kept as a setting
+    void setFilesGrid(bool grid) const;
     PhoneMedia phoneMedia() const;
     PhoneBattery phoneBattery(const std::string& peerId) const;  // level -1 when not known
     void findPhone(const std::string& peerId, bool ring) const;  // ring it (through silent mode), or stop
@@ -441,6 +445,10 @@ public:
     void startHelper(const std::string& command) const;  // the phone: starts the helper (AppStreams)
     void requestPhoneApps() const;
     void openPhoneApp(const PhoneApp& app) const;
+    // A shortcut that opens the app in its own window, AirLink's staying hidden (the applications
+    // menu, or the desktop); its result shows as a notice.
+    bool canMakeAppShortcuts() const;
+    void makeAppShortcut(const PhoneApp& app, bool onDesktop) const;
     void closeAppWindow(int session) const;
     void showAppWindow(int session) const;
     // Input for an open app: {"cmd":"touch","action":"down","x":..,"y":..} and the like (helper/Server.java).

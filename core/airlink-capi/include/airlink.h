@@ -177,6 +177,8 @@ uint64_t airlink_cloud_quota(AirlinkNode* node, const char* account);
  * gets " (2)"). Google's documents come as Office files. */
 uint64_t airlink_cloud_download(AirlinkNode* node, const char* account, const char* entry_json, const char* dir);
 /* Uploads a local file, or a folder with all it holds, into folder. Value: the new entry. */
+/* A small JPEG/PNG of an image or a video entry, cached in dir. Value: its path, or null. */
+uint64_t airlink_cloud_thumbnail(AirlinkNode* node, const char* account, const char* entry_json, const char* dir);
 uint64_t airlink_cloud_upload(AirlinkNode* node, const char* account, const char* folder, const char* path);
 uint64_t airlink_cloud_create_folder(AirlinkNode* node, const char* account, const char* parent, const char* name);
 /* Value: the renamed entry (a Dropbox entry's id changes with its name). */

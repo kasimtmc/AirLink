@@ -43,6 +43,7 @@ jclass adbPairingClass = nullptr;
 jmethodID adbStart = nullptr, adbDone = nullptr;
 jclass appStreamsClass = nullptr;
 jmethodID appStreamsHelperStarted = nullptr;
+jmethodID appStreamsWatchClipboard = nullptr;
 
 std::string fromJava(JNIEnv* env, jstring s) {
     if (!s) return {};
@@ -118,6 +119,9 @@ void stageUris(const std::vector<std::string>& uris, std::function<void(std::vec
 void handleLaunch(int, char**) {}  // Android: shares come as intents (MainActivity)
 
 std::optional<std::pair<int, int>> takePanelRequest() { return std::nullopt; }
+std::vector<std::pair<std::string, std::string>> takePhoneAppRequests() { return {}; }
+bool canMakeAppShortcuts() { return false; }
+std::string makePhoneAppShortcut(const std::string&, const std::string&, const std::string&, bool) { return "unsupported"; }
 void publishStatus(const std::string&, const std::string&, int) {}
 
 void setShareHandler(std::function<void(std::vector<std::string>)> handler) {
@@ -489,6 +493,13 @@ void advancedSetupResult(bool ok, const std::string& message) {
     e->DeleteLocalRef(m);
 }
 
+void watchClipboardInBackground() {
+    JNIEnv* e = env();
+    if (!e || !appStreamsClass || !appStreamsWatchClipboard) return;
+    e->CallStaticVoidMethod(appStreamsClass, appStreamsWatchClipboard);
+    if (e->ExceptionCheck()) e->ExceptionClear();
+}
+
 void helperStarted(bool ok, const std::string& message) {
     JNIEnv* e = env();
     if (!e || !appStreamsClass) return;
@@ -651,6 +662,7 @@ extern "C" JNIEXPORT void JNICALL Java_com_plyg_airlink_MainActivity_nativeInit(
         appStreamsClass = static_cast<jclass>(e->NewGlobalRef(local));
         e->DeleteLocalRef(local);
         appStreamsHelperStarted = e->GetStaticMethodID(appStreamsClass, "helperStarted", "(ZLjava/lang/String;)V");
+        appStreamsWatchClipboard = e->GetStaticMethodID(appStreamsClass, "watchClipboard", "()V");
     }
 }
 
@@ -699,6 +711,11 @@ extern "C" JNIEXPORT void JNICALL Java_com_plyg_airlink_MainActivity_nativeShare
 extern "C" JNIEXPORT void JNICALL Java_com_plyg_airlink_AirLinkNotificationListener_nativeBroadcast(JNIEnv* e, jclass, jstring kind,
                                                                                                     jstring body) {
     airlink::App::get().broadcast(fromJava(e, kind), fromJava(e, body));
+}
+
+// A copy the shell helper saw (on the main thread): sent on as one read in front would be.
+extern "C" JNIEXPORT void JNICALL Java_com_plyg_airlink_AppStreams_nativeClipboard(JNIEnv* e, jclass, jstring text, jboolean sensitive) {
+    airlink::App::get().syncClipboard(fromJava(e, text), sensitive);
 }
 
 extern "C" JNIEXPORT void JNICALL Java_com_plyg_airlink_MainActivity_nativeStartHelper(JNIEnv* e, jclass, jstring command) {
