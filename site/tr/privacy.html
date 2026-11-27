@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="tr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AirLink Gizlilik Politikası</title>
+<link rel="icon" href="../airlink.svg">
+<link rel="stylesheet" href="../style.css">
+<link rel="alternate" hreflang="en" href="https://kasimtmc.github.io/AirLink/privacy.html">
+</head>
+<body>
+<header>
+  <img src="../airlink.svg" alt="">
+  <a href="./">AirLink</a>
+  <nav><a href="privacy.html">Gizlilik</a><a href="terms.html">Koşullar</a><a href="https://github.com/kasimtmc/AirLink">GitHub</a><span class="lang"><span aria-current="true">TR</span><a href="../privacy.html" hreflang="en" lang="en">EN</a></span></nav>
+</header>
+<main>
+  <h1>Gizlilik politikası</h1>
+  <p class="muted">Yürürlük: 27 Kasım 2026.</p>
+
+  <p>AirLink bir Linux, Windows ve Android uygulamasıdır. Bu politika AirLink'in hangi verileri işlediğini, nereye gittiklerini ve bunları nasıl yönettiğinizi anlatır. Kısaca: AirLink'in kendi sunucusu ve hesabı yoktur, sizinle ilgili hiçbir şey toplamaz ve verilerinizi yalnızca kendi cihazlarınız arasında ve bağladığınız bulut sürücüsü sağlayıcılarına gönderir.</p>
+
+  <h2>Topladığımız veriler</h2>
+  <p>Hiçbiri. AirLink'te analiz, reklam, izleme ya da çökme raporu yoktur; verilerinizi alan bir sunucumuz da yoktur. Aşağıda anlatılan her şey cihazlarınızda kalır ya da cihazlarınızla seçtiğiniz hizmetler arasında doğrudan gider.</p>
+
+  <h2>Cihazlarınız arasında</h2>
+  <p>AirLink çalışan cihazlar yerel ağınızda birbirini bulur ve sizin istediklerinizi paylaşır: dosyalar, pano metni, bildirimler, SMS, kişiler, arama bilgileri, ekran görüntüsü ve ses. Bu trafik eşleşmiş cihazlarınız arasında şifreli bir bağlantıyla (karşılıklı TLS ile QUIC) doğrudan gider; bize ya da başkasına gönderilmez. Bir cihaza gelenler o cihazda saklanır (örneğin dosyalar İndirilenler klasörünüzde) ve orada silebilirsiniz.</p>
+  <p>Android'de AirLink bildirim erişimi, SMS, kişiler ve telefon gibi izinleri yalnızca bu özellikleri kendi eşleşmiş bilgisayarınıza sunmak için ve siz her birine izin verdikten sonra ister.</p>
+
+  <h2>Bulut sürücüleri (Google Drive, OneDrive, Dropbox)</h2>
+  <p>Bilgisayarda Google Drive, Microsoft OneDrive ya da Dropbox hesabınızı bağlayarak dosyalarını AirLink'te açabilirsiniz. Bir hesap bağladığınızda:</p>
+  <ul>
+    <li>Tarayıcınızda sağlayıcının kendi sayfasında giriş yapar ve AirLink'e erişim izni verirsiniz. AirLink şifrenizi hiç görmez.</li>
+    <li>Sağlayıcı AirLink'e bir erişim anahtarı ve bir yenileme anahtarı verir. Yenileme anahtarı bilgisayarınızda, sistemin anahtar zincirinde saklanır (Linux'ta KWallet ya da GNOME Keyring, Windows'ta Kimlik Bilgileri Yöneticisi); anahtar zinciri yoksa yalnızca kullanıcı hesabınızın okuyabildiği bir dosyada. Hesabın adı ve e-posta adresi sekmeyi adlandırmak için bilgisayarınızda tutulur.</li>
+    <li>AirLink bu erişimi dosya ve klasörlerinizi göstermek, aramak, kullanılan alanı göstermek, dosyaları bilgisayarınıza indirmek, seçtiğiniz dosyaları yüklemek, klasör oluşturmak, yeniden adlandırmak, öğeleri sürücünün çöp kutusuna taşımak ve istediğinizde bir dosyayı eşleşmiş cihazlarınızdan birine göndermek için kullanır.</li>
+    <li>Bunların hepsi bilgisayarınızla sağlayıcı arasında doğrudan olur. Dosyalarınız, anahtarlarınız ve hesap bilgileriniz bize ya da üçüncü kişilere hiç gönderilmez.</li>
+  </ul>
+  <p>AirLink'in istediği izinler:</p>
+  <ul>
+    <li><strong>Google Drive:</strong> <code>https://www.googleapis.com/auth/drive</code> (Google Drive dosyalarınızı görme, düzenleme, oluşturma ve silme). Sürücünüzün tamamında gezinip yönettiğiniz için yukarıdaki işlemlerde tüm sürücüde kullanılır.</li>
+    <li><strong>OneDrive:</strong> <code>Files.ReadWrite</code>, <code>User.Read</code> (sekme için adınız ve e-postanız) ve <code>offline_access</code> (bağlı kalmak için).</li>
+    <li><strong>Dropbox:</strong> <code>files.metadata.read/write</code>, <code>files.content.read/write</code> ve <code>account_info.read</code>.</li>
+  </ul>
+
+  <h2>Google API Hizmetleri</h2>
+  <p>AirLink'in Google API'lerinden aldığı bilgileri kullanması ve aktarması, Sınırlı Kullanım şartları dahil <a href="https://developers.google.com/terms/api-services-user-data-policy">Google API Hizmetleri Kullanıcı Verileri Politikası</a>'na uyar. AirLink Google kullanıcı verilerini yalnızca yukarıda anlatılan, kullanıcıya dönük özellikler için kullanır; bu özellikleri isteğiniz üzerine sunmak için gerekenler dışında (örneğin bir dosyayı kendi eşleşmiş cihazınıza göndermek) kimseye aktarmaz, reklam için kullanmaz, satmaz, yapay zekâ ya da makine öğrenimi modellerini eğitmek için kullanmaz ve insanların okumasına izin vermez.</p>
+
+  <h2>Erişimi ve verileri kaldırma</h2>
+  <ul>
+    <li>AirLink'te <strong>Ayarlar → Bulut sürücüleri</strong>'ni açın ve hesabın yanındaki <strong>Kaldır</strong>'ı seçin. Bu, saklanan anahtarı ve hesap bilgilerini bilgisayarınızdan siler. Sürücüdeki dosyalarınıza dokunulmaz.</li>
+    <li>AirLink'in erişimini sağlayıcıdan da geri alabilirsiniz: <a href="https://myaccount.google.com/permissions">Google</a>, <a href="https://account.live.com/consent/Manage">Microsoft</a> ya da Dropbox'ta <em>Ayarlar → Bağlı uygulamalar</em>.</li>
+    <li>AirLink'i kaldırıp veri klasörünü silmek, o cihazda tuttuğu her şeyi siler.</li>
+  </ul>
+
+  <h2>Çocuklar</h2>
+  <p>AirLink 13 yaşından küçük çocuklara yönelik değildir ve onların verilerini bilerek işlemeyiz. Zaten AirLink bize hiçbir veri göndermez.</p>
+
+  <h2>Değişiklikler</h2>
+  <p>Bu politika değişirse yeni sürümü bu sayfada, yeni bir yürürlük tarihiyle yayımlanır.</p>
+
+  <h2>İletişim</h2>
+  <p>Bu politikayla ilgili sorular için <a href="https://github.com/kasimtmc/AirLink/issues">github.com/kasimtmc/AirLink/issues</a> adresinde bir konu açın.</p>
+</main>
+<footer>Telif hakkı 2026. AirLink'i Kasım Atmaca geliştiriyor. <a href="terms.html">Kullanım koşulları</a>.</footer>
+</body>
+</html>
