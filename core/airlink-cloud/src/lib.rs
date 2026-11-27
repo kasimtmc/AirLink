@@ -218,24 +218,52 @@ impl Cloud {
         http::save(response, dir, &name, entry.size, progress).await
     }
 
-    /// Uploads a file into `folder`. A name already there is kept: the new file gets another.
-    pub async fn upload(&self, account: &str, folder: &str, file: &Path, progress: Progress) -> Result<Entry> {
-        let meta = tokio::fs::metadata(file).await.with_context(|| format!("{} okunamadı", file.display()))?;
+    /// Uploads a file, or a folder with everything in it, into `folder`. A name already there is
+    /// kept: the new file or folder gets another. Returns the new entry.
+    pub async fn upload(&self, account: &str, folder: &str, path: &Path, progress: Progress) -> Result<Entry> {
+        let meta = tokio::fs::metadata(path).await.with_context(|| format!("{} okunamadı", path.display()))?;
         if meta.is_dir() {
-            bail!("klasörler yüklenemiyor: {}", file.display());
+            return self.upload_folder(account, folder, path, progress).await;
         }
-        let name = file
-            .file_name()
-            .and_then(|n| n.to_str())
-            .ok_or_else(|| anyhow!("dosya adı okunamadı: {}", file.display()))?
-            .to_owned();
+        self.upload_file(account, folder, path, meta.len(), progress).await
+    }
+
+    async fn upload_file(&self, account: &str, folder: &str, file: &Path, size: u64, progress: Progress) -> Result<Entry> {
+        let name = file_name(file)?;
         let call = self.call(account)?;
-        let source = http::Source { path: file.to_owned(), size: meta.len(), progress };
+        let source = http::Source { path: file.to_owned(), size, progress };
         match call.provider() {
             Provider::Onedrive => onedrive::upload(&call, folder, &name, source).await,
             Provider::Dropbox => dropbox::upload(&call, folder, &name, source).await,
             Provider::Gdrive => gdrive::upload(&call, folder, &name, source).await,
         }
+    }
+
+    /// The folder on the drive first, then its subfolders and files, depth first. Progress counts
+    /// the bytes of all its files. Symbolic links are left out.
+    async fn upload_folder(&self, account: &str, parent: &str, dir: &Path, progress: Progress) -> Result<Entry> {
+        let (folders, files) = walk(dir).await?;
+        let total: u64 = files.iter().map(|(_, size)| size).sum();
+        let root = self.create_folder(account, parent, &file_name(dir)?).await?;
+        // Each local folder's id on the drive.
+        let mut ids = std::collections::HashMap::from([(dir.to_owned(), root.id.clone())]);
+        for local in &folders {
+            let (Some(up), Ok(name)) = (local.parent(), file_name(local)) else { continue };
+            let parent_id = ids.get(up).cloned().ok_or_else(|| anyhow!("klasör sırası bozuk: {}", local.display()))?;
+            let made = self.create_folder(account, &parent_id, &name).await?;
+            ids.insert(local.clone(), made.id);
+        }
+        let mut before = 0u64;
+        progress(0, total);
+        for (file, size) in files {
+            let Some(folder_id) = file.parent().and_then(|p| ids.get(p)).cloned() else { continue };
+            let (outer, offset) = (progress.clone(), before);
+            let each: Progress = Arc::new(move |done, _| outer(offset + done, total));
+            self.upload_file(account, &folder_id, &file, size, each).await?;
+            before += size;
+        }
+        progress(total, total);
+        Ok(root)
     }
 
     pub async fn create_folder(&self, account: &str, parent: &str, name: &str) -> Result<Entry> {
@@ -364,6 +392,37 @@ impl Call<'_> {
     }
 }
 
+fn file_name(path: &Path) -> Result<String> {
+    path.file_name()
+        .and_then(|n| n.to_str())
+        .map(str::to_owned)
+        .ok_or_else(|| anyhow!("ad okunamadı: {}", path.display()))
+}
+
+/// A folder's subfolders (parents before children) and files with their sizes, all the way down.
+async fn walk(dir: &Path) -> Result<(Vec<PathBuf>, Vec<(PathBuf, u64)>)> {
+    let (mut folders, mut files) = (Vec::new(), Vec::new());
+    let mut pending = vec![dir.to_owned()];
+    while let Some(current) = pending.pop() {
+        let mut read = tokio::fs::read_dir(&current).await.with_context(|| format!("{} okunamadı", current.display()))?;
+        let mut children = Vec::new();
+        while let Some(item) = read.next_entry().await? {
+            children.push(item);
+        }
+        children.sort_by_key(|c| c.file_name());
+        for item in children {
+            let kind = item.file_type().await?;
+            if kind.is_dir() {
+                folders.push(item.path());
+                pending.push(item.path());
+            } else if kind.is_file() {
+                files.push((item.path(), item.metadata().await?.len()));
+            }
+        }
+    }
+    Ok((folders, files))
+}
+
 fn sort(entries: &mut [Entry]) {
     entries.sort_by_cached_key(|e| (!e.folder, e.name.to_lowercase()));
 }
@@ -372,4 +431,25 @@ fn sort(entries: &mut [Entry]) {
 /// The keyring's calls block (D-Bus on Linux): off the runtime's worker threads.
 async fn blocking<T: Send + 'static>(f: impl FnOnce() -> T + Send + 'static) -> T {
     tokio::task::spawn_blocking(f).await.expect("keyring call panicked")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn walks_folders_parents_first() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("Top");
+        std::fs::create_dir_all(root.join("a/b")).unwrap();
+        std::fs::write(root.join("x.txt"), "12345").unwrap();
+        std::fs::write(root.join("a/b/y.txt"), "12").unwrap();
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(root.join("x.txt"), root.join("link")).unwrap();
+        let (folders, files) = walk(&root).await.unwrap();
+        assert_eq!(folders, vec![root.join("a"), root.join("a/b")]);
+        let mut files: Vec<_> = files.into_iter().map(|(p, s)| (p.strip_prefix(&root).unwrap().to_owned(), s)).collect();
+        files.sort();
+        assert_eq!(files, vec![(PathBuf::from("a/b/y.txt"), 2), (PathBuf::from("x.txt"), 5)]);
+    }
 }

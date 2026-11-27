@@ -94,7 +94,6 @@ The release builds take AirLink's Google ID from the repository variable `AIRLIN
 
 ## Limits
 
-- Only files are uploaded; a dropped folder is skipped with a message.
 - Google's own documents are downloaded as Office files (Docs → .docx, Sheets → .xlsx, Slides → .pptx, Drawings → .png); forms and sites can't be downloaded.
 - Opening a folder found by search starts from the drive's root in the folder path.
 - Android has no drive tabs: there, the providers' own apps reach their drives.

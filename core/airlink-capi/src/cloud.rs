@@ -185,7 +185,7 @@ cloud_op! {
 }
 
 cloud_op! {
-    /// Uploads a local file into `folder`. Value: the new entry.
+    /// Uploads a local file, or a folder with all it holds, into `folder`. Value: the new entry.
     fn airlink_cloud_upload(account, folder, path) |cloud, shared, op| {
         cloud.upload(&account, &folder, &PathBuf::from(path), progress(shared.clone(), op)).await
     }
