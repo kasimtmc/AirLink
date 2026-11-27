@@ -87,6 +87,10 @@ uint64_t airlink_confirm_pairing(AirlinkNode* node, uint64_t pairing, bool accep
 /* paths_json: ["/path/a", "/path/dir", ...]. Result: op_result (value = transfer id);
  * progress comes as transfer_* events. */
 uint64_t airlink_send_files(AirlinkNode* node, const char* peer_id, const char* paths_json);
+/* Cancels a running transfer, sending or receiving. It ends with transfer_failed here (error
+ * "cancelled") and on the other device ("cancelled by the other device"); unfinished files are
+ * not kept. False if no transfer with that id is running. */
+bool airlink_cancel_transfer(AirlinkNode* node, const char* transfer_id);
 
 /* Result: op_result. */
 uint64_t airlink_send_clipboard(AirlinkNode* node, const char* peer_id, const char* text);
@@ -172,7 +176,7 @@ uint64_t airlink_cloud_quota(AirlinkNode* node, const char* account);
 /* entry_json: an entry from a listing. Value: the downloaded file's path (in dir; a taken name
  * gets " (2)"). Google's documents come as Office files. */
 uint64_t airlink_cloud_download(AirlinkNode* node, const char* account, const char* entry_json, const char* dir);
-/* Uploads a local file into folder. Value: the new entry. */
+/* Uploads a local file, or a folder with all it holds, into folder. Value: the new entry. */
 uint64_t airlink_cloud_upload(AirlinkNode* node, const char* account, const char* folder, const char* path);
 uint64_t airlink_cloud_create_folder(AirlinkNode* node, const char* account, const char* parent, const char* name);
 /* Value: the renamed entry (a Dropbox entry's id changes with its name). */

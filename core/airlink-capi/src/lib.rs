@@ -518,6 +518,18 @@ pub unsafe extern "C" fn airlink_send_files(
     })
 }
 
+/// Cancels a running transfer, sending or receiving (see `Node::cancel_transfer`).
+///
+/// # Safety
+/// `node` as for `node_ref`; `transfer_id` a valid C string.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn airlink_cancel_transfer(node: *mut AirlinkNode, transfer_id: *const c_char) -> bool {
+    let (Some(n), Some(id)) = (unsafe { node_ref(node) }, unsafe { read_str(transfer_id) }) else {
+        return false;
+    };
+    guard(false, || n.node.cancel_transfer(&id))
+}
+
 /// # Safety
 /// `node` as for `node_ref`; strings valid C strings.
 #[unsafe(no_mangle)]

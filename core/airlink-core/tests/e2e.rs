@@ -425,3 +425,54 @@ async fn a_password_arrives_marked() {
     .await;
     assert!(!sensitive);
 }
+
+/// Either side cancels a transfer under way: both see it as cancelled, nothing half-done is kept.
+#[tokio::test]
+async fn cancel_transfer_either_side() {
+    let tmp = tempfile::tempdir().unwrap();
+    let a = node(&tmp.path().join("a"), "Alpha", true).await;
+    let b = node(&tmp.path().join("b"), "Beta", true).await;
+    assert!(pair(&a, &b, true).await);
+    timeout(Duration::from_secs(5), async {
+        while !b.is_trusted(&a.info().id) {
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+    })
+    .await
+    .unwrap();
+
+    // Large enough to be still going when the first progress event comes.
+    let src = tmp.path().join("big.bin");
+    std::fs::write(&src, vec![7u8; 256 * 1024 * 1024]).unwrap();
+    let dl = tmp.path().join("b/downloads");
+
+    for receiver_cancels in [true, false] {
+        let (mut a_events, mut b_events) = (a.subscribe(), b.subscribe());
+        let send = {
+            let (a, b_id, p) = (a.clone(), b.info().id.clone(), vec![src.clone()]);
+            tokio::spawn(async move { a.send_files(&b_id, &p).await })
+        };
+        let events = if receiver_cancels { &mut b_events } else { &mut a_events };
+        let id = next_matching(events, |e| match e {
+            Event::TransferProgress { transfer_id, bytes_done, .. } if bytes_done > 0 => Some(transfer_id),
+            _ => None,
+        })
+        .await;
+        let canceller = if receiver_cancels { &b } else { &a };
+        assert!(canceller.cancel_transfer(&id));
+        let err = send.await.unwrap().expect_err("a cancelled transfer fails").to_string();
+        let expected = if receiver_cancels { airlink_core::TRANSFER_CANCELLED_BY_PEER } else { airlink_core::TRANSFER_CANCELLED };
+        assert_eq!(err, expected);
+        // The receiver hears it too, and keeps no file or .part.
+        let b_error = next_matching(&mut b_events, |e| match e {
+            Event::TransferFailed { error, .. } => Some(error),
+            _ => None,
+        })
+        .await;
+        let expected = if receiver_cancels { airlink_core::TRANSFER_CANCELLED } else { airlink_core::TRANSFER_CANCELLED_BY_PEER };
+        assert_eq!(b_error, expected);
+        let left: Vec<_> = std::fs::read_dir(&dl).map(|d| d.flatten().map(|e| e.file_name()).collect()).unwrap_or_default();
+        assert!(left.is_empty(), "left behind: {left:?}");
+        assert!(!a.cancel_transfer(&id), "a finished transfer can't be cancelled");
+    }
+}

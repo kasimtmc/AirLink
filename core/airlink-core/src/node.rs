@@ -13,7 +13,7 @@ use quinn::{Connection, Endpoint, RecvStream, SendStream};
 use serde::Serialize;
 use sha2::{Digest, Sha256};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
-use tokio::sync::{broadcast, oneshot};
+use tokio::sync::{broadcast, oneshot, watch};
 use tokio::time::timeout;
 use tracing::{debug, info, warn};
 
@@ -201,6 +201,34 @@ struct Inner {
     media_out: Mutex<HashMap<(String, String), Arc<MediaOut>>>,
     /// The latest frame received on each (peer id, name), not yet taken.
     media_in: Mutex<HashMap<(String, String), Vec<u8>>>,
+    /// Transfers running now, by id: true cancels one (`Node::cancel_transfer`).
+    transfers: Mutex<HashMap<String, watch::Sender<bool>>>,
+}
+
+/// The stream error code with which a side ends a transfer its user cancelled.
+const CANCELLED: quinn::VarInt = quinn::VarInt::from_u32(0x63);
+/// `TransferFailed`'s error when this device's user cancelled.
+pub const TRANSFER_CANCELLED: &str = "cancelled";
+/// `TransferFailed`'s error when the other device's user did.
+pub const TRANSFER_CANCELLED_BY_PEER: &str = "cancelled by the other device";
+
+/// Whether an error is the other side ending the transfer as cancelled.
+fn cancelled_by_peer(e: &anyhow::Error) -> bool {
+    e.chain().any(|c| {
+        matches!(c.downcast_ref::<quinn::ReadError>(), Some(quinn::ReadError::Reset(code)) if *code == CANCELLED)
+            || matches!(c.downcast_ref::<quinn::WriteError>(), Some(quinn::WriteError::Stopped(code)) if *code == CANCELLED)
+            || matches!(
+                c.downcast_ref::<quinn::ReadExactError>(),
+                Some(quinn::ReadExactError::ReadError(quinn::ReadError::Reset(code))) if *code == CANCELLED
+            )
+    })
+}
+
+/// Resolves once the transfer is cancelled (never, if its entry is gone).
+async fn until_cancelled(mut rx: watch::Receiver<bool>) {
+    if rx.wait_for(|c| *c).await.is_err() {
+        std::future::pending::<()>().await;
+    }
 }
 
 /// One outgoing media stream: frames are written by a task of its own, and a new frame replaces
@@ -254,6 +282,7 @@ impl Node {
             discovery: Mutex::new(None),
             media_out: Mutex::new(HashMap::new()),
             media_in: Mutex::new(HashMap::new()),
+            transfers: Mutex::new(HashMap::new()),
         });
 
         tokio::spawn(accept_loop(inner.clone()));
@@ -442,6 +471,16 @@ impl Node {
             }),
         }
         res.map(|_| transfer_id)
+    }
+
+    /// Cancels a running transfer, either way: it fails here with `TRANSFER_CANCELLED` and on the
+    /// other device with `TRANSFER_CANCELLED_BY_PEER`; files not complete yet are not kept. False
+    /// if no transfer with that id is running.
+    pub fn cancel_transfer(&self, transfer_id: &str) -> bool {
+        match self.inner.transfers.lock().unwrap().get(transfer_id) {
+            Some(tx) => tx.send(true).is_ok(),
+            None => false,
+        }
     }
 
     pub async fn send_clipboard(&self, peer_id: &str, text: &str) -> Result<()> {
@@ -981,7 +1020,8 @@ async fn receive_files(
     let mut progress = Progress::new(inner, transfer_id, &peer.id, Direction::Incoming, total);
     let mut written: Vec<(PathBuf, PathBuf, String)> = Vec::new(); // (part, target, sha256)
 
-    let result: Result<()> = async {
+    let cancel = inner.track_transfer(transfer_id);
+    let work = async {
         let mut buf = vec![0u8; CHUNK];
         for (meta, rel) in files.iter().zip(&rel_paths) {
             let target = unique_path(base.join(rel));
@@ -1025,8 +1065,18 @@ async fn receive_files(
             bail!("checksum mismatch");
         }
         Ok(())
+    };
+    let result: Result<()> = tokio::select! {
+        r = work => r.map_err(|e| if cancelled_by_peer(&e) { anyhow!(TRANSFER_CANCELLED_BY_PEER) } else { e }),
+        () = until_cancelled(cancel) => {
+            Err(anyhow!(TRANSFER_CANCELLED))
+        }
+    };
+    inner.untrack_transfer(transfer_id);
+    if result.as_ref().is_err_and(|e| e.to_string() == TRANSFER_CANCELLED) {
+        let _ = send.reset(CANCELLED);
+        let _ = recv.stop(CANCELLED);
     }
-    .await;
 
     if let Err(e) = result {
         for (part, _, _) in &written {
@@ -1053,6 +1103,16 @@ async fn receive_files(
 }
 
 impl Inner {
+    fn track_transfer(&self, id: &str) -> watch::Receiver<bool> {
+        let (tx, rx) = watch::channel(false);
+        self.transfers.lock().unwrap().insert(id.to_owned(), tx);
+        rx
+    }
+
+    fn untrack_transfer(&self, id: &str) {
+        self.transfers.lock().unwrap().remove(id);
+    }
+
     fn emit(&self, e: Event) {
         let _ = self.events.send(e);
     }
@@ -1280,46 +1340,65 @@ impl Inner {
             bytes_total: total,
         });
 
-        match check(timeout(REMOTE_PROMPT_TIMEOUT, read_msg(&mut recv)).await??)? {
-            Message::FileOfferResponse { accepted: true } => {}
-            Message::FileOfferResponse { accepted: false } => {
-                bail!("the receiver declined the transfer")
-            }
-            m => bail!("unexpected reply: {m:?}"),
-        }
-
-        let mut progress = Progress::new(self, transfer_id, peer_id, Direction::Outgoing, total);
-        let mut hashes = Vec::with_capacity(files.len());
-        let mut buf = vec![0u8; CHUNK];
-        for (path, meta) in &files {
-            let mut file = tokio::fs::File::open(path).await?.take(meta.size);
-            let mut hasher = Sha256::new();
-            let mut sent = 0u64;
-            loop {
-                let n = file.read(&mut buf).await?;
-                if n == 0 {
-                    break;
+        // Cancellable from here on, while waiting for the answer too.
+        let cancel = self.track_transfer(transfer_id);
+        let work = async {
+            match check(timeout(REMOTE_PROMPT_TIMEOUT, read_msg(&mut recv)).await??)? {
+                Message::FileOfferResponse { accepted: true } => {}
+                Message::FileOfferResponse { accepted: false } => {
+                    bail!("the receiver declined the transfer")
                 }
-                hasher.update(&buf[..n]);
-                send.write_all(&buf[..n]).await?;
-                sent += n as u64;
-                progress.add(n as u64);
+                m => bail!("unexpected reply: {m:?}"),
             }
-            if sent != meta.size {
-                bail!("{} changed while sending", path.display());
-            }
-            hashes.push(hex::encode(hasher.finalize()));
-        }
-        progress.finish();
-        write_msg(&mut send, &Message::FileDone { sha256: hashes }).await?;
-        send.finish()?;
 
-        match check(timeout(Duration::from_secs(60), read_msg(&mut recv)).await??)? {
-            Message::FileAck { ok: true, .. } => Ok(files.into_iter().map(|(p, _)| p).collect()),
-            Message::FileAck { ok: false, error } => {
-                bail!("receiver rejected: {}", error.unwrap_or_default())
+            let mut progress = Progress::new(self, transfer_id, peer_id, Direction::Outgoing, total);
+            let mut hashes = Vec::with_capacity(files.len());
+            let mut buf = vec![0u8; CHUNK];
+            for (path, meta) in &files {
+                let mut file = tokio::fs::File::open(path).await?.take(meta.size);
+                let mut hasher = Sha256::new();
+                let mut sent = 0u64;
+                loop {
+                    let n = file.read(&mut buf).await?;
+                    if n == 0 {
+                        break;
+                    }
+                    hasher.update(&buf[..n]);
+                    send.write_all(&buf[..n]).await?;
+                    sent += n as u64;
+                    progress.add(n as u64);
+                }
+                if sent != meta.size {
+                    bail!("{} changed while sending", path.display());
+                }
+                hashes.push(hex::encode(hasher.finalize()));
             }
-            m => bail!("unexpected reply: {m:?}"),
+            progress.finish();
+            write_msg(&mut send, &Message::FileDone { sha256: hashes }).await?;
+            send.finish()?;
+
+            match check(timeout(Duration::from_secs(60), read_msg(&mut recv)).await??)? {
+                Message::FileAck { ok: true, .. } => Ok(files.iter().map(|(p, _)| p.clone()).collect()),
+                Message::FileAck { ok: false, error } => {
+                    bail!("receiver rejected: {}", error.unwrap_or_default())
+                }
+                m => bail!("unexpected reply: {m:?}"),
+            }
+        };
+        let outcome = tokio::select! {
+            r = work => Some(r),
+            () = until_cancelled(cancel) => None,
+        };
+        self.untrack_transfer(transfer_id);
+        match outcome {
+            Some(Ok(sent)) => Ok(sent),
+            Some(Err(e)) if cancelled_by_peer(&e) => bail!(TRANSFER_CANCELLED_BY_PEER),
+            Some(Err(e)) => Err(e),
+            None => {
+                let _ = send.reset(CANCELLED);
+                let _ = recv.stop(CANCELLED);
+                bail!(TRANSFER_CANCELLED)
+            }
         }
     }
 }

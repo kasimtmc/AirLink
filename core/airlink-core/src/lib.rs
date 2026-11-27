@@ -15,7 +15,8 @@ pub mod trust;
 pub use discovery::DiscoveredPeer;
 pub use identity::short_id;
 pub use node::{
-    DEFAULT_PORT, Direction, Event, Node, NodeConfig, OutgoingPairing, read_saved_name,
+    DEFAULT_PORT, Direction, Event, Node, NodeConfig, OutgoingPairing, TRANSFER_CANCELLED,
+    TRANSFER_CANCELLED_BY_PEER, read_saved_name,
 };
 pub use protocol::{DeviceInfo, FileMeta};
 pub use trust::TrustedPeer;
