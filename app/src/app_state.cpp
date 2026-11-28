@@ -1,5 +1,6 @@
 #include "app_state.hpp"
 #include "clipboard_watch.hpp"
+#include "update_state.hpp"
 
 #include <airlink.h>
 
@@ -386,6 +387,7 @@ struct App::Impl {
         auto adb = std::filesystem::path(cfg.dataDir) / "adb";
         if (std::filesystem::exists(adb / "ready") || std::filesystem::exists(adb / "connect-port")) platform::watchClipboardInBackground();
         Drives::get().attach(node, me.peek().downloadDir, me.peek().dataDir);
+        Updates::get().attach(node, me.peek().dataDir);
         if (auto path = settingPath("files-layout"); !path.empty()) {
             std::string saved;
             if (std::ifstream in(path); in >> saved) filesGrid.set(saved == "grid");
@@ -515,6 +517,7 @@ struct App::Impl {
 
     void handle(const json::Value& e) {
         if (Drives::get().handle(e)) return;
+        if (Updates::get().handle(e)) return;
         std::string kind = e["event"].str();
         if (kind == "peer_discovered" || kind == "peer_lost") {
             refreshPeers();
@@ -1115,6 +1118,7 @@ void App::pump() const {
     }
     while (char* raw = airlink_poll_event(s.node)) s.handle(json::Value::parse(takeString(raw)));
     Drives::get().pump();
+    Updates::get().pump();
     for (auto& request : platform::takePhoneAppRequests()) {
         if (s.pendingApps.empty()) s.pendingSince = nowMillis();
         s.pendingApps.push_back(std::move(request));

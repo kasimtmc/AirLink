@@ -12,6 +12,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
 mod cloud;
+mod update;
 mod desktop;
 
 use airlink_core::{DEFAULT_PORT, Node, NodeConfig, OutgoingPairing, read_saved_name};

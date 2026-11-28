@@ -106,6 +106,10 @@ object Texts {
         "Ekrandaki içeriği bulmak için Erişilebilirlik'te AirLink'i açın" to "Turn on AirLink in Accessibility to find what's on screen",
         "Gönderilecek içerik bulunamadı" to "Nothing to send was found",
         "Paylaşım menüsünde AirLink bulunamadı; menüde AirLink'i sabitleyin" to "AirLink isn't in the share menu; pin AirLink there",
+        // Updates
+        "AirLink'e uygulama yükleme izni verin, sonra Güncelle'ye yeniden basın" to "Allow AirLink to install apps, then press Update again",
+        "Güncelleme kurulamadı: yüklü AirLink başka bir anahtarla imzalanmış" to "Couldn't install the update: the installed AirLink is signed with another key",
+        "Güncelleme kurulamadı: {}" to "Couldn't install the update: {}",
         // Advanced mode
         "Eşleme kodunu buraya yazın" to "Type the pairing code here",
         "Kablosuz hata ayıklama > Eşleme koduyla cihaz eşle. Kodu girin; bağlantı bulunamazsa kod:eşleme_portu yazın." to

@@ -178,6 +178,17 @@ void openFile(const std::string& path);
 std::string systemLanguage();
 // A web page in the default browser (a cloud drive's sign-in).
 void openUrl(const std::string& url);
+
+// ---- Updates (update_state.hpp) -------------------------------------------------------------
+// How this copy was installed, for its update: appimage, deb, tar, flatpak (Linux),
+// windows-installer, windows-zip, android; "" for one that doesn't update itself (a build from
+// the source tree).
+std::string updateKind();
+// Puts the downloaded release files in place of this copy (blocking: may wait for a password);
+// empty when done, else why not. With updateRestarts, a new AirLink starts as this one ends.
+std::string applyUpdate(const std::string& kind, const std::vector<std::string>& files);
+bool updateRestarts(const std::string& kind);
+void notifyUpdate(const std::string& version);  // a desktop notification (the app may be in the tray)
 // A Files-tab path (a file, or on Android a content:// URI) that is still there.
 bool fileExists(const std::string& path);
 // A sent file that was a copy made for sending (Android's shares and picks): its original

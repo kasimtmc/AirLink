@@ -74,6 +74,43 @@ fun MissingPermissionsBanner(count: Int, onOpenSettings: () -> Unit) {
 }
 
 // This device, its permissions and its features.
+// AirLink's version, and its updates from GitHub: looked for at start and twice a day (the switch),
+// or now; an available one installed as this copy was installed (update_state.hpp).
+@Kompozable
+fun UpdatesCard() {
+    val updates = updatesState()
+    val u = updates.info()
+    val cs = MaterialTheme.colorScheme
+    val links = uriHandler()
+    OutlinedCard(modifier = Modifier.fillMaxWidth()) {
+        Column(modifier = Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(trf("AirLink {}", appVersion()), style = MaterialTheme.typography.titleSmall)
+                    val line = updateLine(u)
+                    if (line.isNotEmpty()) {
+                        Text(line, style = MaterialTheme.typography.bodySmall,
+                             color = if (u.status == "error") cs.error else if (u.status == "available") cs.primary else cs.onSurfaceVariant)
+                    }
+                }
+                if (u.status == "available") {
+                    Button(onClick = { updates.install() }) { Text(updateAction()) }
+                } else {
+                    OutlinedButton(onClick = { updates.check() }, enabled = !updateBusy(u)) { Text(tr("Denetle")) }
+                }
+            }
+            if (u.status == "downloading") LinearProgressIndicator(progress = { updateFraction(u) }, modifier = Modifier.fillMaxWidth())
+            if (u.status == "available" && u.page.isNotEmpty()) {
+                TextButton(onClick = { links.openUri(u.page) }) { Text(tr("Sürüm notları")) }
+            }
+            Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                Text(tr("Güncellemeleri kendiliğinden denetle"), modifier = Modifier.weight(1f))
+                Switch(checked = updates.autoCheck(), onCheckedChange = { updates.setAutoCheck(it) })
+            }
+        }
+    }
+}
+
 @Kompozable
 fun SettingsScreen(app: App) {
     val paired = app.pairedPeers()
@@ -89,6 +126,7 @@ fun SettingsScreen(app: App) {
         item { ThisDeviceCard(app.me()) }
         item { SectionTitle(tr("Genel")) }
         item { LanguageCard() }
+        item { UpdatesCard() }
         if (canStartAtLogin()) item { StartAtLoginCard() }
         if (permissions) {
             item { SectionTitle(tr("İzinler")) }

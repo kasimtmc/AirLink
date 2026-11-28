@@ -68,6 +68,9 @@ Section "AirLink"
   WriteRegStr HKCU "${UNINSTALL_KEY}" "UninstallString" '"$INSTDIR\uninstall.exe"'
   WriteRegDWORD HKCU "${UNINSTALL_KEY}" "NoModify" 1
   WriteRegDWORD HKCU "${UNINSTALL_KEY}" "NoRepair" 1
+  ; Silent (/S): AirLink's own update ran it; the new AirLink starts in the tray again.
+  IfSilent 0 +2
+    Exec '"$INSTDIR\airlink.exe" --background'
 SectionEnd
 
 Section "Uninstall"

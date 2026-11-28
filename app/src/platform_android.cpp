@@ -44,6 +44,8 @@ jmethodID adbStart = nullptr, adbDone = nullptr;
 jclass appStreamsClass = nullptr;
 jmethodID appStreamsHelperStarted = nullptr;
 jmethodID appStreamsWatchClipboard = nullptr;
+jclass updaterClass = nullptr;
+jmethodID updaterInstall = nullptr;
 
 std::string fromJava(JNIEnv* env, jstring s) {
     if (!s) return {};
@@ -120,6 +122,26 @@ void handleLaunch(int, char**) {}  // Android: shares come as intents (MainActiv
 
 std::optional<std::pair<int, int>> takePanelRequest() { return std::nullopt; }
 std::vector<std::pair<std::string, std::string>> takePhoneAppRequests() { return {}; }
+std::string updateKind() { return "android"; }
+std::string applyUpdate(const std::string&, const std::vector<std::string>& files) {
+    // (on the update's own thread: attached to the VM for the call)
+    JNIEnv* e = nullptr;
+    bool attached = false;
+    if (!vm || !updaterClass || !updaterInstall || files.empty()) return "unsupported";
+    if (vm->GetEnv(reinterpret_cast<void**>(&e), JNI_VERSION_1_6) != JNI_OK) {
+        if (vm->AttachCurrentThread(&e, nullptr) != JNI_OK) return "no JNI";
+        attached = true;
+    }
+    jstring path = e->NewStringUTF(files.front().c_str());
+    auto result = static_cast<jstring>(e->CallStaticObjectMethod(updaterClass, updaterInstall, path));
+    std::string error = e->ExceptionCheck() ? (e->ExceptionClear(), std::string("installer failed")) : result ? fromJava(e, result) : std::string();
+    e->DeleteLocalRef(path);
+    if (result) e->DeleteLocalRef(result);
+    if (attached) vm->DetachCurrentThread();
+    return error;
+}
+bool updateRestarts(const std::string&) { return false; }
+void notifyUpdate(const std::string&) {}
 bool canMakeAppShortcuts() { return false; }
 std::string makePhoneAppShortcut(const std::string&, const std::string&, const std::string&, bool) { return "unsupported"; }
 void publishStatus(const std::string&, const std::string&, int) {}
@@ -663,6 +685,10 @@ extern "C" JNIEXPORT void JNICALL Java_com_plyg_airlink_MainActivity_nativeInit(
         e->DeleteLocalRef(local);
         appStreamsHelperStarted = e->GetStaticMethodID(appStreamsClass, "helperStarted", "(ZLjava/lang/String;)V");
         appStreamsWatchClipboard = e->GetStaticMethodID(appStreamsClass, "watchClipboard", "()V");
+        local = e->FindClass("com/plyg/airlink/Updater");
+        updaterClass = static_cast<jclass>(e->NewGlobalRef(local));
+        e->DeleteLocalRef(local);
+        updaterInstall = e->GetStaticMethodID(updaterClass, "install", "(Ljava/lang/String;)Ljava/lang/String;");
     }
 }
 

@@ -81,6 +81,18 @@ fun TrayPanel(app: App, onOpenApp: () -> Unit) {
                 TextButton(onClick = { exitApplication() }) { Text(tr("Çık")) }
             }
         }
+        // A newer AirLink: said here too, with its button.
+        val update = updatesState().info()
+        if (update.status == "available" || update.status == "downloading" || update.status == "installing") {
+            item {
+                Row(modifier = Modifier.fillMaxWidth().background(cs.primaryContainer, RoundedCornerShape(12.dp)).padding(start = 12.dp, end = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically) {
+                    Text(updateLine(update), style = MaterialTheme.typography.bodySmall, color = cs.onPrimaryContainer, modifier = Modifier.weight(1f),
+                         maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    if (update.status == "available") TextButton(onClick = { updatesState().install() }) { Text(updateAction()) }
+                }
+            }
+        }
         if (target.isNotEmpty()) {
             item {
                 Text(if (pasted.isNotEmpty()) pasted

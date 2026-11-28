@@ -1135,4 +1135,200 @@ std::string makePhoneAppShortcut(const std::string&, const std::string&, const s
 
 #endif
 
+// ---- Updates --------------------------------------------------------------------------------
+
+void notifyUpdate(const std::string& version) {
+    std::string title = trf("AirLink {} çıktı", version), body = tr("AirLink'in Ayarlar'ından güncelleyebilirsiniz.");
+#if defined(_WIN32)
+    std::lock_guard lock(trayNotificationsMutex);
+    trayNotifications.emplace_back(title, body);
+#else
+    showDesktopNotification(title, body);
+#endif
+}
+
+bool updateRestarts(const std::string& kind) { return kind != "flatpak" && !kind.empty(); }
+
+#if defined(__linux__)
+
+namespace {
+
+// Runs a program and waits for it: its exit code (-1: it didn't start).
+int runAndWait(const std::vector<std::string>& argv) {
+    std::vector<char*> args;
+    std::vector<std::string> copy = argv;
+    for (auto& a : copy) args.push_back(a.data());
+    args.push_back(nullptr);
+    pid_t pid = 0;
+    if (posix_spawnp(&pid, args[0], nullptr, nullptr, args.data(), environ) != 0) return -1;
+    int status = 0;
+    if (waitpid(pid, &status, 0) < 0) return -1;
+    return WIFEXITED(status) ? WEXITSTATUS(status) : -1;
+}
+
+bool hasProgram(const char* name) { return runAndWait({"sh", "-c", std::string("command -v ") + name + " >/dev/null"}) == 0; }
+
+std::string thisBinary() {
+    std::error_code ec;
+    auto exe = std::filesystem::read_symlink("/proc/self/exe", ec);
+    return ec ? std::string() : exe.string();
+}
+
+// Starts `bin` again (hidden in the tray) once this process has ended: a detached shell waits
+// for this pid (one instance at a time: the new one would hand itself to this one otherwise).
+void restartAs(const std::string& bin) {
+    std::string script = "while kill -0 " + std::to_string(getpid()) + " 2>/dev/null; do sleep 0.2; done; exec \"$0\" --background";
+    pid_t pid = 0;
+    const char* args[] = {"setsid", "sh", "-c", script.c_str(), bin.c_str(), nullptr};
+    posix_spawnp(&pid, "setsid", nullptr, nullptr, const_cast<char* const*>(args), environ);
+}
+
+// The Plasma panel widget, upgraded where it is installed for this user (or installed: it came
+// with AirLink, the user may have removed it).
+void upgradePlasmoid(const std::string& file) {
+    if (file.empty() || !hasProgram("kpackagetool6")) return;
+    bool installed = runAndWait({"kpackagetool6", "--type", "Plasma/Applet", "--show", "dev.airlink.panel"}) == 0;
+    runAndWait({"kpackagetool6", "--type", "Plasma/Applet", installed ? "--upgrade" : "--install", file});
+}
+
+std::string fileEnding(const std::vector<std::string>& files, const std::string& end) {
+    for (const auto& f : files)
+        if (f.ends_with(end)) return f;
+    return {};
+}
+
+}  // namespace
+
+std::string updateKind() {
+    if (std::getenv("FLATPAK_ID")) return "flatpak";
+    if (const char* image = std::getenv("APPIMAGE"); image && *image) return "appimage";
+    std::string bin = thisBinary();
+    if (bin.starts_with("/opt/airlink/")) return "deb";
+    auto dir = std::filesystem::path(bin).parent_path();
+    std::error_code ec;
+    // A build from the source tree (CMake's build folder): not replaced by a release.
+    if (std::filesystem::exists(dir / "CMakeCache.txt", ec)) return {};
+    // The release tar.gz: its packaging/ folder next to the binary.
+    if (std::filesystem::exists(dir / "packaging" / "install.sh", ec)) return "tar";
+    return {};
+}
+
+std::string applyUpdate(const std::string& kind, const std::vector<std::string>& files) {
+    if (kind == "appimage") {
+        std::string image = std::getenv("APPIMAGE") ? std::getenv("APPIMAGE") : "";
+        std::string fresh = fileEnding(files, ".AppImage");
+        if (image.empty() || fresh.empty()) return tr("AppImage bulunamadı");
+        // Beside it first, then renamed over it (the running one keeps its open file).
+        std::string next = image + ".new";
+        std::error_code ec;
+        std::filesystem::copy_file(fresh, next, std::filesystem::copy_options::overwrite_existing, ec);
+        if (ec) return trf("{} yazılamadı ({})", next, ec.message());
+        std::filesystem::permissions(next, std::filesystem::perms::owner_all | std::filesystem::perms::group_read | std::filesystem::perms::group_exec |
+                                               std::filesystem::perms::others_read | std::filesystem::perms::others_exec, ec);
+        std::filesystem::rename(next, image, ec);
+        if (ec) return trf("{} değiştirilemedi ({})", image, ec.message());
+        upgradePlasmoid(fileEnding(files, ".plasmoid"));
+        restartAs(image);
+        return {};
+    }
+    if (kind == "deb") {
+        std::string deb = fileEnding(files, ".deb");
+        if (deb.empty()) return tr(".deb bulunamadı");
+        if (!hasProgram("pkexec")) return tr("pkexec yok: .deb'i elle kurun");
+        // apt-get resolves new dependencies; dpkg where there is no apt.
+        int code = hasProgram("apt-get") ? runAndWait({"pkexec", "apt-get", "install", "-y", "--allow-downgrades", deb})
+                                         : runAndWait({"pkexec", "dpkg", "-i", deb});
+        if (code == 126 || code == 127) return tr("yetki verilmedi");
+        if (code != 0) return trf("paket kurulamadı (çıkış kodu {})", code);
+        restartAs("/usr/bin/airlink");
+        return {};
+    }
+    if (kind == "tar") {
+        std::string archive = fileEnding(files, ".tar.gz");
+        std::string bin = thisBinary();
+        auto dir = std::filesystem::path(bin).parent_path();
+        if (archive.empty() || bin.empty()) return tr("arşiv bulunamadı");
+        if (access(dir.c_str(), W_OK) != 0) return trf("{} klasörüne yazılamıyor", dir.string());
+        auto unpacked = std::filesystem::path(archive).parent_path() / "unpacked";
+        std::error_code ec;
+        std::filesystem::create_directories(unpacked, ec);
+        if (runAndWait({"tar", "-xzf", archive, "-C", unpacked.string(), "--strip-components=1"}) != 0) return tr("arşiv açılamadı");
+        // Over the old files (a running binary is replaced, not written into: --remove-destination).
+        if (runAndWait({"cp", "-a", "--remove-destination", (unpacked / ".").string(), dir.string()}) != 0) return trf("{} klasörüne kopyalanamadı", dir.string());
+        // The menus, the file managers' entries and the Plasma widget, pointing at it as before.
+        runAndWait({"sh", (dir / "packaging" / "install.sh").string(), bin});
+        restartAs(bin);
+        return {};
+    }
+    if (kind == "flatpak") {
+        // Not replaced from inside its sandbox: the bundle goes to the software center (Discover,
+        // GNOME Software), which installs it over this one.
+        std::string bundle = fileEnding(files, ".flatpak");
+        if (bundle.empty()) return tr(".flatpak bulunamadı");
+        openFile(bundle);
+        return {};
+    }
+    return tr("bu kurulum kendini güncelleyemiyor");
+}
+
+#elif defined(_WIN32)
+
+namespace {
+std::wstring wide(const std::string& utf8) { return std::filesystem::path(std::u8string(utf8.begin(), utf8.end())).wstring(); }
+
+std::wstring exePath() {
+    wchar_t exe[MAX_PATH];
+    return GetModuleFileNameW(nullptr, exe, MAX_PATH) ? std::wstring(exe) : std::wstring();
+}
+
+bool spawnDetached(std::wstring commandLine) {
+    STARTUPINFOW si{};
+    si.cb = sizeof si;
+    PROCESS_INFORMATION pi{};
+    if (!CreateProcessW(nullptr, commandLine.data(), nullptr, nullptr, FALSE, DETACHED_PROCESS | CREATE_NO_WINDOW, nullptr, nullptr, &si, &pi))
+        return false;
+    CloseHandle(pi.hThread);
+    CloseHandle(pi.hProcess);
+    return true;
+}
+}  // namespace
+
+std::string updateKind() {
+    auto dir = std::filesystem::path(exePath()).parent_path();
+    std::error_code ec;
+    if (std::filesystem::exists(dir / L"uninstall.exe", ec)) return "windows-installer";
+    if (std::filesystem::exists(dir / L"CMakeCache.txt", ec)) return {};
+    return "windows-zip";
+}
+
+std::string applyUpdate(const std::string& kind, const std::vector<std::string>& files) {
+    std::string file = files.empty() ? std::string() : files.front();
+    if (file.empty()) return tr("dosya bulunamadı");
+    if (kind == "windows-installer") {
+        // Silent: it closes this AirLink, installs over it and starts the new one (installer.nsi).
+        if (!spawnDetached(L"\"" + wide(file) + L"\" /S")) return tr("kurulum başlatılamadı");
+        return {};
+    }
+    if (kind == "windows-zip") {
+        // PowerShell waits for this process, unpacks the zip over its folder and starts it again.
+        auto dir = std::filesystem::path(exePath()).parent_path();
+        std::wstring ps = L"$p=" + std::to_wstring(GetCurrentProcessId()) + L"; while (Get-Process -Id $p -ErrorAction SilentlyContinue) { Start-Sleep -Milliseconds 200 }; "
+                          L"$t=Join-Path $env:TEMP 'airlink-update'; Remove-Item -Recurse -Force $t -ErrorAction SilentlyContinue; "
+                          L"Expand-Archive -Force -LiteralPath '" + wide(file) + L"' -DestinationPath $t; "
+                          L"$s=(Get-ChildItem $t -Directory | Select-Object -First 1).FullName; if (-not $s) { $s=$t }; "
+                          L"Copy-Item -Recurse -Force (Join-Path $s '*') '" + dir.wstring() + L"'; "
+                          L"Start-Process -FilePath '" + (dir / L"airlink.exe").wstring() + L"' -ArgumentList '--background'";
+        if (!spawnDetached(L"powershell -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -Command \"" + ps + L"\"")) return tr("güncelleme başlatılamadı");
+        return {};
+    }
+    return tr("bu kurulum kendini güncelleyemiyor");
+}
+
+#else
+
+std::string updateKind() { return {}; }
+std::string applyUpdate(const std::string&, const std::vector<std::string>&) { return "unsupported"; }
+
+#endif
+
 }  // namespace airlink::platform

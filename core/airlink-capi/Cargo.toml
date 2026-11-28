@@ -18,6 +18,11 @@ serde.workspace = true
 serde_json.workspace = true
 tracing.workspace = true
 openh264 = "0.9.9"
+# Updates from GitHub's releases (update.rs).
+reqwest = { version = "0.13", default-features = false, features = ["rustls-no-provider", "http2", "json", "stream", "system-proxy"] }
+rustls = { version = "0.23", default-features = false, features = ["ring", "std"] }
+futures-util = "0.3"
+sha2 = "0.10"
 
 # This computer's screen and input, shared with a paired phone (not on Android).
 [target.'cfg(not(target_os = "android"))'.dependencies]

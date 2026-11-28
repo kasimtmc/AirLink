@@ -19,6 +19,7 @@
 #include "clipboard_watch.hpp"
 #include "i18n.hpp"
 #include "cloud_state.hpp"
+#include "update_state.hpp"
 #include "json.hpp"
 #include "platform.hpp"
 #include "tray_icon.hpp"
@@ -125,6 +126,29 @@ inline std::string previewImagePath() {
 }
 
 inline std::string fileName(const std::string& path);
+inline Updates updatesState() { return Updates::get(); }
+
+// The update card's line: what is going on.
+inline std::string updateLine(const UpdateInfo& u) {
+    if (u.status == "checking") return tr("Denetleniyor…");
+    if (u.status == "uptodate") return tr("AirLink güncel");
+    if (u.status == "available") return trf("AirLink {} çıktı", u.version);
+    if (u.status == "downloading")
+        return u.total > 0 ? trf("İndiriliyor · {} / {}", humanSize(u.done), humanSize(u.total)) : tr("İndiriliyor…");
+    if (u.status == "installing") return tr("Kuruluyor… AirLink yeniden başlayacak");
+    if (u.status == "error") return u.error;
+    return {};
+}
+
+inline float updateFraction(const UpdateInfo& u) { return u.total > 0 ? float(double(u.done) / double(u.total)) : 0.f; }
+// The button for an available release: this copy updates itself, a Flatpak's bundle goes to the
+// software center, a source build gets the release page.
+inline std::string updateAction() {
+    std::string kind = airlink::platform::updateKind();
+    return kind.empty() ? tr("Sürüm sayfasını aç") : kind == "flatpak" ? tr("İndir ve aç") : tr("Güncelle");
+}
+inline bool updateBusy(const UpdateInfo& u) { return u.status == "checking" || u.status == "downloading" || u.status == "installing"; }
+
 // "X gönderilsin" / "3 dosya gönderilsin".
 inline std::string shareTitle(const std::vector<std::string>& files) {
     return files.size() == 1 ? trf("{} gönderilsin", fileName(files.front())) : trf("{} dosya gönderilsin", files.size());

@@ -205,6 +205,14 @@ void airlink_win_player_bluetooth(const char* phone);
 char* airlink_win_player_bluetooth_status(void);
 #endif
 
+/* Updates (GitHub releases of kasimtmc/AirLink). airlink_update_check's value: the latest release
+ * when newer than this build, {"version","tag","notes","page","assets":[{"name","url","size"}]},
+ * else null. airlink_update_download fetches one of its files into dir, checked against the
+ * release's SHA256SUMS (sums: its URL, or ""): {"event":"update_progress","op","done","total"}
+ * events; value: the file's path. */
+uint64_t airlink_update_check(AirlinkNode* node);
+uint64_t airlink_update_download(AirlinkNode* node, const char* url, const char* sums, const char* dir);
+
 #ifdef __cplusplus
 }
 #endif
