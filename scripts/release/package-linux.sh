@@ -68,7 +68,7 @@ AirLink $version for Linux (x86_64, glibc 2.39+)
 Run ./airlink, or install the menu entry, the file-manager menus and the KDE panel widget
 for this user:
 
-    packaging/install.sh "\$PWD/airlink"
+    ./packaging/install.sh
 
 packaging/install.sh --uninstall removes them. Needs PipeWire and PulseAudio's client
 libraries (libpipewire-0.3, libpulse); BlueZ, bluetoothctl and pactl for call audio.

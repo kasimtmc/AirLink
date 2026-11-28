@@ -5,7 +5,8 @@
 #   - a "AirLink ile gönder" script in Files' (GNOME Nautilus) Scripts menu
 #   - the icon
 #   - an "AirLink" panel widget (KDE Plasma 6): AirLink's tray panel from an icon of its own
-# Usage: install.sh [/path/to/airlink]     (default: the build next to this file)
+# Usage: install.sh [/path/to/airlink]     (default: the release archive's airlink next to this
+#                                           folder, else the source tree's build)
 #        install.sh --uninstall
 set -eu
 
@@ -29,9 +30,16 @@ if [ "${1:-}" = "--uninstall" ]; then
     exit 0
 fi
 
-bin=${1:-$here/../../build/airlink}
-bin=$(cd "$(dirname "$bin")" && pwd)/$(basename "$bin")
-[ -x "$bin" ] || { echo "AirLink binary not found: $bin (build it, or pass its path)" >&2; exit 1; }
+if [ -n "${1:-}" ]; then
+    bin=$1
+elif [ -x "$here/../airlink" ]; then
+    bin=$here/../airlink           # the release archive: packaging/ next to the binary
+else
+    bin=$here/../../build/airlink  # the source tree: app/packaging/linux and app/build
+fi
+dir=$(dirname "$bin")
+[ -d "$dir" ] && [ -x "$bin" ] || { echo "AirLink binary not found: $bin (pass its path: install.sh /path/to/airlink)" >&2; exit 1; }
+bin=$(cd "$dir" && pwd)/$(basename "$bin")
 
 mkdir -p "$(dirname "$desktop_file")" "$(dirname "$service_menu")" "$(dirname "$nautilus_script")" "$(dirname "$icon")"
 cp "$here/airlink.svg" "$icon"

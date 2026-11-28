@@ -6,37 +6,68 @@
 
 // Files handed to AirLink from outside (a file manager's "Send with AirLink", Android's share
 // sheet): which device gets them.
+// Files shared from outside (a file manager's "AirLink ile gönder", the command line): which
+// device gets them. On a computer in a small window of its own, so it shows with AirLink's window
+// hidden in the tray too; on a phone as a dialog over the app.
 @Kompozable
 fun ShareDialog(app: App) {
     val files = app.share()
-    if (files.isNotEmpty() && app.ready()) {
-        val paired = app.pairedPeers()
+    if (files.isNotEmpty() && app.ready() && !isDesktop()) {
         AlertDialog(
             onDismissRequest = { app.cancelShare() },
             icon = { Icon(AppIcons.Upload, contentDescription = null) },
-            title = { Text(if (files.size == 1) trf("{} gönderilsin", fileName(files.first())) else trf("{} dosya gönderilsin", files.size)) },
-            text = {
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    if (paired.isEmpty()) {
-                        Text(tr("Henüz eşleşmiş cihaz yok. Önce bir cihazla eşleşin."))
-                    } else {
-                        Text(tr("Hangi cihaza?"), color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        if (app.canFling() && app.flingEnabled() && app.flingTarget().isNotEmpty()) {
-                            Text(trf("Ya da telefonu {} cihazına doğru fırlatın.", app.peerName(app.flingTarget())),
-                                 style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary)
-                        }
-                        for (peer in paired) {
-                            OutlinedButton(onClick = { app.shareTo(peer.id) }, modifier = Modifier.fillMaxWidth(), enabled = peer.online) {
-                                Icon(AppIcons.forPlatform(peer.platform), contentDescription = null, modifier = Modifier.size(18.dp))
-                                Spacer(modifier = Modifier.width(8.dp))
-                                Text(if (peer.online) peer.name else trf("{} (çevrimdışı)", peer.name), modifier = Modifier.weight(1f))
-                            }
-                        }
-                    }
-                }
-            },
+            title = { Text(shareTitle(files)) },
+            text = { ShareChoices(app) },
             confirmButton = { TextButton(onClick = { app.cancelShare() }) { Text(tr("Vazgeç")) } },
         )
+    }
+}
+
+@Kompozable
+fun ShareWindow(app: App) {
+    val files = app.share()
+    if (files.isNotEmpty() && app.ready()) {
+        val state = rememberWindowState(size = DpSize(420.dp, 420.dp))
+        Window(onCloseRequest = { app.cancelShare() }, state = state, title = tr("AirLink ile gönder")) {
+            Surface(modifier = Modifier.fillMaxSize()) {
+                Column(modifier = Modifier.fillMaxSize().padding(20.dp).verticalScroll(rememberScrollState()),
+                       verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(AppIcons.Upload, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+                        Spacer(modifier = Modifier.width(12.dp))
+                        Text(shareTitle(files), style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f),
+                             maxLines = 2, overflow = TextOverflow.Ellipsis)
+                    }
+                    ShareChoices(app)
+                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                        TextButton(onClick = { app.cancelShare() }) { Text(tr("Vazgeç")) }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Kompozable
+fun ShareChoices(app: App) {
+    val paired = app.pairedPeers()
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        if (paired.isEmpty()) {
+            Text(tr("Henüz eşleşmiş cihaz yok. Önce bir cihazla eşleşin."))
+        } else {
+            Text(tr("Hangi cihaza?"), color = MaterialTheme.colorScheme.onSurfaceVariant)
+            if (app.canFling() && app.flingEnabled() && app.flingTarget().isNotEmpty()) {
+                Text(trf("Ya da telefonu {} cihazına doğru fırlatın.", app.peerName(app.flingTarget())),
+                     style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary)
+            }
+            for (peer in paired) {
+                OutlinedButton(onClick = { app.shareTo(peer.id) }, modifier = Modifier.fillMaxWidth(), enabled = peer.online) {
+                    Icon(AppIcons.forPlatform(peer.platform), contentDescription = null, modifier = Modifier.size(18.dp))
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(if (peer.online) peer.name else trf("{} (çevrimdışı)", peer.name), modifier = Modifier.weight(1f))
+                }
+            }
+        }
     }
 }
 
@@ -77,6 +108,7 @@ fun DeviceList(app: App, clipboard: ClipboardManager, onOpenSettings: () -> Unit
                     onShowScreen = { app.startScreen(peer.id) },
                     onControl = { app.startDesktop(peer.id) },
                     onTrust = { app.setTrusted(peer.id, it) },
+                    onRename = { app.renamePeer(peer.id, it) },
                     battery = app.phoneBattery(peer.id),
                     onFind = { app.findPhone(peer.id, it) },
                 )
@@ -196,10 +228,15 @@ fun PairedPeerCard(
     onShowScreen: () -> Unit,
     onControl: () -> Unit,
     onTrust: (Boolean) -> Unit,
+    onRename: (String) -> Unit,
     battery: PhoneBattery,
     onFind: (Boolean) -> Unit,
 ) {
     var dragging by remember { mutableStateOf(false) }
+    var renaming by remember { mutableStateOf(false) }
+    var newName by remember { mutableStateOf("") }
+    val nameFocus = remember { FocusRequester() }
+    LaunchedEffect(renaming) { if (renaming) nameFocus.requestFocus() }
     val cs = MaterialTheme.colorScheme
     val status = when {
         dragging -> tr("Göndermek için bırakın")
@@ -235,7 +272,48 @@ fun PairedPeerCard(
                 }
                 Spacer(modifier = Modifier.width(16.dp))
                 Column(modifier = Modifier.weight(1f)) {
-                    Text(peer.name, style = MaterialTheme.typography.titleMedium)
+                    // The name, and its pencil: a field in its place to rename it (✔ keeps, × leaves it).
+                    if (renaming) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            // (compact: the name's own size, in a thin outline)
+                            BasicTextField(value = newName, onValueChange = { newName = it }, singleLine = true, maxLines = 1,
+                                           textStyle = TextStyle(font = MaterialTheme.typography.titleMedium, color = cs.onSurface),
+                                           modifier = Modifier.weight(1f, false).widthIn(120.dp, 280.dp).focusRequester(nameFocus),
+                                           onSubmit = {
+                                               if (newName.isNotBlank()) onRename(newName.trim())
+                                               renaming = false
+                                           },
+                                           decorator = { innerTextField ->
+                                               Box(modifier = Modifier.border(1.dp, cs.primary, RoundedCornerShape(6.dp)).padding(8.dp, 3.dp)) {
+                                                   innerTextField()
+                                               }
+                                           })
+                            IconButton(onClick = { renaming = false }, modifier = Modifier.size(32.dp)) {
+                                Icon(Icons.Filled.Close, contentDescription = tr("Vazgeç"), modifier = Modifier.size(18.dp))
+                            }
+                            IconButton(onClick = {
+                                onRename(newName.trim())
+                                renaming = false
+                            }, enabled = newName.isNotBlank(), modifier = Modifier.size(32.dp)) {
+                                Icon(Icons.Filled.Check, contentDescription = tr("Kaydet"), tint = cs.primary, modifier = Modifier.size(18.dp))
+                            }
+                        }
+                    } else {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text(peer.name, style = MaterialTheme.typography.titleMedium, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                                 modifier = Modifier.weight(1f, false))
+                            IconButton(onClick = {
+                                newName = peer.name
+                                renaming = true
+                            }, modifier = Modifier.size(32.dp)) {
+                                Icon(Icons.Filled.Edit, contentDescription = tr("Yeniden adlandır"), modifier = Modifier.size(16.dp), tint = cs.onSurfaceVariant)
+                            }
+                        }
+                    }
+                    if (peer.name != peer.deviceName && peer.deviceName.isNotEmpty() && !renaming) {
+                        Text(trf("Kendi adı: {}", peer.deviceName), style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant,
+                             maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    }
                     Text(status, style = MaterialTheme.typography.bodyMedium, color = cs.onSurfaceVariant)
                     if (peer.online && battery.level >= 0) BatteryLine(battery)
                 }

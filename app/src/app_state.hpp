@@ -26,7 +26,8 @@ struct DeviceInfo {
 
 struct Peer {
     std::string id;
-    std::string name;
+    std::string name;        // as the user renamed it here, else its own
+    std::string deviceName;  // the name the device gives itself
     std::string platform;
     bool paired = false;
     bool online = false;
@@ -328,6 +329,9 @@ public:
     std::vector<std::string> takeIncomingClipboard() const;
     bool incomingClipboardSecret() const;  // the latest of them is a password
     std::vector<ClipboardItem> clipboardHistory() const;
+    // A paired device's name on this device (empty, or its own name: back to that); kept in
+    // <data dir>/device-names.json.
+    void renamePeer(const std::string& peerId, const std::string& name) const;
     std::vector<FileRecord> fileHistory() const;
     void forgetFileRecord(int64_t id) const;  // from the list (the "x")
     bool deleteFile(int64_t id) const;        // the file from the disk; its card stays, marked deleted

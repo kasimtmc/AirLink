@@ -30,6 +30,7 @@ fun AirLinkApp() {
         Home()
         if (isDesktop()) PhoneAppWindows(appState())
         if (isDesktop()) PhoneScreenWindow(appState())
+        if (isDesktop()) ShareWindow(appState())
         if (isDesktop()) AirLinkTray(appState())
     }
 }

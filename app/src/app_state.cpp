@@ -379,6 +379,7 @@ struct App::Impl {
                           .dataDir = info["data_dir"].str()});
         loadLanguageSetting(settingPath("language"));
         loadFileHistory();
+        loadAliases();
         // A phone set up for advanced mode: its shell helper watches the clipboard, which Android
         // keeps from an app in the background.
         // (set up before this version: the saved port says so)
@@ -401,6 +402,28 @@ struct App::Impl {
         platform::nodeStarted(node);
     }
 
+    // Names the user gave paired devices here, by id.
+    std::map<std::string, std::string> aliases;
+    void loadAliases() {
+        std::string path = settingPath("device-names.json");
+        if (path.empty()) return;
+        std::ifstream in(std::filesystem::path(std::u8string(path.begin(), path.end())));
+        if (!in) return;
+        std::string text((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+        for (const auto& a : json::Value::parse(text).array()) aliases[a["id"].str()] = a["name"].str();
+    }
+    void saveAliases() {
+        std::string path = settingPath("device-names.json");
+        if (path.empty()) return;
+        std::string out = "[";
+        for (const auto& [id, name] : aliases) {
+            if (out.size() > 1) out += ",\n";
+            out += "{\"id\":" + json::quote(id) + ",\"name\":" + json::quote(name) + "}";
+        }
+        out += "]\n";
+        std::ofstream(std::filesystem::path(std::u8string(path.begin(), path.end())), std::ios::binary | std::ios::trunc) << out;
+    }
+
     void refreshPeers() {
         // Keep the parsed value in a variable: a range-for over parse(...).array() would iterate
         // the array of a temporary already destroyed (C++20 doesn't extend its lifetime).
@@ -408,7 +431,8 @@ struct App::Impl {
         std::vector<Peer> list;
         for (const auto& p : parsed.array())
             list.push_back(Peer{.id = p["id"].str(),
-                                .name = p["name"].str(),
+                                .name = aliases.count(p["id"].str()) ? aliases[p["id"].str()] : p["name"].str(),
+                                .deviceName = p["name"].str(),
                                 .platform = p["platform"].str(),
                                 .paired = p["paired"].boolean(),
                                 .online = p["online"].boolean(),
@@ -1982,6 +2006,17 @@ void App::sendClipboard(const std::string& peerId, const std::string& text) cons
     bool secret = text == impl_->lastClipboard && impl_->lastClipboardSensitive;
     impl_->track(airlink_send_clipboard_marked(impl_->node, peerId.c_str(), text.c_str(), secret), OpKind::SendClipboard);
     impl_->rememberClipboard(peerId, text, false, secret);
+}
+
+void App::renamePeer(const std::string& peerId, const std::string& name) const {
+    auto& s = *impl_;
+    std::string own;
+    for (const Peer& p : s.peers.peek())
+        if (p.id == peerId) own = p.deviceName;
+    if (name.empty() || name == own) s.aliases.erase(peerId);
+    else s.aliases[peerId] = name;
+    s.saveAliases();
+    if (s.node) s.refreshPeers();
 }
 
 std::vector<FileRecord> App::fileHistory() const {

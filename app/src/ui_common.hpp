@@ -124,6 +124,12 @@ inline std::string previewImagePath() {
     return path ? path : "/tmp/airlink-preview.jpg";
 }
 
+inline std::string fileName(const std::string& path);
+// "X gönderilsin" / "3 dosya gönderilsin".
+inline std::string shareTitle(const std::vector<std::string>& files) {
+    return files.size() == 1 ? trf("{} gönderilsin", fileName(files.front())) : trf("{} dosya gönderilsin", files.size());
+}
+
 // A phone app's right-click menu in the Apps tab.
 inline std::vector<kompoz::ContextMenuItem> appMenu(const App& app, const PhoneApp& a) {
     std::vector<kompoz::ContextMenuItem> items;

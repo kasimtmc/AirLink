@@ -28,6 +28,7 @@ const std::unordered_map<std::string_view, std::string_view>& table() {
         {"Ayarlar", "Settings"},
         {"Temizle", "Clear"},
         {"Geçmiş", "History"},
+        {"Kendi adı: {}", "Its own name: {}"},
         {"Son uygulamalar", "Recent apps"},
         {"{} uygulama · sağ tıklayarak kısayol oluşturabilirsiniz", "{} [app|apps] · right-click one to make a shortcut"},
         {"Uygulama menüsüne kısayol ekle", "Add a shortcut to the app menu"},
