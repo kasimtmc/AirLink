@@ -353,6 +353,10 @@ public:
     // `sensitive`: the clipboard holds a password (its source marked it).
     void syncClipboard(const std::string& text, bool sensitive) const;
     // "Şifre gizliliği" (on by default): a copied password goes to trusted devices only after a yes.
+    // Copied text goes to the trusted devices by itself (else only by hand: Pano buttons, Ctrl+V
+    // in the panel); kept in <data dir>/clipboard-auto-send.
+    bool clipboardAutoSend() const;
+    void setClipboardAutoSend(bool on) const;
     bool passwordPrivacy() const;
     void setPasswordPrivacy(bool on) const;
     bool passwordPending() const;            // a copied password waits for that yes

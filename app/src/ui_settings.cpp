@@ -23,6 +23,25 @@ fun PasswordPrivacyCard(app: App) {
     }
 }
 
+// Copied text to the trusted devices by itself, or not at all (then only by hand).
+@Kompozable
+fun ClipboardAutoSendCard(app: App) {
+    val cs = MaterialTheme.colorScheme
+    OutlinedCard(modifier = Modifier.fillMaxWidth()) {
+        Row(modifier = Modifier.fillMaxWidth().padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+            Icon(AppIcons.ContentPaste, contentDescription = null, tint = cs.primary)
+            Spacer(modifier = Modifier.width(12.dp))
+            Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text(tr("Pano içeriğini otomatik gönder"), style = MaterialTheme.typography.titleMedium)
+                Text(tr("Pano içeriği güvenilir cihazlara otomatik gönderilir. Kapalıyken kopyaladıklarınız yalnızca Pano düğmesiyle gider."),
+                     style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant)
+            }
+            Spacer(modifier = Modifier.width(12.dp))
+            Switch(checked = app.clipboardAutoSend(), onCheckedChange = { app.setClipboardAutoSend(it) })
+        }
+    }
+}
+
 // The UI's language: the system's, or Turkish or English whatever the system says.
 @Kompozable
 fun LanguageCard() {
@@ -126,6 +145,7 @@ fun SettingsScreen(app: App) {
         item { ThisDeviceCard(app.me()) }
         item { SectionTitle(tr("Genel")) }
         item { LanguageCard() }
+        item { ClipboardAutoSendCard(app) }
         item { UpdatesCard() }
         if (canStartAtLogin()) item { StartAtLoginCard() }
         if (permissions) {

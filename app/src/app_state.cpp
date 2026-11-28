@@ -290,6 +290,7 @@ struct App::Impl {
     bool lastClipboardSensitive = false;
     MutableState<bool> passwordPrivacy = mutableStateOf(true);
     MutableState<bool> filesGrid = mutableStateOf(false);
+    MutableState<bool> clipboardAutoSend = mutableStateOf(true);
     MutableState<bool> passwordPending = mutableStateOf(false);
     std::string pendingPassword;  // waiting for the user's yes (password privacy)
     std::string settingPath(const char* name) const {
@@ -388,6 +389,11 @@ struct App::Impl {
         if (std::filesystem::exists(adb / "ready") || std::filesystem::exists(adb / "connect-port")) platform::watchClipboardInBackground();
         Drives::get().attach(node, me.peek().downloadDir, me.peek().dataDir);
         Updates::get().attach(node, me.peek().dataDir);
+        if (auto path = settingPath("clipboard-auto-send"); !path.empty()) {
+            std::ifstream in(path);
+            int on = 1;
+            if (in >> on) clipboardAutoSend.set(on != 0);
+        }
         if (auto path = settingPath("files-layout"); !path.empty()) {
             std::string saved;
             if (std::ifstream in(path); in >> saved) filesGrid.set(saved == "grid");
@@ -1889,6 +1895,8 @@ void App::syncClipboard(const std::string& text, bool sensitive) const {
     // The first reading is what was there already, not a copy: not sent. A password still asks: on
     // Android the clipboard is read only with the app in front, so a fresh copy can be the first.
     bool first = !std::exchange(s.clipboardSeen, true);
+    // (off: copies stay here; the Pano buttons and the panel's Ctrl+V still send them)
+    if (!s.clipboardAutoSend.peek()) return;
     if (first && !(sensitive && s.passwordPrivacy.peek())) return;
     if (sensitive && s.passwordPrivacy.peek()) {
         // A password: to the trusted devices only after a yes.
@@ -1903,6 +1911,11 @@ void App::syncClipboard(const std::string& text, bool sensitive) const {
     s.sendToTrusted(text, sensitive);
 }
 
+bool App::clipboardAutoSend() const { return impl_->clipboardAutoSend.get(); }
+void App::setClipboardAutoSend(bool on) const {
+    impl_->clipboardAutoSend.set(on);
+    if (auto path = impl_->settingPath("clipboard-auto-send"); !path.empty()) std::ofstream(path) << (on ? 1 : 0);
+}
 bool App::filesGrid() const { return impl_->filesGrid.get(); }
 void App::setFilesGrid(bool grid) const {
     impl_->filesGrid.set(grid);

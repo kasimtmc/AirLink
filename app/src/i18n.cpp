@@ -28,6 +28,8 @@ const std::unordered_map<std::string_view, std::string_view>& table() {
         {"Ayarlar", "Settings"},
         {"Temizle", "Clear"},
         {"Geçmiş", "History"},
+        {"Pano içeriği güvenilir cihazlara otomatik gönderilir. Kapalıyken kopyaladıklarınız yalnızca Pano düğmesiyle gider.", "The clipboard's contents are sent to trusted devices automatically. When it's off, what you copy goes only with the Clipboard button."},
+        {"Pano içeriğini otomatik gönder", "Send the clipboard automatically"},
         {"Denetleniyor…", "Checking…"},
         {"AirLink güncel", "AirLink is up to date"},
         {"AirLink {} çıktı", "AirLink {} is out"},
